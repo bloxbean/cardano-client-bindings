@@ -1,0 +1,40 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: Linux x86_64
+          - os: macos-14
+            label: macOS ARM64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+      - uses: oven-sh/setup-bun@v2
+      - name: Install pytest
+        run: pip install pytest
+      - name: Build native library
+        run: ./gradlew :core:nativeCompile
+      - name: Run JVM tests
+        run: ./gradlew :core:test
+      - name: Run C tests
+        run: ./gradlew :native-test:test
+      - name: Run Python tests
+        run: ./gradlew :wrappers:python:test
+      - name: Run Go tests
+        run: ./gradlew :wrappers:go:test
+      - name: Run Rust tests
+        run: ./gradlew :wrappers:rust:test
+      - name: Run JS tests
+        run: ./gradlew :wrappers:js:test

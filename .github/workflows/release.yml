@@ -1,0 +1,52 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-aarch64
+            ext: dylib
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            ext: so
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+      - name: Build native library
+        run: ./gradlew :core:nativeCompile
+      - name: Package
+        run: |
+          cd core/build/native/nativeCompile
+          tar czf ccl-bridge-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
+            libccl.${{ matrix.ext }} libccl.h graal_isolate.h
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ccl-bridge-${{ matrix.platform }}
+          path: core/build/native/nativeCompile/ccl-bridge-*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Generate checksums
+        run: sha256sum ccl-bridge-*.tar.gz > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ccl-bridge-*.tar.gz
+            SHA256SUMS
+          generate_release_notes: true

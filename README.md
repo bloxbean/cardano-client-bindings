@@ -87,6 +87,37 @@ Each wrapper has a Gradle task that copies the native library and runs the langu
 ./gradlew :wrappers:js:test
 ```
 
+## Installation
+
+### Download Pre-built Native Library
+
+Download the native library for your platform from
+[GitHub Releases](https://github.com/bloxbean/ccl-bridge/releases):
+
+**macOS (Apple Silicon):**
+
+```bash
+curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-bridge-v0.1.0-macos-aarch64.tar.gz | tar xz -C /usr/local/lib/
+```
+
+**Linux (x86_64):**
+
+```bash
+curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-bridge-v0.1.0-linux-x86_64.tar.gz | tar xz -C /usr/local/lib/
+```
+
+Then set the library path:
+
+```bash
+export CCL_LIB_PATH=/usr/local/lib
+
+# Linux
+export LD_LIBRARY_PATH=/usr/local/lib
+
+# macOS
+export DYLD_LIBRARY_PATH=/usr/local/lib
+```
+
 ## Running Tests Without Gradle
 
 You can also run wrapper tests directly. Set `CCL_LIB_PATH` to point to the native library directory.
