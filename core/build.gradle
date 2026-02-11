@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'org.graalvm.buildtools.native'
+}
+
+def cclVersion = '0.7.1'
+
+dependencies {
+    // CCL core modules (offline-only, no backend HTTP)
+    implementation "com.bloxbean.cardano:cardano-client-core:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-function:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-hd-wallet:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-governance:${cclVersion}"
+
+    // CCL CIP modules
+    implementation "com.bloxbean.cardano:cardano-client-cip8:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-cip20:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-cip25:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-cip67:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-cip68:${cclVersion}"
+
+    // GraalVM SDK for @CEntryPoint, CCharPointer, etc.
+    compileOnly "org.graalvm.sdk:nativeimage:25.0.0"
+
+    // SLF4J NOP - avoids log framework init issues in native image
+    implementation 'org.slf4j:slf4j-nop:2.0.11'
+
+    // Test
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+graalvmNative {
+    binaries {
+        main {
+            sharedLibrary = true
+            imageName = 'libccl'
+            buildArgs.addAll(
+                '--no-fallback',
+                '-H:+ReportExceptionStackTraces',
+                '--initialize-at-build-time=org.slf4j',
+                '--initialize-at-build-time=com.bloxbean.cardano.client.crypto',
+                '--initialize-at-build-time=net.i2p.crypto.eddsa',
+                '--initialize-at-build-time=com.fasterxml.jackson',
+                '--initialize-at-build-time=co.nstant.in.cbor',
+            )
+        }
+    }
+}
+
+test {
+    useJUnitPlatform()
+}

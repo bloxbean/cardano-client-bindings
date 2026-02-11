@@ -1,0 +1,21 @@
+task copyNativeLib(type: Copy) {
+    dependsOn ':core:nativeCompile'
+    from project(':core').layout.buildDirectory.dir('native/nativeCompile')
+    into layout.buildDirectory.dir('native')
+    include 'libccl.*'
+    include '*.h'
+}
+
+task test(type: Exec) {
+    dependsOn copyNativeLib
+    workingDir file('ccl')
+
+    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
+    environment 'CGO_CFLAGS', "-I${nativeDir}"
+    environment 'CGO_LDFLAGS', "-L${nativeDir} -lccl"
+    environment 'DYLD_LIBRARY_PATH', nativeDir
+    environment 'LD_LIBRARY_PATH', nativeDir
+    environment 'GOARCH', 'arm64'
+
+    commandLine 'go', 'test', '-v', './...'
+}

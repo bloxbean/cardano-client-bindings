@@ -1,0 +1,8 @@
+{
+  "resources": {
+    "includes": [
+      {"pattern": "mnemonic/wordlist/.*\\.txt$"},
+      {"pattern": ".*\\.properties$"}
+    ]
+  }
+}

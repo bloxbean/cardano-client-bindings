@@ -1,0 +1,8 @@
+rootProject.name = 'ccl-bridge'
+
+include 'core'
+include 'native-test'
+include 'wrappers:python'
+include 'wrappers:go'
+include 'wrappers:rust'
+include 'wrappers:js'

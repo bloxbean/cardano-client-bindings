@@ -1,0 +1,14 @@
+task copyNativeLib(type: Copy) {
+    dependsOn ':core:nativeCompile'
+    from project(':core').layout.buildDirectory.dir('native/nativeCompile')
+    into layout.buildDirectory.dir('native')
+    include 'libccl.*'
+    include '*.h'
+}
+
+task test(type: Exec) {
+    dependsOn copyNativeLib
+    workingDir projectDir
+    environment 'CCL_LIB_PATH', layout.buildDirectory.dir('native').get().asFile.absolutePath
+    commandLine 'python3', '-m', 'pytest', 'tests/', '-v'
+}

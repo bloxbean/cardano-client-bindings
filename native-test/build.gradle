@@ -1,0 +1,40 @@
+// C smoke tests for the shared library
+// Depends on :core nativeCompile output
+
+task copyNativeLib(type: Copy) {
+    dependsOn ':core:nativeCompile'
+    from project(':core').layout.buildDirectory.dir('native/nativeCompile')
+    into layout.buildDirectory.dir('native')
+    include 'libccl.*'
+    include '*.h'
+}
+
+task compileCTest(type: Exec) {
+    dependsOn copyNativeLib
+    workingDir projectDir
+
+    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
+    def outputDir = layout.buildDirectory.dir('test').get().asFile.absolutePath
+
+    doFirst {
+        file(outputDir).mkdirs()
+    }
+
+    commandLine 'cc',
+        '-o', "${outputDir}/test_ccl",
+        'src/test_ccl.c',
+        "-I${nativeDir}",
+        "-L${nativeDir}",
+        '-lccl',
+        "-Wl,-rpath,${nativeDir}"
+}
+
+task test(type: Exec) {
+    dependsOn compileCTest
+    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
+    def testBin = layout.buildDirectory.dir('test').get().asFile.absolutePath + '/test_ccl'
+
+    environment 'DYLD_LIBRARY_PATH', nativeDir
+    environment 'LD_LIBRARY_PATH', nativeDir
+    commandLine testBin
+}
