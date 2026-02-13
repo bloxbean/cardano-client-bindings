@@ -207,8 +207,17 @@ graal_tear_down_isolate(thread);
 from ccl import CclLib
 
 lib = CclLib()  # loads libccl and creates isolate
-account = lib.account_create(network_id=0)
+
+account = lib.account.create(network_id=0)
 print(account)  # {'mnemonic': '...', 'base_address': 'addr1...', ...}
+
+info = lib.address.info(account['base_address'])
+hash = lib.crypto.blake2b_256("48656c6c6f")
+tx_hash = lib.tx.hash(tx_cbor_hex)
+datum_hash = lib.plutus.data_hash("182a")
+drep = lib.gov.drep_key_from_mnemonic(account['mnemonic'])
+wallet = lib.wallet.create()
+
 lib.close()
 ```
 
@@ -218,9 +227,14 @@ lib.close()
 use ccl::Bridge;
 
 let bridge = Bridge::new().unwrap();
-let result = bridge.account_create(ccl::network::MAINNET).unwrap();
+
+let result = bridge.account().create(ccl::network::MAINNET).unwrap();
 let account: serde_json::Value = serde_json::from_str(&result).unwrap();
 println!("Address: {}", account["base_address"]);
+
+let hash = bridge.crypto().blake2b_256("48656c6c6f").unwrap();
+let tx_hash = bridge.tx().hash(tx_cbor).unwrap();
+let datum_hash = bridge.plutus().data_hash("182a").unwrap();
 // Bridge::drop() tears down the isolate automatically
 ```
 
@@ -232,8 +246,13 @@ import "github.com/bloxbean/ccl-bridge/wrappers/go/ccl"
 bridge, _ := ccl.New()
 defer bridge.Close()
 
-account, _ := bridge.AccountCreate(ccl.Mainnet)
+account, _ := bridge.Account.Create(ccl.Mainnet)
 fmt.Println("Address:", account.BaseAddress)
+
+hash, _ := bridge.Crypto.Blake2b256("48656c6c6f")
+txHash, _ := bridge.Tx.Hash(txCbor)
+datumHash, _ := bridge.Plutus.DataHash("182a")
+wallet, _ := bridge.Wallet.Create(ccl.Mainnet)
 ```
 
 ### Usage Pattern (JavaScript / Bun)
@@ -242,8 +261,15 @@ fmt.Println("Address:", account.BaseAddress)
 import { CclBridge, MAINNET } from '@bloxbean/ccl';
 
 const bridge = new CclBridge();
-const account = bridge.accountCreate(MAINNET);
+
+const account = bridge.account.create(MAINNET);
 console.log('Address:', account.base_address);
+
+const hash = bridge.crypto.blake2b256('48656c6c6f');
+const txHash = bridge.tx.hash(txCbor);
+const datumHash = bridge.plutus.dataHash('182a');
+const wallet = bridge.wallet.create(MAINNET);
+
 bridge.close();
 ```
 
@@ -336,10 +362,10 @@ bridge.close();
 |---------|---------|-------|--------|
 | Java (JVM) | JUnit 5 | 24 | Pass |
 | C | Native | 19 assertions | Pass |
-| Python | ctypes + pytest | 10 | Pass |
-| Go | cgo | 7 | Pass |
-| Rust | cargo test | 6 | Pass |
-| JavaScript | Bun FFI | 14 | Pass |
+| Python | ctypes + pytest | 31 pass, 5 skipped | Pass |
+| Go | cgo | 25 | Pass |
+| Rust | cargo test | 26 | Pass |
+| JavaScript | Bun FFI | 30 | Pass |
 
 ## Upstream
 

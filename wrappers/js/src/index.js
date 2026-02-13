@@ -121,6 +121,16 @@ export class CclBridge {
       throw new Error(`Failed to create GraalVM isolate: ${rc}`);
     }
     this._thread = Number(threadBuf[0]);
+
+    // Namespace APIs
+    this.account = new AccountApi(this);
+    this.address = new AddressApi(this);
+    this.crypto = new CryptoApi(this);
+    this.tx = new TxApi(this);
+    this.plutus = new PlutusApi(this);
+    this.script = new ScriptApi(this);
+    this.gov = new GovApi(this);
+    this.wallet = new WalletApi(this);
   }
 
   _getResult() {
@@ -158,134 +168,176 @@ export class CclBridge {
   version() {
     return this._check(this._lib.ccl_version(this._thread));
   }
+}
 
-  // --- Account ---
+// --- Namespace API classes ---
 
-  accountCreate(networkId = MAINNET) {
-    return JSON.parse(this._check(this._lib.ccl_account_create(this._thread, networkId)));
+class AccountApi {
+  constructor(bridge) { this._b = bridge; }
+
+  create(networkId = MAINNET) {
+    return JSON.parse(this._b._check(this._b._lib.ccl_account_create(this._b._thread, networkId)));
   }
 
-  accountFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
-    return JSON.parse(this._check(
-      this._lib.ccl_account_from_mnemonic(this._thread, networkId, cstr(mnemonic), accountIndex, addressIndex)));
+  fromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
+    return JSON.parse(this._b._check(
+      this._b._lib.ccl_account_from_mnemonic(this._b._thread, networkId, cstr(mnemonic), accountIndex, addressIndex)));
   }
 
-  accountGetPrivateKey(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
-    return this._check(
-      this._lib.ccl_account_get_private_key(this._thread, cstr(mnemonic), networkId, accountIndex, addressIndex));
+  getPrivateKey(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
+    return this._b._check(
+      this._b._lib.ccl_account_get_private_key(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex));
   }
 
-  accountGetPublicKey(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
-    return this._check(
-      this._lib.ccl_account_get_public_key(this._thread, cstr(mnemonic), networkId, accountIndex, addressIndex));
+  getPublicKey(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
+    return this._b._check(
+      this._b._lib.ccl_account_get_public_key(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex));
   }
 
-  accountGetDrepId(mnemonic, networkId = MAINNET, accountIndex = 0) {
-    return this._check(
-      this._lib.ccl_account_get_drep_id(this._thread, cstr(mnemonic), networkId, accountIndex));
+  getDrepId(mnemonic, networkId = MAINNET, accountIndex = 0) {
+    return this._b._check(
+      this._b._lib.ccl_account_get_drep_id(this._b._thread, cstr(mnemonic), networkId, accountIndex));
   }
 
-  accountSignTx(mnemonic, networkId, accountIndex, addressIndex, txCborHex) {
-    return this._check(
-      this._lib.ccl_account_sign_tx(this._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex)));
+  signTx(mnemonic, networkId, accountIndex, addressIndex, txCborHex) {
+    return this._b._check(
+      this._b._lib.ccl_account_sign_tx(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex)));
+  }
+}
+
+class AddressApi {
+  constructor(bridge) { this._b = bridge; }
+
+  info(bech32) {
+    return JSON.parse(this._b._check(this._b._lib.ccl_address_info(this._b._thread, cstr(bech32))));
   }
 
-  // --- Address ---
-
-  addressInfo(bech32) {
-    return JSON.parse(this._check(this._lib.ccl_address_info(this._thread, cstr(bech32))));
+  validate(bech32) {
+    return this._b._lib.ccl_address_validate(this._b._thread, cstr(bech32)) === CCL_SUCCESS;
   }
 
-  addressValidate(bech32) {
-    return this._lib.ccl_address_validate(this._thread, cstr(bech32)) === CCL_SUCCESS;
+  toBytes(bech32) {
+    return this._b._check(this._b._lib.ccl_address_to_bytes(this._b._thread, cstr(bech32)));
   }
 
-  addressToBytes(bech32) {
-    return this._check(this._lib.ccl_address_to_bytes(this._thread, cstr(bech32)));
+  fromBytes(hexBytes) {
+    return this._b._check(this._b._lib.ccl_address_from_bytes(this._b._thread, cstr(hexBytes)));
+  }
+}
+
+class CryptoApi {
+  constructor(bridge) { this._b = bridge; }
+
+  blake2b256(dataHex) {
+    return this._b._check(this._b._lib.ccl_crypto_blake2b_256(this._b._thread, cstr(dataHex)));
   }
 
-  addressFromBytes(hexBytes) {
-    return this._check(this._lib.ccl_address_from_bytes(this._thread, cstr(hexBytes)));
+  blake2b224(dataHex) {
+    return this._b._check(this._b._lib.ccl_crypto_blake2b_224(this._b._thread, cstr(dataHex)));
   }
 
-  // --- Crypto ---
-
-  cryptoBlake2b256(dataHex) {
-    return this._check(this._lib.ccl_crypto_blake2b_256(this._thread, cstr(dataHex)));
+  generateMnemonic(wordCount = 24) {
+    return this._b._check(this._b._lib.ccl_crypto_generate_mnemonic(this._b._thread, wordCount));
   }
 
-  cryptoBlake2b224(dataHex) {
-    return this._check(this._lib.ccl_crypto_blake2b_224(this._thread, cstr(dataHex)));
+  validateMnemonic(mnemonic) {
+    return this._b._lib.ccl_crypto_validate_mnemonic(this._b._thread, cstr(mnemonic)) === CCL_SUCCESS;
   }
 
-  cryptoGenerateMnemonic(wordCount = 24) {
-    return this._check(this._lib.ccl_crypto_generate_mnemonic(this._thread, wordCount));
+  sign(messageHex, skHex) {
+    return this._b._check(this._b._lib.ccl_crypto_sign(this._b._thread, cstr(messageHex), cstr(skHex)));
   }
 
-  cryptoValidateMnemonic(mnemonic) {
-    return this._lib.ccl_crypto_validate_mnemonic(this._thread, cstr(mnemonic)) === CCL_SUCCESS;
+  verify(signatureHex, messageHex, pkHex) {
+    return this._b._lib.ccl_crypto_verify(this._b._thread, cstr(signatureHex), cstr(messageHex), cstr(pkHex)) === CCL_SUCCESS;
+  }
+}
+
+class TxApi {
+  constructor(bridge) { this._b = bridge; }
+
+  hash(txCborHex) {
+    return this._b._check(this._b._lib.ccl_tx_hash(this._b._thread, cstr(txCborHex)));
   }
 
-  cryptoSign(messageHex, skHex) {
-    return this._check(this._lib.ccl_crypto_sign(this._thread, cstr(messageHex), cstr(skHex)));
+  signWithSecretKey(txCborHex, skCborHex) {
+    return this._b._check(this._b._lib.ccl_tx_sign_with_secret_key(this._b._thread, cstr(txCborHex), cstr(skCborHex)));
   }
 
-  cryptoVerify(signatureHex, messageHex, pkHex) {
-    return this._lib.ccl_crypto_verify(this._thread, cstr(signatureHex), cstr(messageHex), cstr(pkHex)) === CCL_SUCCESS;
+  toJson(txCborHex) {
+    return this._b._check(this._b._lib.ccl_tx_to_json(this._b._thread, cstr(txCborHex)));
   }
 
-  // --- Transaction ---
-
-  txHash(txCborHex) {
-    return this._check(this._lib.ccl_tx_hash(this._thread, cstr(txCborHex)));
+  fromJson(txJson) {
+    return this._b._check(this._b._lib.ccl_tx_from_json(this._b._thread, cstr(txJson)));
   }
 
-  txToJson(txCborHex) {
-    return this._check(this._lib.ccl_tx_to_json(this._thread, cstr(txCborHex)));
+  deserialize(txCborHex) {
+    return JSON.parse(this._b._check(this._b._lib.ccl_tx_deserialize(this._b._thread, cstr(txCborHex))));
+  }
+}
+
+class PlutusApi {
+  constructor(bridge) { this._b = bridge; }
+
+  dataHash(datumCborHex) {
+    return this._b._check(this._b._lib.ccl_plutus_data_hash(this._b._thread, cstr(datumCborHex)));
   }
 
-  txFromJson(txJson) {
-    return this._check(this._lib.ccl_tx_from_json(this._thread, cstr(txJson)));
+  dataToJson(cborHex) {
+    return this._b._check(this._b._lib.ccl_plutus_data_to_json(this._b._thread, cstr(cborHex)));
   }
 
-  txSignWithSecretKey(txCborHex, skCborHex) {
-    return this._check(this._lib.ccl_tx_sign_with_secret_key(this._thread, cstr(txCborHex), cstr(skCborHex)));
+  dataFromJson(json) {
+    return this._b._check(this._b._lib.ccl_plutus_data_from_json(this._b._thread, cstr(json)));
+  }
+}
+
+class ScriptApi {
+  constructor(bridge) { this._b = bridge; }
+
+  nativeFromJson(json) {
+    return this._b._check(this._b._lib.ccl_script_native_from_json(this._b._thread, cstr(json)));
   }
 
-  // --- Plutus ---
+  hash(scriptCborHex, scriptType = 0) {
+    return this._b._check(this._b._lib.ccl_script_hash(this._b._thread, cstr(scriptCborHex), scriptType));
+  }
+}
 
-  plutusDataHash(datumCborHex) {
-    return this._check(this._lib.ccl_plutus_data_hash(this._thread, cstr(datumCborHex)));
+class GovApi {
+  constructor(bridge) { this._b = bridge; }
+
+  drepKeyFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0) {
+    return JSON.parse(this._b._check(
+      this._b._lib.ccl_gov_drep_key_from_mnemonic(this._b._thread, cstr(mnemonic), networkId, accountIndex)));
   }
 
-  plutusDataToJson(cborHex) {
-    return this._check(this._lib.ccl_plutus_data_to_json(this._thread, cstr(cborHex)));
+  committeeColdKeyFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0) {
+    return JSON.parse(this._b._check(
+      this._b._lib.ccl_gov_committee_cold_key_from_mnemonic(this._b._thread, cstr(mnemonic), networkId, accountIndex)));
   }
 
-  plutusDataFromJson(json) {
-    return this._check(this._lib.ccl_plutus_data_from_json(this._thread, cstr(json)));
+  committeeHotKeyFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0) {
+    return JSON.parse(this._b._check(
+      this._b._lib.ccl_gov_committee_hot_key_from_mnemonic(this._b._thread, cstr(mnemonic), networkId, accountIndex)));
+  }
+}
+
+class WalletApi {
+  constructor(bridge) { this._b = bridge; }
+
+  create(networkId = MAINNET) {
+    return JSON.parse(this._b._check(this._b._lib.ccl_wallet_create(this._b._thread, networkId)));
   }
 
-  // --- Governance ---
-
-  govDrepKeyFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0) {
-    return JSON.parse(this._check(
-      this._lib.ccl_gov_drep_key_from_mnemonic(this._thread, cstr(mnemonic), networkId, accountIndex)));
+  fromMnemonic(mnemonic, networkId = MAINNET) {
+    return JSON.parse(this._b._check(
+      this._b._lib.ccl_wallet_from_mnemonic(this._b._thread, cstr(mnemonic), networkId)));
   }
 
-  // --- Wallet ---
-
-  walletCreate(networkId = MAINNET) {
-    return JSON.parse(this._check(this._lib.ccl_wallet_create(this._thread, networkId)));
-  }
-
-  walletFromMnemonic(mnemonic, networkId = MAINNET) {
-    return JSON.parse(this._check(
-      this._lib.ccl_wallet_from_mnemonic(this._thread, cstr(mnemonic), networkId)));
-  }
-
-  walletGetAddress(mnemonic, networkId = MAINNET, index = 0) {
-    return this._check(
-      this._lib.ccl_wallet_get_address(this._thread, cstr(mnemonic), networkId, index));
+  getAddress(mnemonic, networkId = MAINNET, index = 0) {
+    return this._b._check(
+      this._b._lib.ccl_wallet_get_address(this._b._thread, cstr(mnemonic), networkId, index));
   }
 }

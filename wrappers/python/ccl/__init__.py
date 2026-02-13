@@ -1,6 +1,12 @@
-from ccl._ffi import CclLib
+from ccl._ffi import CclLib, CclError
 from ccl.account import Account
 from ccl.address import Address
 from ccl.crypto import Crypto
+from ccl.transaction import Transaction
+from ccl.plutus import Plutus
+from ccl.script import Script
+from ccl.governance import Governance
+from ccl.wallet import Wallet
 
-__all__ = ['CclLib', 'Account', 'Address', 'Crypto']
+__all__ = ['CclLib', 'CclError', 'Account', 'Address', 'Crypto', 'Transaction',
+           'Plutus', 'Script', 'Governance', 'Wallet']

@@ -117,6 +117,10 @@ extern "C" {
     pub fn ccl_tx_to_json(thread: *mut graal_isolatethread_t, tx_cbor_hex: *const c_char)
         -> c_int;
     pub fn ccl_tx_from_json(thread: *mut graal_isolatethread_t, tx_json: *const c_char) -> c_int;
+    pub fn ccl_tx_deserialize(
+        thread: *mut graal_isolatethread_t,
+        tx_cbor_hex: *const c_char,
+    ) -> c_int;
 
     // Plutus API
     pub fn ccl_plutus_data_hash(
