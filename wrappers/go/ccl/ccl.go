@@ -11,6 +11,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"unsafe"
 )
 
@@ -95,6 +96,7 @@ type Bridge struct {
 	Script  *ScriptApi
 	Gov     *GovApi
 	Wallet  *WalletApi
+	QuickTx *QuickTxApi
 }
 
 // New creates a new Bridge instance with a GraalVM isolate.
@@ -113,6 +115,7 @@ func New() (*Bridge, error) {
 	b.Script = &ScriptApi{bridge: b}
 	b.Gov = &GovApi{bridge: b}
 	b.Wallet = &WalletApi{bridge: b}
+	b.QuickTx = &QuickTxApi{bridge: b}
 
 	return b, nil
 }
@@ -530,4 +533,705 @@ func (w *WalletApi) GetAddress(mnemonic string, networkID, index int) (string, e
 
 	rc := C.ccl_wallet_get_address(w.bridge.thread, cs, C.int(networkID), C.int(index))
 	return w.bridge.check(rc)
+}
+
+// --- QuickTx API ---
+
+// TxResult is the result from building a transaction.
+type TxResult struct {
+	TxCbor string `json:"tx_cbor"`
+	TxHash string `json:"tx_hash"`
+	Fee    string `json:"fee"`
+}
+
+// Amount represents a token amount in a transaction.
+type Amount struct {
+	Unit     string `json:"unit"`
+	Quantity string `json:"quantity"`
+}
+
+// Lovelace creates a lovelace Amount.
+func Lovelace(quantity int64) Amount {
+	return Amount{Unit: "lovelace", Quantity: fmt.Sprintf("%d", quantity)}
+}
+
+// Ada creates a lovelace Amount from ADA (1 ADA = 1,000,000 lovelace).
+func Ada(ada float64) Amount {
+	return Amount{Unit: "lovelace", Quantity: fmt.Sprintf("%d", int64(math.Floor(ada*1_000_000)))}
+}
+
+// Asset creates a native asset Amount.
+func Asset(unit string, quantity int64) Amount {
+	return Amount{Unit: unit, Quantity: fmt.Sprintf("%d", quantity)}
+}
+
+// MintAsset represents an asset to mint.
+type MintAsset struct {
+	Name     string `json:"name"`
+	Quantity string `json:"quantity"`
+}
+
+// AnchorOption holds optional anchor fields.
+type AnchorOption struct {
+	AnchorURL      string
+	AnchorDataHash string
+}
+
+// ProviderConfig configures Java-side lazy provider fetching.
+type ProviderConfig struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	APIKey string `json:"api_key,omitempty"`
+}
+
+// ProposalWithdrawal represents a treasury withdrawal in a proposal.
+type ProposalWithdrawal struct {
+	RewardAddress string `json:"reward_address"`
+	Amount        string `json:"amount"`
+}
+
+// QuickTxApi provides transaction building via QuickTx.
+type QuickTxApi struct {
+	bridge *Bridge
+}
+
+// NewTx creates a new TxBuilder for building a single transaction.
+func (q *QuickTxApi) NewTx() *TxBuilder {
+	return &TxBuilder{bridge: q.bridge, signerCount: 1}
+}
+
+// Tx creates a new Tx for use with Compose().
+func (q *QuickTxApi) Tx() *Tx {
+	return &Tx{}
+}
+
+// Compose creates a ComposeTxBuilder from multiple Tx objects.
+func (q *QuickTxApi) Compose(txs ...*Tx) *ComposeTxBuilder {
+	return &ComposeTxBuilder{bridge: q.bridge, txs: txs}
+}
+
+// --- TxBuilder ---
+
+// TxBuilder builds a single transaction spec.
+type TxBuilder struct {
+	bridge         *Bridge
+	operations     []map[string]interface{}
+	from           string
+	changeAddress  string
+	feePayer       string
+	utxos          interface{}
+	protocolParams interface{}
+	validity       map[string]interface{}
+	mergeOutputs   *bool
+	signerCount    int
+}
+
+func (tb *TxBuilder) PayToAddress(address string, amounts ...Amount) *TxBuilder {
+	amountList := make([]Amount, len(amounts))
+	copy(amountList, amounts)
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amountList,
+	})
+	return tb
+}
+
+func (tb *TxBuilder) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *TxBuilder {
+	op := map[string]interface{}{
+		"type":    "pay_to_contract",
+		"address": address,
+		"amounts": amounts,
+	}
+	if datumCborHex != "" {
+		op["datum_cbor_hex"] = datumCborHex
+	}
+	if datumHash != "" {
+		op["datum_hash"] = datumHash
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) MintAssets(scriptJSON string, assets []MintAsset, receiver string) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type":        "mint_assets",
+		"script_json": scriptJSON,
+		"assets":      assets,
+		"receiver":    receiver,
+	})
+	return tb
+}
+
+func (tb *TxBuilder) AttachMetadata(label int, metadata interface{}) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type":     "attach_metadata",
+		"label":    label,
+		"metadata": metadata,
+	})
+	return tb
+}
+
+func (tb *TxBuilder) CollectFrom(utxos []map[string]interface{}) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type":          "collect_from",
+		"collect_utxos": utxos,
+	})
+	return tb
+}
+
+// Staking
+
+func (tb *TxBuilder) RegisterStakeAddress(address string) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type": "register_stake_address", "address": address,
+	})
+	return tb
+}
+
+func (tb *TxBuilder) DeregisterStakeAddress(address string, refundAddress ...string) *TxBuilder {
+	op := map[string]interface{}{"type": "deregister_stake_address", "address": address}
+	if len(refundAddress) > 0 && refundAddress[0] != "" {
+		op["refund_address"] = refundAddress[0]
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) DelegateTo(address, poolID string) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type": "delegate_to", "address": address, "pool_id": poolID,
+	})
+	return tb
+}
+
+func (tb *TxBuilder) Withdraw(rewardAddress string, amount int64, receiver ...string) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "withdraw", "reward_address": rewardAddress, "amount": fmt.Sprintf("%d", amount),
+	}
+	if len(receiver) > 0 && receiver[0] != "" {
+		op["receiver"] = receiver[0]
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+// DRep
+
+func (tb *TxBuilder) RegisterDRep(credHash, credType string, anchor ...AnchorOption) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "register_drep", "credential_hash": credHash, "credential_type": credType,
+	}
+	if len(anchor) > 0 {
+		if anchor[0].AnchorURL != "" {
+			op["anchor_url"] = anchor[0].AnchorURL
+		}
+		if anchor[0].AnchorDataHash != "" {
+			op["anchor_data_hash"] = anchor[0].AnchorDataHash
+		}
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) UnregisterDRep(credHash, credType string, refundAddress ...string) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
+	}
+	if len(refundAddress) > 0 && refundAddress[0] != "" {
+		op["refund_address"] = refundAddress[0]
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) UpdateDRep(credHash, credType string, anchor ...AnchorOption) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "update_drep", "credential_hash": credHash, "credential_type": credType,
+	}
+	if len(anchor) > 0 {
+		if anchor[0].AnchorURL != "" {
+			op["anchor_url"] = anchor[0].AnchorURL
+		}
+		if anchor[0].AnchorDataHash != "" {
+			op["anchor_data_hash"] = anchor[0].AnchorDataHash
+		}
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+// Voting
+
+func (tb *TxBuilder) DelegateVotingPowerTo(address, drepType string, drepHash ...string) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "delegate_voting_power_to", "address": address, "drep_type": drepType,
+	}
+	if len(drepHash) > 0 && drepHash[0] != "" {
+		op["drep_hash"] = drepHash[0]
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) CreateVote(voterType, voterHash, govActionTxHash string, govActionIndex int, vote string, anchor ...AnchorOption) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "create_vote", "voter_type": voterType, "voter_hash": voterHash,
+		"gov_action_tx_hash": govActionTxHash, "gov_action_index": govActionIndex, "vote": vote,
+	}
+	if len(anchor) > 0 {
+		if anchor[0].AnchorURL != "" {
+			op["anchor_url"] = anchor[0].AnchorURL
+		}
+		if anchor[0].AnchorDataHash != "" {
+			op["anchor_data_hash"] = anchor[0].AnchorDataHash
+		}
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+// Governance
+
+func (tb *TxBuilder) CreateProposal(govActionType, returnAddress, anchorURL, anchorDataHash string, withdrawals ...[]ProposalWithdrawal) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "create_proposal", "gov_action_type": govActionType,
+		"return_address": returnAddress, "anchor_url": anchorURL, "anchor_data_hash": anchorDataHash,
+	}
+	if len(withdrawals) > 0 && len(withdrawals[0]) > 0 {
+		op["withdrawals"] = withdrawals[0]
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+// Config
+
+func (tb *TxBuilder) From(address string) *TxBuilder {
+	tb.from = address
+	return tb
+}
+
+func (tb *TxBuilder) ChangeAddress(address string) *TxBuilder {
+	tb.changeAddress = address
+	return tb
+}
+
+func (tb *TxBuilder) FeePayer(address string) *TxBuilder {
+	tb.feePayer = address
+	return tb
+}
+
+func (tb *TxBuilder) WithUtxos(utxos interface{}) *TxBuilder {
+	tb.utxos = utxos
+	return tb
+}
+
+func (tb *TxBuilder) WithProtocolParams(params interface{}) *TxBuilder {
+	tb.protocolParams = params
+	return tb
+}
+
+func (tb *TxBuilder) ValidFrom(slot int64) *TxBuilder {
+	if tb.validity == nil {
+		tb.validity = make(map[string]interface{})
+	}
+	tb.validity["valid_from"] = slot
+	return tb
+}
+
+func (tb *TxBuilder) ValidTo(slot int64) *TxBuilder {
+	if tb.validity == nil {
+		tb.validity = make(map[string]interface{})
+	}
+	tb.validity["valid_to"] = slot
+	return tb
+}
+
+func (tb *TxBuilder) MergeOutputs(merge bool) *TxBuilder {
+	tb.mergeOutputs = &merge
+	return tb
+}
+
+func (tb *TxBuilder) SignerCount(count int) *TxBuilder {
+	tb.signerCount = count
+	return tb
+}
+
+func (tb *TxBuilder) buildSpec(providerConfig *ProviderConfig) map[string]interface{} {
+	spec := map[string]interface{}{
+		"operations":   tb.operations,
+		"from":         tb.from,
+		"signer_count": tb.signerCount,
+	}
+	if providerConfig != nil {
+		spec["provider"] = providerConfig
+	} else {
+		spec["utxos"] = tb.utxos
+	}
+	if tb.protocolParams != nil {
+		spec["protocol_params"] = tb.protocolParams
+	}
+	if tb.changeAddress != "" {
+		spec["change_address"] = tb.changeAddress
+	}
+	if tb.feePayer != "" {
+		spec["fee_payer"] = tb.feePayer
+	}
+	if len(tb.validity) > 0 {
+		spec["validity"] = tb.validity
+	}
+	if tb.mergeOutputs != nil {
+		spec["merge_outputs"] = *tb.mergeOutputs
+	}
+	return spec
+}
+
+// Build builds the transaction. Returns TxResult with tx_cbor, tx_hash, fee.
+func (tb *TxBuilder) Build() (*TxResult, error) {
+	return tb.doBuild(nil)
+}
+
+// BuildWithProvider builds with a Java-side provider config for lazy UTXO fetching.
+func (tb *TxBuilder) BuildWithProvider(config ProviderConfig) (*TxResult, error) {
+	return tb.doBuild(&config)
+}
+
+func (tb *TxBuilder) doBuild(providerConfig *ProviderConfig) (*TxResult, error) {
+	spec := tb.buildSpec(providerConfig)
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal spec: %w", err)
+	}
+
+	cs := cstr(string(specJSON))
+	defer C.free(unsafe.Pointer(cs))
+
+	rc := C.ccl_quicktx_build(tb.bridge.thread, cs)
+	result, err := tb.bridge.check(rc)
+	if err != nil {
+		return nil, err
+	}
+
+	var txResult TxResult
+	if err := json.Unmarshal([]byte(result), &txResult); err != nil {
+		return nil, fmt.Errorf("failed to parse tx result: %w", err)
+	}
+	return &txResult, nil
+}
+
+// --- Tx (for Compose) ---
+
+// Tx is a lightweight operation collector for use with Compose.
+type Tx struct {
+	operations    []map[string]interface{}
+	from          string
+	changeAddress string
+}
+
+func (tx *Tx) PayToAddress(address string, amounts ...Amount) *Tx {
+	amountList := make([]Amount, len(amounts))
+	copy(amountList, amounts)
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amountList,
+	})
+	return tx
+}
+
+func (tx *Tx) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *Tx {
+	op := map[string]interface{}{
+		"type":    "pay_to_contract",
+		"address": address,
+		"amounts": amounts,
+	}
+	if datumCborHex != "" {
+		op["datum_cbor_hex"] = datumCborHex
+	}
+	if datumHash != "" {
+		op["datum_hash"] = datumHash
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) MintAssets(scriptJSON string, assets []MintAsset, receiver string) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type":        "mint_assets",
+		"script_json": scriptJSON,
+		"assets":      assets,
+		"receiver":    receiver,
+	})
+	return tx
+}
+
+func (tx *Tx) AttachMetadata(label int, metadata interface{}) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type":     "attach_metadata",
+		"label":    label,
+		"metadata": metadata,
+	})
+	return tx
+}
+
+func (tx *Tx) CollectFrom(utxos []map[string]interface{}) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type":          "collect_from",
+		"collect_utxos": utxos,
+	})
+	return tx
+}
+
+func (tx *Tx) RegisterStakeAddress(address string) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type": "register_stake_address", "address": address,
+	})
+	return tx
+}
+
+func (tx *Tx) DeregisterStakeAddress(address string, refundAddress ...string) *Tx {
+	op := map[string]interface{}{"type": "deregister_stake_address", "address": address}
+	if len(refundAddress) > 0 && refundAddress[0] != "" {
+		op["refund_address"] = refundAddress[0]
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) DelegateTo(address, poolID string) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type": "delegate_to", "address": address, "pool_id": poolID,
+	})
+	return tx
+}
+
+func (tx *Tx) Withdraw(rewardAddress string, amount int64, receiver ...string) *Tx {
+	op := map[string]interface{}{
+		"type": "withdraw", "reward_address": rewardAddress, "amount": fmt.Sprintf("%d", amount),
+	}
+	if len(receiver) > 0 && receiver[0] != "" {
+		op["receiver"] = receiver[0]
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) RegisterDRep(credHash, credType string, anchor ...AnchorOption) *Tx {
+	op := map[string]interface{}{
+		"type": "register_drep", "credential_hash": credHash, "credential_type": credType,
+	}
+	if len(anchor) > 0 {
+		if anchor[0].AnchorURL != "" {
+			op["anchor_url"] = anchor[0].AnchorURL
+		}
+		if anchor[0].AnchorDataHash != "" {
+			op["anchor_data_hash"] = anchor[0].AnchorDataHash
+		}
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) UnregisterDRep(credHash, credType string, refundAddress ...string) *Tx {
+	op := map[string]interface{}{
+		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
+	}
+	if len(refundAddress) > 0 && refundAddress[0] != "" {
+		op["refund_address"] = refundAddress[0]
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) UpdateDRep(credHash, credType string, anchor ...AnchorOption) *Tx {
+	op := map[string]interface{}{
+		"type": "update_drep", "credential_hash": credHash, "credential_type": credType,
+	}
+	if len(anchor) > 0 {
+		if anchor[0].AnchorURL != "" {
+			op["anchor_url"] = anchor[0].AnchorURL
+		}
+		if anchor[0].AnchorDataHash != "" {
+			op["anchor_data_hash"] = anchor[0].AnchorDataHash
+		}
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) DelegateVotingPowerTo(address, drepType string, drepHash ...string) *Tx {
+	op := map[string]interface{}{
+		"type": "delegate_voting_power_to", "address": address, "drep_type": drepType,
+	}
+	if len(drepHash) > 0 && drepHash[0] != "" {
+		op["drep_hash"] = drepHash[0]
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) CreateVote(voterType, voterHash, govActionTxHash string, govActionIndex int, vote string, anchor ...AnchorOption) *Tx {
+	op := map[string]interface{}{
+		"type": "create_vote", "voter_type": voterType, "voter_hash": voterHash,
+		"gov_action_tx_hash": govActionTxHash, "gov_action_index": govActionIndex, "vote": vote,
+	}
+	if len(anchor) > 0 {
+		if anchor[0].AnchorURL != "" {
+			op["anchor_url"] = anchor[0].AnchorURL
+		}
+		if anchor[0].AnchorDataHash != "" {
+			op["anchor_data_hash"] = anchor[0].AnchorDataHash
+		}
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) CreateProposal(govActionType, returnAddress, anchorURL, anchorDataHash string, withdrawals ...[]ProposalWithdrawal) *Tx {
+	op := map[string]interface{}{
+		"type": "create_proposal", "gov_action_type": govActionType,
+		"return_address": returnAddress, "anchor_url": anchorURL, "anchor_data_hash": anchorDataHash,
+	}
+	if len(withdrawals) > 0 && len(withdrawals[0]) > 0 {
+		op["withdrawals"] = withdrawals[0]
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) From(address string) *Tx {
+	tx.from = address
+	return tx
+}
+
+func (tx *Tx) ChangeAddress(address string) *Tx {
+	tx.changeAddress = address
+	return tx
+}
+
+func (tx *Tx) toSpec() map[string]interface{} {
+	spec := map[string]interface{}{
+		"from":       tx.from,
+		"operations": tx.operations,
+	}
+	if tx.changeAddress != "" {
+		spec["change_address"] = tx.changeAddress
+	}
+	return spec
+}
+
+// --- ComposeTxBuilder ---
+
+// ComposeTxBuilder composes multiple Tx objects into a single transaction.
+type ComposeTxBuilder struct {
+	bridge         *Bridge
+	txs            []*Tx
+	feePayer       string
+	utxos          interface{}
+	protocolParams interface{}
+	validity       map[string]interface{}
+	mergeOutputs   *bool
+	signerCount    *int
+}
+
+func (cb *ComposeTxBuilder) FeePayer(address string) *ComposeTxBuilder {
+	cb.feePayer = address
+	return cb
+}
+
+func (cb *ComposeTxBuilder) WithUtxos(utxos interface{}) *ComposeTxBuilder {
+	cb.utxos = utxos
+	return cb
+}
+
+func (cb *ComposeTxBuilder) WithProtocolParams(params interface{}) *ComposeTxBuilder {
+	cb.protocolParams = params
+	return cb
+}
+
+func (cb *ComposeTxBuilder) ValidFrom(slot int64) *ComposeTxBuilder {
+	if cb.validity == nil {
+		cb.validity = make(map[string]interface{})
+	}
+	cb.validity["valid_from"] = slot
+	return cb
+}
+
+func (cb *ComposeTxBuilder) ValidTo(slot int64) *ComposeTxBuilder {
+	if cb.validity == nil {
+		cb.validity = make(map[string]interface{})
+	}
+	cb.validity["valid_to"] = slot
+	return cb
+}
+
+func (cb *ComposeTxBuilder) MergeOutputs(merge bool) *ComposeTxBuilder {
+	cb.mergeOutputs = &merge
+	return cb
+}
+
+func (cb *ComposeTxBuilder) SignerCount(count int) *ComposeTxBuilder {
+	cb.signerCount = &count
+	return cb
+}
+
+// Build builds the composed transaction.
+func (cb *ComposeTxBuilder) Build() (*TxResult, error) {
+	return cb.doBuild(nil)
+}
+
+// BuildWithProvider builds with a Java-side provider config.
+func (cb *ComposeTxBuilder) BuildWithProvider(config ProviderConfig) (*TxResult, error) {
+	return cb.doBuild(&config)
+}
+
+func (cb *ComposeTxBuilder) doBuild(providerConfig *ProviderConfig) (*TxResult, error) {
+	txSpecs := make([]map[string]interface{}, len(cb.txs))
+	for i, tx := range cb.txs {
+		txSpecs[i] = tx.toSpec()
+	}
+
+	spec := map[string]interface{}{
+		"transactions": txSpecs,
+		"fee_payer":    cb.feePayer,
+	}
+
+	if providerConfig != nil {
+		spec["provider"] = providerConfig
+	} else {
+		spec["utxos"] = cb.utxos
+	}
+	if cb.protocolParams != nil {
+		spec["protocol_params"] = cb.protocolParams
+	}
+	if cb.signerCount != nil {
+		spec["signer_count"] = *cb.signerCount
+	}
+	if len(cb.validity) > 0 {
+		spec["validity"] = cb.validity
+	}
+	if cb.mergeOutputs != nil {
+		spec["merge_outputs"] = *cb.mergeOutputs
+	}
+
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal compose spec: %w", err)
+	}
+
+	cs := cstr(string(specJSON))
+	defer C.free(unsafe.Pointer(cs))
+
+	rc := C.ccl_quicktx_build(cb.bridge.thread, cs)
+	result, err := cb.bridge.check(rc)
+	if err != nil {
+		return nil, err
+	}
+
+	var txResult TxResult
+	if err := json.Unmarshal([]byte(result), &txResult); err != nil {
+		return nil, fmt.Errorf("failed to parse tx result: %w", err)
+	}
+	return &txResult, nil
 }

@@ -54,6 +54,7 @@ class CclLib:
         from ccl.script import Script
         from ccl.governance import Governance
         from ccl.wallet import Wallet
+        from ccl.quicktx import QuickTx
 
         self.account = Account(self)
         self.address = Address(self)
@@ -63,6 +64,7 @@ class CclLib:
         self.script = Script(self)
         self.gov = Governance(self)
         self.wallet = Wallet(self)
+        self.quicktx = QuickTx(self)
 
     def _setup_functions(self):
         lib = self._lib
@@ -189,6 +191,10 @@ class CclLib:
 
         lib.ccl_script_hash.argtypes = [c_void_p, c_char_p, c_int]
         lib.ccl_script_hash.restype = c_int
+
+        # QuickTx API
+        lib.ccl_quicktx_build.argtypes = [c_void_p, c_char_p]
+        lib.ccl_quicktx_build.restype = c_int
 
     def _get_result(self):
         """Get the last result string and free it."""

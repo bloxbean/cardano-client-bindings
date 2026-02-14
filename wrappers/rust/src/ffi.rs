@@ -180,4 +180,10 @@ extern "C" {
         script_cbor_hex: *const c_char,
         script_type: c_int,
     ) -> c_int;
+
+    // QuickTx API
+    pub fn ccl_quicktx_build(
+        thread: *mut graal_isolatethread_t,
+        spec_json: *const c_char,
+    ) -> c_int;
 }

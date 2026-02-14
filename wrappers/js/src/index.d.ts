@@ -80,6 +80,121 @@ export declare class CclBridge {
     walletGetAddress(mnemonic: string, networkId?: number, index?: number): string;
 }
 
+export interface QuickTxResult {
+    tx_cbor: string;
+    tx_hash: string;
+    fee: string;
+}
+
+export interface AmountSpec {
+    unit: string;
+    quantity: string;
+}
+
+export declare class Amount {
+    static lovelace(quantity: number): AmountSpec;
+    static ada(adaAmount: number): AmountSpec;
+    static asset(unit: string, quantity: number): AmountSpec;
+}
+
+export interface ProviderConfig {
+    name: string;
+    url: string;
+    apiKey?: string;
+}
+
+export declare class TxBuilder {
+    payToAddress(address: string, ...amounts: AmountSpec[]): TxBuilder;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): TxBuilder;
+    mintAssets(scriptJson: string | object, assets: Array<{ name: string; quantity: string }>, receiver: string): TxBuilder;
+    attachMetadata(label: number, metadata: any): TxBuilder;
+    collectFrom(utxos: any[]): TxBuilder;
+    // Staking
+    registerStakeAddress(address: string): TxBuilder;
+    deregisterStakeAddress(address: string, refundAddress?: string | null): TxBuilder;
+    delegateTo(address: string, poolId: string): TxBuilder;
+    withdraw(rewardAddress: string, amount: string | number, receiver?: string | null): TxBuilder;
+    // DRep
+    registerDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
+    unregisterDRep(credentialHash: string, credentialType?: string, refundAddress?: string | null): TxBuilder;
+    updateDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
+    // Voting
+    delegateVotingPowerTo(address: string, drepType: string, drepHash?: string | null): TxBuilder;
+    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
+    // Governance
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): TxBuilder;
+    from(address: string): TxBuilder;
+    changeAddress(address: string): TxBuilder;
+    feePayer(address: string): TxBuilder;
+    withUtxos(utxos: any[]): TxBuilder;
+    withProtocolParams(params: any): TxBuilder;
+    validFrom(slot: number): TxBuilder;
+    validTo(slot: number): TxBuilder;
+    mergeOutputs(merge: boolean): TxBuilder;
+    signerCount(count: number): TxBuilder;
+    build(providerConfig?: ProviderConfig | null): QuickTxResult;
+    buildWithProvider(provider: Provider): Promise<QuickTxResult>;
+}
+
+export declare class Tx {
+    payToAddress(address: string, ...amounts: AmountSpec[]): Tx;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): Tx;
+    mintAssets(scriptJson: string | object, assets: Array<{ name: string; quantity: string }>, receiver: string): Tx;
+    attachMetadata(label: number, metadata: any): Tx;
+    collectFrom(utxos: any[]): Tx;
+    // Staking
+    registerStakeAddress(address: string): Tx;
+    deregisterStakeAddress(address: string, refundAddress?: string | null): Tx;
+    delegateTo(address: string, poolId: string): Tx;
+    withdraw(rewardAddress: string, amount: string | number, receiver?: string | null): Tx;
+    // DRep
+    registerDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
+    unregisterDRep(credentialHash: string, credentialType?: string, refundAddress?: string | null): Tx;
+    updateDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
+    // Voting
+    delegateVotingPowerTo(address: string, drepType: string, drepHash?: string | null): Tx;
+    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
+    // Governance
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): Tx;
+    from(address: string): Tx;
+    changeAddress(address: string): Tx;
+}
+
+export declare class ComposeTxBuilder {
+    feePayer(address: string): ComposeTxBuilder;
+    withUtxos(utxos: any[]): ComposeTxBuilder;
+    withProtocolParams(params: any): ComposeTxBuilder;
+    validFrom(slot: number): ComposeTxBuilder;
+    validTo(slot: number): ComposeTxBuilder;
+    mergeOutputs(merge: boolean): ComposeTxBuilder;
+    signerCount(count: number): ComposeTxBuilder;
+    build(providerConfig?: ProviderConfig | null): QuickTxResult;
+    buildWithProvider(provider: Provider): Promise<QuickTxResult>;
+}
+
+export declare class QuickTxApi {
+    newTx(): TxBuilder;
+    tx(): Tx;
+    compose(...txs: Tx[]): ComposeTxBuilder;
+}
+
+export declare class Provider {
+    getUtxos(address: string): Promise<any[]>;
+    getProtocolParams(): Promise<any>;
+    submitTx(txCborHex: string): Promise<string>;
+}
+
+export declare class YaciDevKitProvider extends Provider {
+    constructor(baseUrl?: string);
+    getUtxos(address: string): Promise<any[]>;
+    getProtocolParams(): Promise<any>;
+    submitTx(txCborHex: string): Promise<string>;
+    topup(address: string, adaAmount?: number): Promise<any>;
+    reset(): Promise<number>;
+    waitForBlock(ms?: number): Promise<void>;
+    isAvailable(): Promise<boolean>;
+}
+
 export declare const MAINNET: number;
 export declare const TESTNET: number;
 export declare const PREPROD: number;
@@ -94,3 +209,4 @@ export declare const CCL_ERROR_INVALID_MNEMONIC: number;
 export declare const CCL_ERROR_INVALID_ADDRESS: number;
 export declare const CCL_ERROR_INSUFFICIENT_FUNDS: number;
 export declare const CCL_ERROR_INVALID_TRANSACTION: number;
+export declare const CCL_ERROR_TX_BUILD: number;

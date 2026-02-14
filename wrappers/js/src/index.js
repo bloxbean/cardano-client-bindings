@@ -2,6 +2,8 @@ import { dlopen, FFIType, ptr, CString } from 'bun:ffi';
 import path from 'path';
 import os from 'os';
 
+export { Provider, YaciDevKitProvider } from './provider.js';
+
 // Error codes
 export const CCL_SUCCESS = 0;
 export const CCL_ERROR_GENERAL = -1;
@@ -13,6 +15,7 @@ export const CCL_ERROR_INVALID_MNEMONIC = -6;
 export const CCL_ERROR_INVALID_ADDRESS = -7;
 export const CCL_ERROR_INSUFFICIENT_FUNDS = -8;
 export const CCL_ERROR_INVALID_TRANSACTION = -9;
+export const CCL_ERROR_TX_BUILD = -10;
 
 // Network IDs
 export const MAINNET = 0;
@@ -109,6 +112,9 @@ export class CclBridge {
       ccl_wallet_create: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
       ccl_wallet_from_mnemonic: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
       ccl_wallet_get_address: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+
+      // QuickTx
+      ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
     });
 
     this._lib = lib.symbols;
@@ -131,6 +137,7 @@ export class CclBridge {
     this.script = new ScriptApi(this);
     this.gov = new GovApi(this);
     this.wallet = new WalletApi(this);
+    this.quicktx = new QuickTxApi(this);
   }
 
   _getResult() {
@@ -339,5 +346,503 @@ class WalletApi {
   getAddress(mnemonic, networkId = MAINNET, index = 0) {
     return this._b._check(
       this._b._lib.ccl_wallet_get_address(this._b._thread, cstr(mnemonic), networkId, index));
+  }
+}
+
+class QuickTxApi {
+  constructor(bridge) { this._b = bridge; }
+
+  newTx() {
+    return new TxBuilder(this._b);
+  }
+
+  tx() {
+    return new Tx();
+  }
+
+  compose(...txs) {
+    return new ComposeTxBuilder(this._b, txs);
+  }
+}
+
+export class Amount {
+  static lovelace(quantity) {
+    return { unit: 'lovelace', quantity: String(Math.floor(quantity)) };
+  }
+
+  static ada(adaAmount) {
+    return { unit: 'lovelace', quantity: String(Math.floor(adaAmount * 1_000_000)) };
+  }
+
+  static asset(unit, quantity) {
+    return { unit, quantity: String(Math.floor(quantity)) };
+  }
+}
+
+export class TxBuilder {
+  constructor(bridge) {
+    this._b = bridge;
+    this._operations = [];
+    this._from = null;
+    this._changeAddress = null;
+    this._feePayer = null;
+    this._utxos = null;
+    this._protocolParams = null;
+    this._validity = {};
+    this._mergeOutputs = null;
+    this._signerCount = 1;
+  }
+
+  payToAddress(address, ...amounts) {
+    this._operations.push({
+      type: 'pay_to_address',
+      address,
+      amounts: [...amounts],
+    });
+    return this;
+  }
+
+  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+    const op = {
+      type: 'pay_to_contract',
+      address,
+      amounts: Array.isArray(amounts) ? amounts : [amounts],
+    };
+    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
+    if (datumHash) op.datum_hash = datumHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  mintAssets(scriptJson, assets, receiver) {
+    this._operations.push({
+      type: 'mint_assets',
+      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
+      assets,
+      receiver,
+    });
+    return this;
+  }
+
+  attachMetadata(label, metadata) {
+    this._operations.push({
+      type: 'attach_metadata',
+      label,
+      metadata,
+    });
+    return this;
+  }
+
+  collectFrom(utxos) {
+    this._operations.push({
+      type: 'collect_from',
+      collect_utxos: utxos,
+    });
+    return this;
+  }
+
+  // Staking
+  registerStakeAddress(address) {
+    this._operations.push({ type: 'register_stake_address', address });
+    return this;
+  }
+
+  deregisterStakeAddress(address, refundAddress = null) {
+    const op = { type: 'deregister_stake_address', address };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  delegateTo(address, poolId) {
+    this._operations.push({ type: 'delegate_to', address, pool_id: poolId });
+    return this;
+  }
+
+  withdraw(rewardAddress, amount, receiver = null) {
+    const op = { type: 'withdraw', reward_address: rewardAddress, amount: String(amount) };
+    if (receiver) op.receiver = receiver;
+    this._operations.push(op);
+    return this;
+  }
+
+  // DRep
+  registerDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
+    const op = { type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  unregisterDRep(credentialHash, credentialType = 'key', refundAddress = null) {
+    const op = { type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  updateDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
+    const op = { type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Voting
+  delegateVotingPowerTo(address, drepType, drepHash = null) {
+    const op = { type: 'delegate_voting_power_to', address, drep_type: drepType };
+    if (drepHash) op.drep_hash = drepHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
+      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Governance
+  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, options = {}) {
+    const op = {
+      type: 'create_proposal', gov_action_type: govActionType,
+      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
+    };
+    if (options.withdrawals) op.withdrawals = options.withdrawals;
+    this._operations.push(op);
+    return this;
+  }
+
+  from(address) {
+    this._from = address;
+    return this;
+  }
+
+  changeAddress(address) {
+    this._changeAddress = address;
+    return this;
+  }
+
+  feePayer(address) {
+    this._feePayer = address;
+    return this;
+  }
+
+  withUtxos(utxos) {
+    this._utxos = utxos;
+    return this;
+  }
+
+  withProtocolParams(params) {
+    this._protocolParams = params;
+    return this;
+  }
+
+  validFrom(slot) {
+    this._validity.valid_from = slot;
+    return this;
+  }
+
+  validTo(slot) {
+    this._validity.valid_to = slot;
+    return this;
+  }
+
+  mergeOutputs(merge) {
+    this._mergeOutputs = merge;
+    return this;
+  }
+
+  signerCount(count) {
+    this._signerCount = count;
+    return this;
+  }
+
+  build(providerConfig = null) {
+    const spec = {
+      operations: this._operations,
+      from: this._from,
+      signer_count: this._signerCount,
+    };
+
+    if (providerConfig) {
+      spec.provider = { name: providerConfig.name, url: providerConfig.url };
+      if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
+      if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
+    } else {
+      spec.utxos = this._utxos;
+      spec.protocol_params = this._protocolParams;
+    }
+
+    if (this._changeAddress) spec.change_address = this._changeAddress;
+    if (this._feePayer) spec.fee_payer = this._feePayer;
+    if (Object.keys(this._validity).length > 0) spec.validity = this._validity;
+    if (this._mergeOutputs !== null) spec.merge_outputs = this._mergeOutputs;
+
+    const specJson = JSON.stringify(spec);
+    const rc = this._b._lib.ccl_quicktx_build(this._b._thread, cstr(specJson));
+    return JSON.parse(this._b._check(rc));
+  }
+
+  async buildWithProvider(provider) {
+    if (this._utxos === null && this._from) {
+      this._utxos = await provider.getUtxos(this._from);
+    }
+    if (this._protocolParams === null) {
+      this._protocolParams = await provider.getProtocolParams();
+    }
+    return this.build();
+  }
+}
+
+export class Tx {
+  constructor() {
+    this._operations = [];
+    this._from = null;
+    this._changeAddress = null;
+  }
+
+  payToAddress(address, ...amounts) {
+    this._operations.push({
+      type: 'pay_to_address',
+      address,
+      amounts: [...amounts],
+    });
+    return this;
+  }
+
+  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+    const op = {
+      type: 'pay_to_contract',
+      address,
+      amounts: Array.isArray(amounts) ? amounts : [amounts],
+    };
+    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
+    if (datumHash) op.datum_hash = datumHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  mintAssets(scriptJson, assets, receiver) {
+    this._operations.push({
+      type: 'mint_assets',
+      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
+      assets,
+      receiver,
+    });
+    return this;
+  }
+
+  attachMetadata(label, metadata) {
+    this._operations.push({
+      type: 'attach_metadata',
+      label,
+      metadata,
+    });
+    return this;
+  }
+
+  collectFrom(utxos) {
+    this._operations.push({
+      type: 'collect_from',
+      collect_utxos: utxos,
+    });
+    return this;
+  }
+
+  // Staking
+  registerStakeAddress(address) {
+    this._operations.push({ type: 'register_stake_address', address });
+    return this;
+  }
+
+  deregisterStakeAddress(address, refundAddress = null) {
+    const op = { type: 'deregister_stake_address', address };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  delegateTo(address, poolId) {
+    this._operations.push({ type: 'delegate_to', address, pool_id: poolId });
+    return this;
+  }
+
+  withdraw(rewardAddress, amount, receiver = null) {
+    const op = { type: 'withdraw', reward_address: rewardAddress, amount: String(amount) };
+    if (receiver) op.receiver = receiver;
+    this._operations.push(op);
+    return this;
+  }
+
+  // DRep
+  registerDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
+    const op = { type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  unregisterDRep(credentialHash, credentialType = 'key', refundAddress = null) {
+    const op = { type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  updateDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
+    const op = { type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Voting
+  delegateVotingPowerTo(address, drepType, drepHash = null) {
+    const op = { type: 'delegate_voting_power_to', address, drep_type: drepType };
+    if (drepHash) op.drep_hash = drepHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
+      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Governance
+  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, options = {}) {
+    const op = {
+      type: 'create_proposal', gov_action_type: govActionType,
+      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
+    };
+    if (options.withdrawals) op.withdrawals = options.withdrawals;
+    this._operations.push(op);
+    return this;
+  }
+
+  from(address) {
+    this._from = address;
+    return this;
+  }
+
+  changeAddress(address) {
+    this._changeAddress = address;
+    return this;
+  }
+
+  _toSpec() {
+    const spec = {
+      from: this._from,
+      operations: this._operations,
+    };
+    if (this._changeAddress) spec.change_address = this._changeAddress;
+    return spec;
+  }
+}
+
+export class ComposeTxBuilder {
+  constructor(bridge, txs) {
+    this._b = bridge;
+    this._txs = [...txs];
+    this._feePayer = null;
+    this._utxos = null;
+    this._protocolParams = null;
+    this._validity = {};
+    this._mergeOutputs = null;
+    this._signerCount = null;
+  }
+
+  feePayer(address) {
+    this._feePayer = address;
+    return this;
+  }
+
+  withUtxos(utxos) {
+    this._utxos = utxos;
+    return this;
+  }
+
+  withProtocolParams(params) {
+    this._protocolParams = params;
+    return this;
+  }
+
+  validFrom(slot) {
+    this._validity.valid_from = slot;
+    return this;
+  }
+
+  validTo(slot) {
+    this._validity.valid_to = slot;
+    return this;
+  }
+
+  mergeOutputs(merge) {
+    this._mergeOutputs = merge;
+    return this;
+  }
+
+  signerCount(count) {
+    this._signerCount = count;
+    return this;
+  }
+
+  build(providerConfig = null) {
+    const spec = {
+      transactions: this._txs.map(tx => tx._toSpec()),
+      fee_payer: this._feePayer,
+    };
+
+    if (providerConfig) {
+      spec.provider = { name: providerConfig.name, url: providerConfig.url };
+      if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
+      if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
+    } else {
+      spec.utxos = this._utxos;
+      spec.protocol_params = this._protocolParams;
+    }
+
+    if (this._signerCount !== null) spec.signer_count = this._signerCount;
+    if (Object.keys(this._validity).length > 0) spec.validity = this._validity;
+    if (this._mergeOutputs !== null) spec.merge_outputs = this._mergeOutputs;
+
+    const specJson = JSON.stringify(spec);
+    const rc = this._b._lib.ccl_quicktx_build(this._b._thread, cstr(specJson));
+    return JSON.parse(this._b._check(rc));
+  }
+
+  async buildWithProvider(provider) {
+    if (this._utxos === null) {
+      const addresses = new Set();
+      for (const tx of this._txs) {
+        if (tx._from) addresses.add(tx._from);
+      }
+      const allUtxos = [];
+      for (const addr of addresses) {
+        const utxos = await provider.getUtxos(addr);
+        allUtxos.push(...utxos);
+      }
+      this._utxos = allUtxos;
+    }
+    if (this._protocolParams === null) {
+      this._protocolParams = await provider.getProtocolParams();
+    }
+    return this.build();
   }
 }

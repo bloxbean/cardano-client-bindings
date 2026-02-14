@@ -4,6 +4,9 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
 
+use serde::Serialize;
+use serde_json::{json, Value};
+
 pub use ffi::*;
 
 /// Error codes from the CCL library.
@@ -164,6 +167,11 @@ impl Bridge {
     /// Get the wallet namespace API.
     pub fn wallet(&self) -> WalletApi<'_> {
         WalletApi { bridge: self }
+    }
+
+    /// Get the quicktx namespace API.
+    pub fn quicktx(&self) -> QuickTxApi<'_> {
+        QuickTxApi { bridge: self }
     }
 }
 
@@ -553,5 +561,821 @@ impl<'a> WalletApi<'a> {
         let rc =
             unsafe { ffi::ccl_wallet_get_address(self.bridge.thread, cs.as_ptr(), network_id, index) };
         self.bridge.check(rc)
+    }
+}
+
+// --- QuickTx API ---
+
+/// Result from building a transaction.
+#[derive(Debug, serde::Deserialize)]
+pub struct TxResult {
+    pub tx_cbor: String,
+    pub tx_hash: String,
+    pub fee: String,
+}
+
+/// Helper for creating amount values.
+pub struct Amount;
+
+impl Amount {
+    pub fn lovelace(quantity: u64) -> Value {
+        json!({"unit": "lovelace", "quantity": quantity.to_string()})
+    }
+
+    pub fn ada(ada: f64) -> Value {
+        json!({"unit": "lovelace", "quantity": ((ada * 1_000_000.0) as u64).to_string()})
+    }
+
+    pub fn asset(unit: &str, quantity: u64) -> Value {
+        json!({"unit": unit, "quantity": quantity.to_string()})
+    }
+}
+
+/// Asset to mint.
+#[derive(Serialize)]
+pub struct MintAsset {
+    pub name: String,
+    pub quantity: String,
+}
+
+/// Provider configuration for Java-side lazy fetching.
+#[derive(Serialize)]
+pub struct ProviderConfig {
+    pub name: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+/// Withdrawal entry for treasury proposals.
+#[derive(Serialize)]
+pub struct ProposalWithdrawal {
+    pub reward_address: String,
+    pub amount: String,
+}
+
+/// QuickTx namespace API.
+pub struct QuickTxApi<'a> {
+    bridge: &'a Bridge,
+}
+
+impl<'a> QuickTxApi<'a> {
+    /// Create a new TxBuilder for building a single transaction.
+    pub fn new_tx(&self) -> TxBuilder<'a> {
+        TxBuilder {
+            bridge: self.bridge,
+            operations: Vec::new(),
+            from: None,
+            change_address: None,
+            fee_payer: None,
+            utxos: None,
+            protocol_params: None,
+            validity: serde_json::Map::new(),
+            merge_outputs: None,
+            signer_count: 1,
+        }
+    }
+
+    /// Create a new Tx for use with compose().
+    pub fn tx(&self) -> Tx {
+        Tx {
+            operations: Vec::new(),
+            from: None,
+            change_address: None,
+        }
+    }
+
+    /// Compose multiple Tx objects into a single transaction.
+    pub fn compose(&self, txs: Vec<Tx>) -> ComposeTxBuilder<'a> {
+        ComposeTxBuilder {
+            bridge: self.bridge,
+            txs,
+            fee_payer: None,
+            utxos: None,
+            protocol_params: None,
+            validity: serde_json::Map::new(),
+            merge_outputs: None,
+            signer_count: None,
+        }
+    }
+}
+
+/// Builder for a single transaction spec.
+pub struct TxBuilder<'a> {
+    bridge: &'a Bridge,
+    operations: Vec<Value>,
+    from: Option<String>,
+    change_address: Option<String>,
+    fee_payer: Option<String>,
+    utxos: Option<Value>,
+    protocol_params: Option<Value>,
+    validity: serde_json::Map<String, Value>,
+    merge_outputs: Option<bool>,
+    signer_count: i32,
+}
+
+impl<'a> TxBuilder<'a> {
+    pub fn pay_to_address(&mut self, address: &str, amounts: &[Value]) -> &mut Self {
+        self.operations.push(json!({
+            "type": "pay_to_address",
+            "address": address,
+            "amounts": amounts,
+        }));
+        self
+    }
+
+    pub fn pay_to_contract(
+        &mut self,
+        address: &str,
+        amounts: &[Value],
+        datum_cbor_hex: Option<&str>,
+        datum_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "pay_to_contract",
+            "address": address,
+            "amounts": amounts,
+        });
+        if let Some(d) = datum_cbor_hex {
+            op["datum_cbor_hex"] = json!(d);
+        }
+        if let Some(h) = datum_hash {
+            op["datum_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn mint_assets(
+        &mut self,
+        script_json: &str,
+        assets: &[MintAsset],
+        receiver: &str,
+    ) -> &mut Self {
+        self.operations.push(json!({
+            "type": "mint_assets",
+            "script_json": script_json,
+            "assets": assets,
+            "receiver": receiver,
+        }));
+        self
+    }
+
+    pub fn attach_metadata(&mut self, label: u64, metadata: Value) -> &mut Self {
+        self.operations.push(json!({
+            "type": "attach_metadata",
+            "label": label,
+            "metadata": metadata,
+        }));
+        self
+    }
+
+    pub fn collect_from(&mut self, utxos: &[Value]) -> &mut Self {
+        self.operations.push(json!({
+            "type": "collect_from",
+            "collect_utxos": utxos,
+        }));
+        self
+    }
+
+    // Staking
+
+    pub fn register_stake_address(&mut self, address: &str) -> &mut Self {
+        self.operations
+            .push(json!({"type": "register_stake_address", "address": address}));
+        self
+    }
+
+    pub fn deregister_stake_address(
+        &mut self,
+        address: &str,
+        refund_address: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({"type": "deregister_stake_address", "address": address});
+        if let Some(r) = refund_address {
+            op["refund_address"] = json!(r);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn delegate_to(&mut self, address: &str, pool_id: &str) -> &mut Self {
+        self.operations
+            .push(json!({"type": "delegate_to", "address": address, "pool_id": pool_id}));
+        self
+    }
+
+    pub fn withdraw(
+        &mut self,
+        reward_address: &str,
+        amount: u64,
+        receiver: Option<&str>,
+    ) -> &mut Self {
+        let mut op =
+            json!({"type": "withdraw", "reward_address": reward_address, "amount": amount.to_string()});
+        if let Some(r) = receiver {
+            op["receiver"] = json!(r);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    // DRep
+
+    pub fn register_drep(
+        &mut self,
+        cred_hash: &str,
+        cred_type: &str,
+        anchor_url: Option<&str>,
+        anchor_data_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "register_drep",
+            "credential_hash": cred_hash,
+            "credential_type": cred_type,
+        });
+        if let Some(u) = anchor_url {
+            op["anchor_url"] = json!(u);
+        }
+        if let Some(h) = anchor_data_hash {
+            op["anchor_data_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn unregister_drep(
+        &mut self,
+        cred_hash: &str,
+        cred_type: &str,
+        refund_address: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "unregister_drep",
+            "credential_hash": cred_hash,
+            "credential_type": cred_type,
+        });
+        if let Some(r) = refund_address {
+            op["refund_address"] = json!(r);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn update_drep(
+        &mut self,
+        cred_hash: &str,
+        cred_type: &str,
+        anchor_url: Option<&str>,
+        anchor_data_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "update_drep",
+            "credential_hash": cred_hash,
+            "credential_type": cred_type,
+        });
+        if let Some(u) = anchor_url {
+            op["anchor_url"] = json!(u);
+        }
+        if let Some(h) = anchor_data_hash {
+            op["anchor_data_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    // Voting
+
+    pub fn delegate_voting_power_to(
+        &mut self,
+        address: &str,
+        drep_type: &str,
+        drep_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op =
+            json!({"type": "delegate_voting_power_to", "address": address, "drep_type": drep_type});
+        if let Some(h) = drep_hash {
+            op["drep_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn create_vote(
+        &mut self,
+        voter_type: &str,
+        voter_hash: &str,
+        gov_action_tx_hash: &str,
+        gov_action_index: u32,
+        vote: &str,
+        anchor_url: Option<&str>,
+        anchor_data_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "create_vote",
+            "voter_type": voter_type,
+            "voter_hash": voter_hash,
+            "gov_action_tx_hash": gov_action_tx_hash,
+            "gov_action_index": gov_action_index,
+            "vote": vote,
+        });
+        if let Some(u) = anchor_url {
+            op["anchor_url"] = json!(u);
+        }
+        if let Some(h) = anchor_data_hash {
+            op["anchor_data_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    // Governance
+
+    pub fn create_proposal(
+        &mut self,
+        gov_action_type: &str,
+        return_address: &str,
+        anchor_url: &str,
+        anchor_data_hash: &str,
+        withdrawals: Option<&[ProposalWithdrawal]>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "create_proposal",
+            "gov_action_type": gov_action_type,
+            "return_address": return_address,
+            "anchor_url": anchor_url,
+            "anchor_data_hash": anchor_data_hash,
+        });
+        if let Some(w) = withdrawals {
+            op["withdrawals"] = serde_json::to_value(w).unwrap_or_default();
+        }
+        self.operations.push(op);
+        self
+    }
+
+    // Config
+
+    pub fn from(&mut self, address: &str) -> &mut Self {
+        self.from = Some(address.to_string());
+        self
+    }
+
+    pub fn change_address(&mut self, address: &str) -> &mut Self {
+        self.change_address = Some(address.to_string());
+        self
+    }
+
+    pub fn fee_payer(&mut self, address: &str) -> &mut Self {
+        self.fee_payer = Some(address.to_string());
+        self
+    }
+
+    pub fn with_utxos(&mut self, utxos: Value) -> &mut Self {
+        self.utxos = Some(utxos);
+        self
+    }
+
+    pub fn with_protocol_params(&mut self, params: Value) -> &mut Self {
+        self.protocol_params = Some(params);
+        self
+    }
+
+    pub fn valid_from(&mut self, slot: u64) -> &mut Self {
+        self.validity
+            .insert("valid_from".to_string(), json!(slot));
+        self
+    }
+
+    pub fn valid_to(&mut self, slot: u64) -> &mut Self {
+        self.validity.insert("valid_to".to_string(), json!(slot));
+        self
+    }
+
+    pub fn merge_outputs(&mut self, merge: bool) -> &mut Self {
+        self.merge_outputs = Some(merge);
+        self
+    }
+
+    pub fn signer_count(&mut self, count: i32) -> &mut Self {
+        self.signer_count = count;
+        self
+    }
+
+    fn build_spec(&self, provider_config: Option<&ProviderConfig>) -> Value {
+        let mut spec = json!({
+            "operations": self.operations,
+            "from": self.from,
+            "signer_count": self.signer_count,
+        });
+
+        if let Some(pc) = provider_config {
+            spec["provider"] = serde_json::to_value(pc).unwrap_or_default();
+        } else if let Some(ref u) = self.utxos {
+            spec["utxos"] = u.clone();
+        }
+        if let Some(ref pp) = self.protocol_params {
+            spec["protocol_params"] = pp.clone();
+        }
+        if let Some(ref ca) = self.change_address {
+            spec["change_address"] = json!(ca);
+        }
+        if let Some(ref fp) = self.fee_payer {
+            spec["fee_payer"] = json!(fp);
+        }
+        if !self.validity.is_empty() {
+            spec["validity"] = Value::Object(self.validity.clone());
+        }
+        if let Some(m) = self.merge_outputs {
+            spec["merge_outputs"] = json!(m);
+        }
+        spec
+    }
+
+    /// Build the transaction.
+    pub fn build(&self) -> Result<TxResult> {
+        self.do_build(None)
+    }
+
+    /// Build with a Java-side provider config for lazy UTXO fetching.
+    pub fn build_with_provider(&self, config: &ProviderConfig) -> Result<TxResult> {
+        self.do_build(Some(config))
+    }
+
+    fn do_build(&self, provider_config: Option<&ProviderConfig>) -> Result<TxResult> {
+        let spec = self.build_spec(provider_config);
+        let spec_json = serde_json::to_string(&spec).map_err(|e| CclError {
+            code: error_codes::CCL_ERROR_SERIALIZATION,
+            message: format!("Failed to serialize spec: {}", e),
+        })?;
+
+        let cs = to_cstring(&spec_json)?;
+        let rc = unsafe { ffi::ccl_quicktx_build(self.bridge.thread, cs.as_ptr()) };
+        let result = self.bridge.check(rc)?;
+
+        serde_json::from_str(&result).map_err(|e| CclError {
+            code: error_codes::CCL_ERROR_SERIALIZATION,
+            message: format!("Failed to parse tx result: {}", e),
+        })
+    }
+}
+
+/// Lightweight operation collector for one transaction in a compose group.
+pub struct Tx {
+    operations: Vec<Value>,
+    from: Option<String>,
+    change_address: Option<String>,
+}
+
+impl Tx {
+    pub fn pay_to_address(&mut self, address: &str, amounts: &[Value]) -> &mut Self {
+        self.operations.push(json!({
+            "type": "pay_to_address",
+            "address": address,
+            "amounts": amounts,
+        }));
+        self
+    }
+
+    pub fn pay_to_contract(
+        &mut self,
+        address: &str,
+        amounts: &[Value],
+        datum_cbor_hex: Option<&str>,
+        datum_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "pay_to_contract",
+            "address": address,
+            "amounts": amounts,
+        });
+        if let Some(d) = datum_cbor_hex {
+            op["datum_cbor_hex"] = json!(d);
+        }
+        if let Some(h) = datum_hash {
+            op["datum_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn mint_assets(
+        &mut self,
+        script_json: &str,
+        assets: &[MintAsset],
+        receiver: &str,
+    ) -> &mut Self {
+        self.operations.push(json!({
+            "type": "mint_assets",
+            "script_json": script_json,
+            "assets": assets,
+            "receiver": receiver,
+        }));
+        self
+    }
+
+    pub fn attach_metadata(&mut self, label: u64, metadata: Value) -> &mut Self {
+        self.operations.push(json!({
+            "type": "attach_metadata",
+            "label": label,
+            "metadata": metadata,
+        }));
+        self
+    }
+
+    pub fn collect_from(&mut self, utxos: &[Value]) -> &mut Self {
+        self.operations.push(json!({
+            "type": "collect_from",
+            "collect_utxos": utxos,
+        }));
+        self
+    }
+
+    pub fn register_stake_address(&mut self, address: &str) -> &mut Self {
+        self.operations
+            .push(json!({"type": "register_stake_address", "address": address}));
+        self
+    }
+
+    pub fn deregister_stake_address(
+        &mut self,
+        address: &str,
+        refund_address: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({"type": "deregister_stake_address", "address": address});
+        if let Some(r) = refund_address {
+            op["refund_address"] = json!(r);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn delegate_to(&mut self, address: &str, pool_id: &str) -> &mut Self {
+        self.operations
+            .push(json!({"type": "delegate_to", "address": address, "pool_id": pool_id}));
+        self
+    }
+
+    pub fn withdraw(
+        &mut self,
+        reward_address: &str,
+        amount: u64,
+        receiver: Option<&str>,
+    ) -> &mut Self {
+        let mut op =
+            json!({"type": "withdraw", "reward_address": reward_address, "amount": amount.to_string()});
+        if let Some(r) = receiver {
+            op["receiver"] = json!(r);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn register_drep(
+        &mut self,
+        cred_hash: &str,
+        cred_type: &str,
+        anchor_url: Option<&str>,
+        anchor_data_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "register_drep",
+            "credential_hash": cred_hash,
+            "credential_type": cred_type,
+        });
+        if let Some(u) = anchor_url {
+            op["anchor_url"] = json!(u);
+        }
+        if let Some(h) = anchor_data_hash {
+            op["anchor_data_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn unregister_drep(
+        &mut self,
+        cred_hash: &str,
+        cred_type: &str,
+        refund_address: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "unregister_drep",
+            "credential_hash": cred_hash,
+            "credential_type": cred_type,
+        });
+        if let Some(r) = refund_address {
+            op["refund_address"] = json!(r);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn update_drep(
+        &mut self,
+        cred_hash: &str,
+        cred_type: &str,
+        anchor_url: Option<&str>,
+        anchor_data_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "update_drep",
+            "credential_hash": cred_hash,
+            "credential_type": cred_type,
+        });
+        if let Some(u) = anchor_url {
+            op["anchor_url"] = json!(u);
+        }
+        if let Some(h) = anchor_data_hash {
+            op["anchor_data_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn delegate_voting_power_to(
+        &mut self,
+        address: &str,
+        drep_type: &str,
+        drep_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op =
+            json!({"type": "delegate_voting_power_to", "address": address, "drep_type": drep_type});
+        if let Some(h) = drep_hash {
+            op["drep_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn create_vote(
+        &mut self,
+        voter_type: &str,
+        voter_hash: &str,
+        gov_action_tx_hash: &str,
+        gov_action_index: u32,
+        vote: &str,
+        anchor_url: Option<&str>,
+        anchor_data_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "create_vote",
+            "voter_type": voter_type,
+            "voter_hash": voter_hash,
+            "gov_action_tx_hash": gov_action_tx_hash,
+            "gov_action_index": gov_action_index,
+            "vote": vote,
+        });
+        if let Some(u) = anchor_url {
+            op["anchor_url"] = json!(u);
+        }
+        if let Some(h) = anchor_data_hash {
+            op["anchor_data_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn create_proposal(
+        &mut self,
+        gov_action_type: &str,
+        return_address: &str,
+        anchor_url: &str,
+        anchor_data_hash: &str,
+        withdrawals: Option<&[ProposalWithdrawal]>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "create_proposal",
+            "gov_action_type": gov_action_type,
+            "return_address": return_address,
+            "anchor_url": anchor_url,
+            "anchor_data_hash": anchor_data_hash,
+        });
+        if let Some(w) = withdrawals {
+            op["withdrawals"] = serde_json::to_value(w).unwrap_or_default();
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn from(&mut self, address: &str) -> &mut Self {
+        self.from = Some(address.to_string());
+        self
+    }
+
+    pub fn change_address(&mut self, address: &str) -> &mut Self {
+        self.change_address = Some(address.to_string());
+        self
+    }
+
+    fn to_spec(&self) -> Value {
+        let mut spec = json!({
+            "from": self.from,
+            "operations": self.operations,
+        });
+        if let Some(ref ca) = self.change_address {
+            spec["change_address"] = json!(ca);
+        }
+        spec
+    }
+}
+
+/// Builder for composing multiple Tx objects into a single transaction.
+pub struct ComposeTxBuilder<'a> {
+    bridge: &'a Bridge,
+    txs: Vec<Tx>,
+    fee_payer: Option<String>,
+    utxos: Option<Value>,
+    protocol_params: Option<Value>,
+    validity: serde_json::Map<String, Value>,
+    merge_outputs: Option<bool>,
+    signer_count: Option<i32>,
+}
+
+impl<'a> ComposeTxBuilder<'a> {
+    pub fn fee_payer(&mut self, address: &str) -> &mut Self {
+        self.fee_payer = Some(address.to_string());
+        self
+    }
+
+    pub fn with_utxos(&mut self, utxos: Value) -> &mut Self {
+        self.utxos = Some(utxos);
+        self
+    }
+
+    pub fn with_protocol_params(&mut self, params: Value) -> &mut Self {
+        self.protocol_params = Some(params);
+        self
+    }
+
+    pub fn valid_from(&mut self, slot: u64) -> &mut Self {
+        self.validity
+            .insert("valid_from".to_string(), json!(slot));
+        self
+    }
+
+    pub fn valid_to(&mut self, slot: u64) -> &mut Self {
+        self.validity.insert("valid_to".to_string(), json!(slot));
+        self
+    }
+
+    pub fn merge_outputs(&mut self, merge: bool) -> &mut Self {
+        self.merge_outputs = Some(merge);
+        self
+    }
+
+    pub fn signer_count(&mut self, count: i32) -> &mut Self {
+        self.signer_count = Some(count);
+        self
+    }
+
+    /// Build the composed transaction.
+    pub fn build(&self) -> Result<TxResult> {
+        self.do_build(None)
+    }
+
+    /// Build with a Java-side provider config.
+    pub fn build_with_provider(&self, config: &ProviderConfig) -> Result<TxResult> {
+        self.do_build(Some(config))
+    }
+
+    fn do_build(&self, provider_config: Option<&ProviderConfig>) -> Result<TxResult> {
+        let tx_specs: Vec<Value> = self.txs.iter().map(|tx| tx.to_spec()).collect();
+
+        let mut spec = json!({
+            "transactions": tx_specs,
+            "fee_payer": self.fee_payer,
+        });
+
+        if let Some(pc) = provider_config {
+            spec["provider"] = serde_json::to_value(pc).unwrap_or_default();
+        } else if let Some(ref u) = self.utxos {
+            spec["utxos"] = u.clone();
+        }
+        if let Some(ref pp) = self.protocol_params {
+            spec["protocol_params"] = pp.clone();
+        }
+        if let Some(sc) = self.signer_count {
+            spec["signer_count"] = json!(sc);
+        }
+        if !self.validity.is_empty() {
+            spec["validity"] = Value::Object(self.validity.clone());
+        }
+        if let Some(m) = self.merge_outputs {
+            spec["merge_outputs"] = json!(m);
+        }
+
+        let spec_json = serde_json::to_string(&spec).map_err(|e| CclError {
+            code: error_codes::CCL_ERROR_SERIALIZATION,
+            message: format!("Failed to serialize compose spec: {}", e),
+        })?;
+
+        let cs = to_cstring(&spec_json)?;
+        let rc = unsafe { ffi::ccl_quicktx_build(self.bridge.thread, cs.as_ptr()) };
+        let result = self.bridge.check(rc)?;
+
+        serde_json::from_str(&result).map_err(|e| CclError {
+            code: error_codes::CCL_ERROR_SERIALIZATION,
+            message: format!("Failed to parse tx result: {}", e),
+        })
     }
 }

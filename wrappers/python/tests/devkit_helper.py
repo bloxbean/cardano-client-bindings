@@ -1,0 +1,88 @@
+"""Yaci DevKit HTTP helper for integration tests.
+
+Uses only stdlib (urllib) - no external dependencies required.
+"""
+import json
+import time
+import urllib.request
+import urllib.error
+
+DEVKIT_URL = "http://localhost:10000/local-cluster/api"
+
+
+class DevKitHelper:
+    """Helper class for interacting with Yaci DevKit local cluster."""
+
+    def __init__(self, base_url=DEVKIT_URL):
+        self.base_url = base_url
+
+    def reset(self):
+        """Reset the devnet to initial state."""
+        req = urllib.request.Request(
+            f"{self.base_url}/admin/devnet/reset",
+            method="POST",
+            data=b"",
+        )
+        with urllib.request.urlopen(req) as resp:
+            return resp.status
+
+    def topup(self, address, ada_amount=100):
+        """Fund an address with ADA."""
+        data = json.dumps({"address": address, "adaAmount": ada_amount}).encode()
+        req = urllib.request.Request(
+            f"{self.base_url}/addresses/topup",
+            method="POST",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+
+    def get_utxos(self, address):
+        """Fetch UTXOs for an address."""
+        url = f"{self.base_url}/addresses/{address}/utxos"
+        with urllib.request.urlopen(url) as resp:
+            return json.loads(resp.read())
+
+    def get_protocol_params(self):
+        """Fetch current protocol parameters."""
+        url = f"{self.base_url}/epochs/parameters"
+        with urllib.request.urlopen(url) as resp:
+            return json.loads(resp.read())
+
+    def submit_tx(self, tx_cbor_hex):
+        """Submit a signed transaction (CBOR hex string).
+
+        Converts hex to raw bytes and POSTs as application/cbor.
+        """
+        tx_bytes = bytes.fromhex(tx_cbor_hex)
+        req = urllib.request.Request(
+            f"{self.base_url}/tx/submit",
+            method="POST",
+            data=tx_bytes,
+            headers={"Content-Type": "application/cbor"},
+        )
+        with urllib.request.urlopen(req) as resp:
+            return resp.read().decode("utf-8").strip().strip('"')
+
+    def get_tx(self, tx_hash):
+        """Get transaction details by hash."""
+        url = f"{self.base_url}/txs/{tx_hash}"
+        with urllib.request.urlopen(url) as resp:
+            return json.loads(resp.read())
+
+    def wait_for_block(self, seconds=2):
+        """Wait for a new block to be produced."""
+        time.sleep(seconds)
+
+    def is_available(self):
+        """Check if DevKit is running."""
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/admin/devnet",
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status == 200
+        except (urllib.error.URLError, OSError):
+            return False

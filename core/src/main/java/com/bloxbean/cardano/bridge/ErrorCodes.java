@@ -11,6 +11,7 @@ public final class ErrorCodes {
     public static final int CCL_ERROR_INVALID_ADDRESS = -7;
     public static final int CCL_ERROR_INSUFFICIENT_FUNDS = -8;
     public static final int CCL_ERROR_INVALID_TRANSACTION = -9;
+    public static final int CCL_ERROR_TX_BUILD = -10;
 
     private ErrorCodes() {}
 }

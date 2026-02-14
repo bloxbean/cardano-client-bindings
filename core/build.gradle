@@ -11,6 +11,7 @@ dependencies {
     implementation "com.bloxbean.cardano:cardano-client-function:${cclVersion}"
     implementation "com.bloxbean.cardano:cardano-client-hd-wallet:${cclVersion}"
     implementation "com.bloxbean.cardano:cardano-client-governance:${cclVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-quicktx:${cclVersion}"
 
     // CCL CIP modules
     implementation "com.bloxbean.cardano:cardano-client-cip8:${cclVersion}"
@@ -44,6 +45,7 @@ graalvmNative {
                 '--initialize-at-build-time=net.i2p.crypto.eddsa',
                 '--initialize-at-build-time=com.fasterxml.jackson',
                 '--initialize-at-build-time=co.nstant.in.cbor',
+                '--enable-url-protocols=http,https',
             )
         }
     }
