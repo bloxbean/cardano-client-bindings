@@ -12,22 +12,23 @@ import com.bloxbean.cardano.client.plutus.spec.PlutusV1Script;
 import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script;
 import com.bloxbean.cardano.client.plutus.spec.PlutusV3Script;
 import com.bloxbean.cardano.client.quicktx.ScriptTx;
+import com.bloxbean.cardano.client.spec.UnitInterval;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
+import com.bloxbean.cardano.client.transaction.spec.ProtocolVersion;
+import com.bloxbean.cardano.client.transaction.spec.Withdrawal;
 import com.bloxbean.cardano.client.transaction.spec.governance.Anchor;
+import com.bloxbean.cardano.client.transaction.spec.governance.Constitution;
 import com.bloxbean.cardano.client.transaction.spec.governance.DRep;
 import com.bloxbean.cardano.client.transaction.spec.governance.Vote;
 import com.bloxbean.cardano.client.transaction.spec.governance.Voter;
 import com.bloxbean.cardano.client.transaction.spec.governance.VoterType;
-import com.bloxbean.cardano.client.transaction.spec.governance.actions.GovActionId;
-import com.bloxbean.cardano.client.transaction.spec.governance.actions.InfoAction;
-import com.bloxbean.cardano.client.transaction.spec.governance.actions.TreasuryWithdrawalsAction;
-import com.bloxbean.cardano.client.transaction.spec.Withdrawal;
+import com.bloxbean.cardano.client.transaction.spec.governance.actions.*;
+import com.bloxbean.cardano.client.spec.Script;
+import com.bloxbean.cardano.client.transaction.spec.script.NativeScript;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Maps a TxSpec/TxItemSpec (parsed from JSON) into a CCL ScriptTx object.
@@ -135,6 +136,10 @@ public class ScriptTxSpecMapper {
                 case "create_proposal":
                     applyCreateProposal(tx, op);
                     break;
+                // Treasury donation (Gap 4)
+                case "donate_to_treasury":
+                    applyDonateToTreasury(tx, op);
+                    break;
                 case "mint_assets":
                     throw new IllegalArgumentException(
                             "Use 'mint_plutus_assets' instead of 'mint_assets' in script_tx mode");
@@ -151,7 +156,12 @@ public class ScriptTxSpecMapper {
         if (op.getAmounts() == null || op.getAmounts().isEmpty()) {
             throw new IllegalArgumentException("pay_to_address requires 'amounts'");
         }
-        tx.payToAddress(op.getAddress(), op.getAmounts());
+        if (op.getScriptRefCborHex() != null && !op.getScriptRefCborHex().isEmpty()) {
+            Script refScript = parseScriptRef(op.getScriptRefCborHex(), op.getScriptRefType());
+            tx.payToAddress(op.getAddress(), op.getAmounts(), refScript);
+        } else {
+            tx.payToAddress(op.getAddress(), op.getAmounts());
+        }
     }
 
     private static void applyPayToContract(ScriptTx tx, TxOperation op) {
@@ -162,9 +172,18 @@ public class ScriptTxSpecMapper {
             throw new IllegalArgumentException("pay_to_contract requires 'amounts'");
         }
 
+        Script refScript = null;
+        if (op.getScriptRefCborHex() != null && !op.getScriptRefCborHex().isEmpty()) {
+            refScript = parseScriptRef(op.getScriptRefCborHex(), op.getScriptRefType());
+        }
+
         if (op.getDatumCborHex() != null && !op.getDatumCborHex().isEmpty()) {
             PlutusData datum = parseRedeemer(op.getDatumCborHex());
-            tx.payToContract(op.getAddress(), op.getAmounts(), datum);
+            if (refScript != null) {
+                tx.payToContract(op.getAddress(), op.getAmounts(), datum, refScript);
+            } else {
+                tx.payToContract(op.getAddress(), op.getAmounts(), datum);
+            }
         } else if (op.getDatumHash() != null && !op.getDatumHash().isEmpty()) {
             tx.payToContract(op.getAddress(), op.getAmounts(), op.getDatumHash());
         } else {
@@ -424,8 +443,10 @@ public class ScriptTxSpecMapper {
         Credential credential = parseCredential(op.getCredentialHash(), op.getCredentialType());
         PlutusData redeemer = parseRedeemer(op.getRedeemerCborHex());
         String refundAddress = op.getRefundAddress() != null ? op.getRefundAddress() : null;
+        BigInteger refundAmount = op.getRefundAmount() != null && !op.getRefundAmount().isEmpty()
+                ? new BigInteger(op.getRefundAmount()) : null;
 
-        tx.unRegisterDRep(credential, refundAddress, redeemer);
+        tx.unRegisterDRep(credential, refundAddress, refundAmount, redeemer);
     }
 
     private static void applyUpdateDRep(ScriptTx tx, TxOperation op) {
@@ -528,13 +549,118 @@ public class ScriptTxSpecMapper {
                 tx.createProposal(action, op.getReturnAddress(), anchor, redeemer);
                 break;
             }
+            case "no_confidence": {
+                NoConfidence.NoConfidenceBuilder builder = NoConfidence.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor, redeemer);
+                break;
+            }
+            case "update_committee": {
+                UpdateCommittee.UpdateCommitteeBuilder builder = UpdateCommittee.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                if (op.getMembersToRemove() != null) {
+                    Set<Credential> removals = new LinkedHashSet<>();
+                    for (Map<String, String> m : op.getMembersToRemove()) {
+                        removals.add(parseCredential(m.get("hash"), m.get("type")));
+                    }
+                    builder.membersForRemoval(removals);
+                }
+                if (op.getNewMembers() != null) {
+                    Map<Credential, Integer> newMembersMap = new LinkedHashMap<>();
+                    for (Map<String, Object> m : op.getNewMembers()) {
+                        Credential cred = parseCredential((String) m.get("hash"), (String) m.get("type"));
+                        int epoch = ((Number) m.get("epoch")).intValue();
+                        newMembersMap.put(cred, epoch);
+                    }
+                    builder.newMembersAndTerms(newMembersMap);
+                }
+                if (op.getQuorumNumerator() != null && op.getQuorumDenominator() != null) {
+                    builder.quorumThreshold(new UnitInterval(
+                            new BigInteger(op.getQuorumNumerator()),
+                            new BigInteger(op.getQuorumDenominator())));
+                }
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor, redeemer);
+                break;
+            }
+            case "new_constitution": {
+                NewConstitution.NewConstitutionBuilder builder = NewConstitution.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                Anchor constitutionAnchor = parseAnchor(op.getConstitutionAnchorUrl(), op.getConstitutionAnchorDataHash());
+                Constitution.ConstitutionBuilder cBuilder = Constitution.builder();
+                if (constitutionAnchor != null) cBuilder.anchor(constitutionAnchor);
+                if (op.getConstitutionScriptHash() != null) cBuilder.scripthash(op.getConstitutionScriptHash());
+                builder.constitution(cBuilder.build());
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor, redeemer);
+                break;
+            }
+            case "hard_fork_initiation": {
+                HardForkInitiationAction.HardForkInitiationActionBuilder builder = HardForkInitiationAction.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                if (op.getProtocolVersionMajor() == null || op.getProtocolVersionMinor() == null) {
+                    throw new IllegalArgumentException(
+                            "hard_fork_initiation requires 'protocol_version_major' and 'protocol_version_minor'");
+                }
+                builder.protocolVersion(new ProtocolVersion(op.getProtocolVersionMajor(), op.getProtocolVersionMinor()));
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor, redeemer);
+                break;
+            }
+            case "parameter_change": {
+                ParameterChangeAction.ParameterChangeActionBuilder builder = ParameterChangeAction.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                if (op.getPolicyHash() != null && !op.getPolicyHash().isEmpty()) {
+                    builder.policyHash(HexUtil.decodeHexString(op.getPolicyHash()));
+                }
+                if (op.getProtocolParamUpdateJson() != null && !op.getProtocolParamUpdateJson().isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "parameter_change protocol_param_update_json is not yet supported. " +
+                            "Use the raw transaction builder for parameter change proposals.");
+                }
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor, redeemer);
+                break;
+            }
             default:
                 throw new IllegalArgumentException(
                         "Unsupported gov_action_type: " + op.getGovActionType());
         }
     }
 
+    // --- Treasury donation (Gap 4) ---
+
+    private static void applyDonateToTreasury(ScriptTx tx, TxOperation op) {
+        if (op.getTreasuryValue() == null) {
+            throw new IllegalArgumentException("donate_to_treasury requires 'treasury_value'");
+        }
+        if (op.getDonationAmount() == null) {
+            throw new IllegalArgumentException("donate_to_treasury requires 'donation_amount'");
+        }
+        tx.donateToTreasury(new BigInteger(op.getTreasuryValue()), new BigInteger(op.getDonationAmount()));
+    }
+
     // --- Helper methods ---
+
+    private static GovActionId parsePrevGovActionId(String txHash, Integer index) {
+        if (txHash == null || txHash.isEmpty()) return null;
+        return new GovActionId(txHash, index != null ? index : 0);
+    }
+
+    private static Script parseScriptRef(String cborHex, String scriptRefType) {
+        if (scriptRefType == null || scriptRefType.isEmpty()) {
+            throw new IllegalArgumentException("script_ref_type is required when script_ref_cbor_hex is provided. " +
+                    "Supported: plutus_v1, plutus_v2, plutus_v3");
+        }
+        return switch (scriptRefType.toLowerCase()) {
+            case "plutus_v1" -> PlutusV1Script.builder().cborHex(cborHex).build();
+            case "plutus_v2" -> PlutusV2Script.builder().cborHex(cborHex).build();
+            case "plutus_v3" -> PlutusV3Script.builder().cborHex(cborHex).build();
+            default -> throw new IllegalArgumentException("Unsupported script_ref_type: " + scriptRefType
+                    + ". Supported: plutus_v1, plutus_v2, plutus_v3");
+        };
+    }
 
     static PlutusScript parsePlutusScript(String cborHex, String type) {
         return switch (type.toLowerCase()) {

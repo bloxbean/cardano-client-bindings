@@ -114,9 +114,39 @@ export interface ProviderConfig {
     enableCostEvaluation?: boolean;
 }
 
+export interface ProposalOptions {
+    withdrawals?: Array<{ reward_address: string; amount: string }>;
+    govActionTxHash?: string;
+    govActionIndex?: number;
+    membersToRemove?: string[];
+    newMembers?: Record<string, number>;
+    quorumNumerator?: number;
+    quorumDenominator?: number;
+    constitutionAnchorUrl?: string;
+    constitutionAnchorDataHash?: string;
+    constitutionScriptHash?: string;
+    protocolVersionMajor?: number;
+    protocolVersionMinor?: number;
+    policyHash?: string;
+}
+
+export interface PoolOptions {
+    relays?: Array<{ type: string; ipv4?: string; ipv6?: string; port?: number; dns_name?: string }>;
+    poolMetadataUrl?: string;
+    poolMetadataHash?: string;
+}
+
+export interface Relay {
+    type: string;
+    ipv4?: string;
+    ipv6?: string;
+    port?: number;
+    dns_name?: string;
+}
+
 export declare class TxBuilder {
-    payToAddress(address: string, ...amounts: AmountSpec[]): TxBuilder;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): TxBuilder;
+    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): TxBuilder;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): TxBuilder;
     mintAssets(scriptJson: string | object, assets: Array<{ name: string; quantity: string }>, receiver: string): TxBuilder;
     attachMetadata(label: number, metadata: any): TxBuilder;
     collectFrom(utxos: any[]): TxBuilder;
@@ -127,13 +157,21 @@ export declare class TxBuilder {
     withdraw(rewardAddress: string, amount: string | number, receiver?: string | null): TxBuilder;
     // DRep
     registerDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
-    unregisterDRep(credentialHash: string, credentialType?: string, refundAddress?: string | null): TxBuilder;
+    unregisterDRep(credentialHash: string, credentialType?: string, options?: { refundAddress?: string; refundAmount?: string | number }): TxBuilder;
     updateDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
     // Voting
     delegateVotingPowerTo(address: string, drepType: string, drepHash?: string | null): TxBuilder;
     createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
     // Governance
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): TxBuilder;
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: ProposalOptions): TxBuilder;
+    // Pool operations
+    registerPool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): TxBuilder;
+    updatePool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): TxBuilder;
+    retirePool(poolId: string, epoch: number): TxBuilder;
+    // Treasury donation
+    donateToTreasury(treasuryValue: string | number, donationAmount: string | number): TxBuilder;
+    // Native script
+    attachNativeScript(scriptJson: string | object): TxBuilder;
     from(address: string): TxBuilder;
     changeAddress(address: string): TxBuilder;
     feePayer(address: string): TxBuilder;
@@ -148,8 +186,8 @@ export declare class TxBuilder {
 }
 
 export declare class Tx {
-    payToAddress(address: string, ...amounts: AmountSpec[]): Tx;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): Tx;
+    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): Tx;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): Tx;
     mintAssets(scriptJson: string | object, assets: Array<{ name: string; quantity: string }>, receiver: string): Tx;
     attachMetadata(label: number, metadata: any): Tx;
     collectFrom(utxos: any[]): Tx;
@@ -160,13 +198,21 @@ export declare class Tx {
     withdraw(rewardAddress: string, amount: string | number, receiver?: string | null): Tx;
     // DRep
     registerDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
-    unregisterDRep(credentialHash: string, credentialType?: string, refundAddress?: string | null): Tx;
+    unregisterDRep(credentialHash: string, credentialType?: string, options?: { refundAddress?: string; refundAmount?: string | number }): Tx;
     updateDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
     // Voting
     delegateVotingPowerTo(address: string, drepType: string, drepHash?: string | null): Tx;
     createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
     // Governance
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): Tx;
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: ProposalOptions): Tx;
+    // Pool operations
+    registerPool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): Tx;
+    updatePool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): Tx;
+    retirePool(poolId: string, epoch: number): Tx;
+    // Treasury donation
+    donateToTreasury(treasuryValue: string | number, donationAmount: string | number): Tx;
+    // Native script
+    attachNativeScript(scriptJson: string | object): Tx;
     from(address: string): Tx;
     changeAddress(address: string): Tx;
 }
@@ -184,8 +230,8 @@ export declare class ComposeTxBuilder {
 }
 
 export declare class ScriptTxBuilder {
-    payToAddress(address: string, ...amounts: AmountSpec[]): ScriptTxBuilder;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): ScriptTxBuilder;
+    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): ScriptTxBuilder;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): ScriptTxBuilder;
     attachMetadata(label: number, metadata: any): ScriptTxBuilder;
     collectFrom(utxos: any[]): ScriptTxBuilder;
     collectFromScript(utxos: any[], redeemerCborHex: string, datumCborHex?: string | null): ScriptTxBuilder;
@@ -202,13 +248,15 @@ export declare class ScriptTxBuilder {
     withdraw(rewardAddress: string, amount: string | number, redeemerCborHex: string, receiver?: string | null): ScriptTxBuilder;
     // DRep (with redeemer)
     registerDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
-    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTxBuilder;
+    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { refundAddress?: string; refundAmount?: string | number }): ScriptTxBuilder;
     updateDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
     // Voting (with redeemer)
     delegateVotingPowerTo(address: string, drepType: string, drepHash: string, redeemerCborHex: string): ScriptTxBuilder;
     createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
     // Governance (with redeemer)
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): ScriptTxBuilder;
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: ProposalOptions): ScriptTxBuilder;
+    // Treasury donation (with redeemer)
+    donateToTreasury(treasuryValue: string | number, donationAmount: string | number, redeemerCborHex: string): ScriptTxBuilder;
     from(address: string): ScriptTxBuilder;
     changeAddress(address: string): ScriptTxBuilder;
     changeDatum(datumCborHex: string): ScriptTxBuilder;
@@ -225,8 +273,8 @@ export declare class ScriptTxBuilder {
 }
 
 export declare class ScriptTx {
-    payToAddress(address: string, ...amounts: AmountSpec[]): ScriptTx;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): ScriptTx;
+    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): ScriptTx;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): ScriptTx;
     attachMetadata(label: number, metadata: any): ScriptTx;
     collectFrom(utxos: any[]): ScriptTx;
     collectFromScript(utxos: any[], redeemerCborHex: string, datumCborHex?: string | null): ScriptTx;
@@ -243,13 +291,15 @@ export declare class ScriptTx {
     withdraw(rewardAddress: string, amount: string | number, redeemerCborHex: string, receiver?: string | null): ScriptTx;
     // DRep (with redeemer)
     registerDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
-    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTx;
+    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { refundAddress?: string; refundAmount?: string | number }): ScriptTx;
     updateDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
     // Voting (with redeemer)
     delegateVotingPowerTo(address: string, drepType: string, drepHash: string, redeemerCborHex: string): ScriptTx;
     createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
     // Governance (with redeemer)
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): ScriptTx;
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: ProposalOptions): ScriptTx;
+    // Treasury donation (with redeemer)
+    donateToTreasury(treasuryValue: string | number, donationAmount: string | number, redeemerCborHex: string): ScriptTx;
     from(address: string): ScriptTx;
     changeAddress(address: string): ScriptTx;
     changeDatum(datumCborHex: string): ScriptTx;

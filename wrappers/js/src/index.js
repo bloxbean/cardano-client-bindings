@@ -401,16 +401,28 @@ export class TxBuilder {
     this._signerCount = 1;
   }
 
-  payToAddress(address, ...amounts) {
-    this._operations.push({
+  payToAddress(address, ...args) {
+    let amounts = args;
+    let options = {};
+    if (args.length > 0) {
+      const last = args[args.length - 1];
+      if (last && typeof last === 'object' && !last.unit) {
+        options = args[args.length - 1];
+        amounts = args.slice(0, -1);
+      }
+    }
+    const op = {
       type: 'pay_to_address',
       address,
       amounts: [...amounts],
-    });
+    };
+    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
+    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
+    this._operations.push(op);
     return this;
   }
 
-  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
     const op = {
       type: 'pay_to_contract',
       address,
@@ -418,6 +430,8 @@ export class TxBuilder {
     };
     if (datumCborHex) op.datum_cbor_hex = datumCborHex;
     if (datumHash) op.datum_hash = datumHash;
+    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
+    if (scriptRefType) op.script_ref_type = scriptRefType;
     this._operations.push(op);
     return this;
   }
@@ -483,9 +497,10 @@ export class TxBuilder {
     return this;
   }
 
-  unregisterDRep(credentialHash, credentialType = 'key', refundAddress = null) {
+  unregisterDRep(credentialHash, credentialType = 'key', { refundAddress, refundAmount } = {}) {
     const op = { type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType };
     if (refundAddress) op.refund_address = refundAddress;
+    if (refundAmount != null) op.refund_amount = String(refundAmount);
     this._operations.push(op);
     return this;
   }
@@ -524,7 +539,74 @@ export class TxBuilder {
       return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
     };
     if (options.withdrawals) op.withdrawals = options.withdrawals;
+    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
+    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
+    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
+    if (options.newMembers) op.new_members = options.newMembers;
+    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
+    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
+    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
+    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
+    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
+    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
+    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
+    if (options.policyHash) op.policy_hash = options.policyHash;
     this._operations.push(op);
+    return this;
+  }
+
+  // Pool operations
+  registerPool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
+               rewardAddress, poolOwners, options = {}) {
+    const op = {
+      type: 'register_pool', operator, vrf_key_hash: vrfKeyHash,
+      pledge: String(pledge), cost: String(cost),
+      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
+      reward_address: rewardAddress, pool_owners: poolOwners,
+    };
+    if (options.relays) op.relays = options.relays;
+    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
+    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  updatePool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
+             rewardAddress, poolOwners, options = {}) {
+    const op = {
+      type: 'update_pool', operator, vrf_key_hash: vrfKeyHash,
+      pledge: String(pledge), cost: String(cost),
+      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
+      reward_address: rewardAddress, pool_owners: poolOwners,
+    };
+    if (options.relays) op.relays = options.relays;
+    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
+    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  retirePool(poolId, epoch) {
+    this._operations.push({ type: 'retire_pool', pool_id: poolId, epoch });
+    return this;
+  }
+
+  // Treasury donation
+  donateToTreasury(treasuryValue, donationAmount) {
+    this._operations.push({
+      type: 'donate_to_treasury',
+      treasury_value: String(treasuryValue),
+      donation_amount: String(donationAmount),
+    });
+    return this;
+  }
+
+  // Native script attachment
+  attachNativeScript(scriptJson) {
+    this._operations.push({
+      type: 'attach_native_script',
+      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
+    });
     return this;
   }
 
@@ -618,16 +700,28 @@ export class Tx {
     this._changeAddress = null;
   }
 
-  payToAddress(address, ...amounts) {
-    this._operations.push({
+  payToAddress(address, ...args) {
+    let amounts = args;
+    let options = {};
+    if (args.length > 0) {
+      const last = args[args.length - 1];
+      if (last && typeof last === 'object' && !last.unit) {
+        options = args[args.length - 1];
+        amounts = args.slice(0, -1);
+      }
+    }
+    const op = {
       type: 'pay_to_address',
       address,
       amounts: [...amounts],
-    });
+    };
+    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
+    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
+    this._operations.push(op);
     return this;
   }
 
-  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
     const op = {
       type: 'pay_to_contract',
       address,
@@ -635,6 +729,8 @@ export class Tx {
     };
     if (datumCborHex) op.datum_cbor_hex = datumCborHex;
     if (datumHash) op.datum_hash = datumHash;
+    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
+    if (scriptRefType) op.script_ref_type = scriptRefType;
     this._operations.push(op);
     return this;
   }
@@ -700,9 +796,10 @@ export class Tx {
     return this;
   }
 
-  unregisterDRep(credentialHash, credentialType = 'key', refundAddress = null) {
+  unregisterDRep(credentialHash, credentialType = 'key', { refundAddress, refundAmount } = {}) {
     const op = { type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType };
     if (refundAddress) op.refund_address = refundAddress;
+    if (refundAmount != null) op.refund_amount = String(refundAmount);
     this._operations.push(op);
     return this;
   }
@@ -741,7 +838,74 @@ export class Tx {
       return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
     };
     if (options.withdrawals) op.withdrawals = options.withdrawals;
+    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
+    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
+    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
+    if (options.newMembers) op.new_members = options.newMembers;
+    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
+    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
+    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
+    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
+    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
+    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
+    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
+    if (options.policyHash) op.policy_hash = options.policyHash;
     this._operations.push(op);
+    return this;
+  }
+
+  // Pool operations
+  registerPool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
+               rewardAddress, poolOwners, options = {}) {
+    const op = {
+      type: 'register_pool', operator, vrf_key_hash: vrfKeyHash,
+      pledge: String(pledge), cost: String(cost),
+      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
+      reward_address: rewardAddress, pool_owners: poolOwners,
+    };
+    if (options.relays) op.relays = options.relays;
+    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
+    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  updatePool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
+             rewardAddress, poolOwners, options = {}) {
+    const op = {
+      type: 'update_pool', operator, vrf_key_hash: vrfKeyHash,
+      pledge: String(pledge), cost: String(cost),
+      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
+      reward_address: rewardAddress, pool_owners: poolOwners,
+    };
+    if (options.relays) op.relays = options.relays;
+    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
+    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  retirePool(poolId, epoch) {
+    this._operations.push({ type: 'retire_pool', pool_id: poolId, epoch });
+    return this;
+  }
+
+  // Treasury donation
+  donateToTreasury(treasuryValue, donationAmount) {
+    this._operations.push({
+      type: 'donate_to_treasury',
+      treasury_value: String(treasuryValue),
+      donation_amount: String(donationAmount),
+    });
+    return this;
+  }
+
+  // Native script attachment
+  attachNativeScript(scriptJson) {
+    this._operations.push({
+      type: 'attach_native_script',
+      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
+    });
     return this;
   }
 
@@ -873,16 +1037,28 @@ export class ScriptTxBuilder {
     this._changeDatumHash = null;
   }
 
-  payToAddress(address, ...amounts) {
-    this._operations.push({
+  payToAddress(address, ...args) {
+    let amounts = args;
+    let options = {};
+    if (args.length > 0) {
+      const last = args[args.length - 1];
+      if (last && typeof last === 'object' && !last.unit) {
+        options = args[args.length - 1];
+        amounts = args.slice(0, -1);
+      }
+    }
+    const op = {
       type: 'pay_to_address',
       address,
       amounts: [...amounts],
-    });
+    };
+    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
+    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
+    this._operations.push(op);
     return this;
   }
 
-  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
     const op = {
       type: 'pay_to_contract',
       address,
@@ -890,6 +1066,8 @@ export class ScriptTxBuilder {
     };
     if (datumCborHex) op.datum_cbor_hex = datumCborHex;
     if (datumHash) op.datum_hash = datumHash;
+    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
+    if (scriptRefType) op.script_ref_type = scriptRefType;
     this._operations.push(op);
     return this;
   }
@@ -1026,12 +1204,13 @@ export class ScriptTxBuilder {
     return this;
   }
 
-  unregisterDRep(credentialHash, credentialType, redeemerCborHex, refundAddress = null) {
+  unregisterDRep(credentialHash, credentialType, redeemerCborHex, { refundAddress, refundAmount } = {}) {
     const op = {
       type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType,
       redeemer_cbor_hex: redeemerCborHex,
     };
     if (refundAddress) op.refund_address = refundAddress;
+    if (refundAmount != null) op.refund_amount = String(refundAmount);
     this._operations.push(op);
     return this;
   }
@@ -1076,7 +1255,30 @@ export class ScriptTxBuilder {
       redeemer_cbor_hex: redeemerCborHex,
     };
     if (options.withdrawals) op.withdrawals = options.withdrawals;
+    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
+    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
+    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
+    if (options.newMembers) op.new_members = options.newMembers;
+    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
+    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
+    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
+    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
+    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
+    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
+    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
+    if (options.policyHash) op.policy_hash = options.policyHash;
     this._operations.push(op);
+    return this;
+  }
+
+  // Treasury donation (with redeemer)
+  donateToTreasury(treasuryValue, donationAmount, redeemerCborHex) {
+    this._operations.push({
+      type: 'donate_to_treasury',
+      treasury_value: String(treasuryValue),
+      donation_amount: String(donationAmount),
+      redeemer_cbor_hex: redeemerCborHex,
+    });
     return this;
   }
 
@@ -1185,16 +1387,28 @@ export class ScriptTx {
     this._changeDatumHash = null;
   }
 
-  payToAddress(address, ...amounts) {
-    this._operations.push({
+  payToAddress(address, ...args) {
+    let amounts = args;
+    let options = {};
+    if (args.length > 0) {
+      const last = args[args.length - 1];
+      if (last && typeof last === 'object' && !last.unit) {
+        options = args[args.length - 1];
+        amounts = args.slice(0, -1);
+      }
+    }
+    const op = {
       type: 'pay_to_address',
       address,
       amounts: [...amounts],
-    });
+    };
+    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
+    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
+    this._operations.push(op);
     return this;
   }
 
-  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
     const op = {
       type: 'pay_to_contract',
       address,
@@ -1202,6 +1416,8 @@ export class ScriptTx {
     };
     if (datumCborHex) op.datum_cbor_hex = datumCborHex;
     if (datumHash) op.datum_hash = datumHash;
+    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
+    if (scriptRefType) op.script_ref_type = scriptRefType;
     this._operations.push(op);
     return this;
   }
@@ -1338,12 +1554,13 @@ export class ScriptTx {
     return this;
   }
 
-  unregisterDRep(credentialHash, credentialType, redeemerCborHex, refundAddress = null) {
+  unregisterDRep(credentialHash, credentialType, redeemerCborHex, { refundAddress, refundAmount } = {}) {
     const op = {
       type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType,
       redeemer_cbor_hex: redeemerCborHex,
     };
     if (refundAddress) op.refund_address = refundAddress;
+    if (refundAmount != null) op.refund_amount = String(refundAmount);
     this._operations.push(op);
     return this;
   }
@@ -1388,7 +1605,30 @@ export class ScriptTx {
       redeemer_cbor_hex: redeemerCborHex,
     };
     if (options.withdrawals) op.withdrawals = options.withdrawals;
+    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
+    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
+    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
+    if (options.newMembers) op.new_members = options.newMembers;
+    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
+    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
+    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
+    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
+    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
+    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
+    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
+    if (options.policyHash) op.policy_hash = options.policyHash;
     this._operations.push(op);
+    return this;
+  }
+
+  // Treasury donation (with redeemer)
+  donateToTreasury(treasuryValue, donationAmount, redeemerCborHex) {
+    this._operations.push({
+      type: 'donate_to_treasury',
+      treasury_value: String(treasuryValue),
+      donation_amount: String(donationAmount),
+      redeemer_cbor_hex: redeemerCborHex,
+    });
     return this;
   }
 

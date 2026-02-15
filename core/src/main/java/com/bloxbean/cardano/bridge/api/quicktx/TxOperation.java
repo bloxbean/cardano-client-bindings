@@ -108,6 +108,92 @@ public class TxOperation {
     @JsonProperty("withdrawals")
     private List<Map<String, String>> withdrawals;
 
+    // Reference script on outputs (Gap 1)
+    @JsonProperty("script_ref_cbor_hex")
+    private String scriptRefCborHex;
+
+    @JsonProperty("script_ref_type")
+    private String scriptRefType;
+
+    // Pool operations (Gap 3)
+    @JsonProperty("operator")
+    private String operator;
+
+    @JsonProperty("vrf_key_hash")
+    private String vrfKeyHash;
+
+    @JsonProperty("pledge")
+    private String pledge;
+
+    @JsonProperty("cost")
+    private String cost;
+
+    @JsonProperty("margin_numerator")
+    private String marginNumerator;
+
+    @JsonProperty("margin_denominator")
+    private String marginDenominator;
+
+    @JsonProperty("pool_owners")
+    private List<String> poolOwners;
+
+    @JsonProperty("relays")
+    private List<Map<String, Object>> relays;
+
+    @JsonProperty("pool_metadata_url")
+    private String poolMetadataUrl;
+
+    @JsonProperty("pool_metadata_hash")
+    private String poolMetadataHash;
+
+    @JsonProperty("epoch")
+    private Integer epoch;
+
+    // Treasury donation (Gap 4)
+    @JsonProperty("treasury_value")
+    private String treasuryValue;
+
+    @JsonProperty("donation_amount")
+    private String donationAmount;
+
+    // Governance additional fields (Gap 2)
+    @JsonProperty("members_to_remove")
+    private List<Map<String, String>> membersToRemove;
+
+    @JsonProperty("new_members")
+    private List<Map<String, Object>> newMembers;
+
+    @JsonProperty("quorum_numerator")
+    private String quorumNumerator;
+
+    @JsonProperty("quorum_denominator")
+    private String quorumDenominator;
+
+    @JsonProperty("constitution_anchor_url")
+    private String constitutionAnchorUrl;
+
+    @JsonProperty("constitution_anchor_data_hash")
+    private String constitutionAnchorDataHash;
+
+    @JsonProperty("constitution_script_hash")
+    private String constitutionScriptHash;
+
+    @JsonProperty("protocol_version_major")
+    private Integer protocolVersionMajor;
+
+    @JsonProperty("protocol_version_minor")
+    private Integer protocolVersionMinor;
+
+    @JsonProperty("protocol_param_update_json")
+    private String protocolParamUpdateJson;
+
+    @JsonProperty("policy_hash")
+    private String policyHash;
+
+    // DRep unregister refund amount (Gap 6)
+    @JsonProperty("refund_amount")
+    private String refundAmount;
+
     // ScriptTx fields
     @JsonProperty("redeemer_cbor_hex")
     private String redeemerCborHex;
@@ -225,6 +311,92 @@ public class TxOperation {
 
     public String getOutputDatumCborHex() { return outputDatumCborHex; }
     public void setOutputDatumCborHex(String outputDatumCborHex) { this.outputDatumCborHex = outputDatumCborHex; }
+
+    // Gap 1: Reference script
+    public String getScriptRefCborHex() { return scriptRefCborHex; }
+    public void setScriptRefCborHex(String scriptRefCborHex) { this.scriptRefCborHex = scriptRefCborHex; }
+
+    public String getScriptRefType() { return scriptRefType; }
+    public void setScriptRefType(String scriptRefType) { this.scriptRefType = scriptRefType; }
+
+    // Gap 3: Pool operations
+    public String getOperator() { return operator; }
+    public void setOperator(String operator) { this.operator = operator; }
+
+    public String getVrfKeyHash() { return vrfKeyHash; }
+    public void setVrfKeyHash(String vrfKeyHash) { this.vrfKeyHash = vrfKeyHash; }
+
+    public String getPledge() { return pledge; }
+    public void setPledge(String pledge) { this.pledge = pledge; }
+
+    public String getCost() { return cost; }
+    public void setCost(String cost) { this.cost = cost; }
+
+    public String getMarginNumerator() { return marginNumerator; }
+    public void setMarginNumerator(String marginNumerator) { this.marginNumerator = marginNumerator; }
+
+    public String getMarginDenominator() { return marginDenominator; }
+    public void setMarginDenominator(String marginDenominator) { this.marginDenominator = marginDenominator; }
+
+    public List<String> getPoolOwners() { return poolOwners; }
+    public void setPoolOwners(List<String> poolOwners) { this.poolOwners = poolOwners; }
+
+    public List<Map<String, Object>> getRelays() { return relays; }
+    public void setRelays(List<Map<String, Object>> relays) { this.relays = relays; }
+
+    public String getPoolMetadataUrl() { return poolMetadataUrl; }
+    public void setPoolMetadataUrl(String poolMetadataUrl) { this.poolMetadataUrl = poolMetadataUrl; }
+
+    public String getPoolMetadataHash() { return poolMetadataHash; }
+    public void setPoolMetadataHash(String poolMetadataHash) { this.poolMetadataHash = poolMetadataHash; }
+
+    public Integer getEpoch() { return epoch; }
+    public void setEpoch(Integer epoch) { this.epoch = epoch; }
+
+    // Gap 4: Treasury donation
+    public String getTreasuryValue() { return treasuryValue; }
+    public void setTreasuryValue(String treasuryValue) { this.treasuryValue = treasuryValue; }
+
+    public String getDonationAmount() { return donationAmount; }
+    public void setDonationAmount(String donationAmount) { this.donationAmount = donationAmount; }
+
+    // Gap 2: Additional governance
+    public List<Map<String, String>> getMembersToRemove() { return membersToRemove; }
+    public void setMembersToRemove(List<Map<String, String>> membersToRemove) { this.membersToRemove = membersToRemove; }
+
+    public List<Map<String, Object>> getNewMembers() { return newMembers; }
+    public void setNewMembers(List<Map<String, Object>> newMembers) { this.newMembers = newMembers; }
+
+    public String getQuorumNumerator() { return quorumNumerator; }
+    public void setQuorumNumerator(String quorumNumerator) { this.quorumNumerator = quorumNumerator; }
+
+    public String getQuorumDenominator() { return quorumDenominator; }
+    public void setQuorumDenominator(String quorumDenominator) { this.quorumDenominator = quorumDenominator; }
+
+    public String getConstitutionAnchorUrl() { return constitutionAnchorUrl; }
+    public void setConstitutionAnchorUrl(String constitutionAnchorUrl) { this.constitutionAnchorUrl = constitutionAnchorUrl; }
+
+    public String getConstitutionAnchorDataHash() { return constitutionAnchorDataHash; }
+    public void setConstitutionAnchorDataHash(String constitutionAnchorDataHash) { this.constitutionAnchorDataHash = constitutionAnchorDataHash; }
+
+    public String getConstitutionScriptHash() { return constitutionScriptHash; }
+    public void setConstitutionScriptHash(String constitutionScriptHash) { this.constitutionScriptHash = constitutionScriptHash; }
+
+    public Integer getProtocolVersionMajor() { return protocolVersionMajor; }
+    public void setProtocolVersionMajor(Integer protocolVersionMajor) { this.protocolVersionMajor = protocolVersionMajor; }
+
+    public Integer getProtocolVersionMinor() { return protocolVersionMinor; }
+    public void setProtocolVersionMinor(Integer protocolVersionMinor) { this.protocolVersionMinor = protocolVersionMinor; }
+
+    public String getProtocolParamUpdateJson() { return protocolParamUpdateJson; }
+    public void setProtocolParamUpdateJson(String protocolParamUpdateJson) { this.protocolParamUpdateJson = protocolParamUpdateJson; }
+
+    public String getPolicyHash() { return policyHash; }
+    public void setPolicyHash(String policyHash) { this.policyHash = policyHash; }
+
+    // Gap 6: DRep refund amount
+    public String getRefundAmount() { return refundAmount; }
+    public void setRefundAmount(String refundAmount) { this.refundAmount = refundAmount; }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ReferenceInput {

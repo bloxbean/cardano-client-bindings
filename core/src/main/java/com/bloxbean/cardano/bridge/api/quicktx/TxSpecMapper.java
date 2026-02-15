@@ -5,24 +5,35 @@ import com.bloxbean.cardano.client.metadata.cbor.CBORMetadata;
 import com.bloxbean.cardano.client.metadata.cbor.CBORMetadataList;
 import com.bloxbean.cardano.client.metadata.cbor.CBORMetadataMap;
 import com.bloxbean.cardano.client.plutus.spec.PlutusData;
+import com.bloxbean.cardano.client.plutus.spec.PlutusV1Script;
+import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script;
+import com.bloxbean.cardano.client.plutus.spec.PlutusV3Script;
 import com.bloxbean.cardano.client.quicktx.Tx;
+import com.bloxbean.cardano.client.spec.UnitInterval;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
+import com.bloxbean.cardano.client.transaction.spec.ProtocolVersion;
 import com.bloxbean.cardano.client.transaction.spec.Withdrawal;
+import com.bloxbean.cardano.client.transaction.spec.cert.PoolRegistration;
+import com.bloxbean.cardano.client.transaction.spec.cert.SingleHostAddr;
+import com.bloxbean.cardano.client.transaction.spec.cert.SingleHostName;
+import com.bloxbean.cardano.client.transaction.spec.cert.MultiHostName;
+import com.bloxbean.cardano.client.transaction.spec.cert.Relay;
 import com.bloxbean.cardano.client.transaction.spec.governance.Anchor;
+import com.bloxbean.cardano.client.transaction.spec.governance.Constitution;
 import com.bloxbean.cardano.client.transaction.spec.governance.DRep;
 import com.bloxbean.cardano.client.transaction.spec.governance.Vote;
 import com.bloxbean.cardano.client.transaction.spec.governance.Voter;
 import com.bloxbean.cardano.client.transaction.spec.governance.VoterType;
-import com.bloxbean.cardano.client.transaction.spec.governance.actions.GovActionId;
-import com.bloxbean.cardano.client.transaction.spec.governance.actions.InfoAction;
-import com.bloxbean.cardano.client.transaction.spec.governance.actions.TreasuryWithdrawalsAction;
+import com.bloxbean.cardano.client.transaction.spec.governance.actions.*;
+import com.bloxbean.cardano.client.spec.Script;
 import com.bloxbean.cardano.client.transaction.spec.script.NativeScript;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.UnknownHostException;
+import java.util.*;
 
 /**
  * Maps a TxSpec (parsed from JSON) into a CCL Tx object.
@@ -101,6 +112,24 @@ public class TxSpecMapper {
                 case "create_proposal":
                     applyCreateProposal(tx, op);
                     break;
+                // Pool operations (Gap 3)
+                case "register_pool":
+                    applyRegisterPool(tx, op);
+                    break;
+                case "update_pool":
+                    applyUpdatePool(tx, op);
+                    break;
+                case "retire_pool":
+                    applyRetirePool(tx, op);
+                    break;
+                // Treasury donation (Gap 4)
+                case "donate_to_treasury":
+                    applyDonateToTreasury(tx, op);
+                    break;
+                // Attach native script standalone (Gap 5)
+                case "attach_native_script":
+                    applyAttachNativeScript(tx, op);
+                    break;
                 default:
                     throw new IllegalArgumentException("Unknown operation type: " + op.getType());
             }
@@ -114,7 +143,12 @@ public class TxSpecMapper {
         if (op.getAmounts() == null || op.getAmounts().isEmpty()) {
             throw new IllegalArgumentException("pay_to_address requires 'amounts'");
         }
-        tx.payToAddress(op.getAddress(), op.getAmounts());
+        if (op.getScriptRefCborHex() != null && !op.getScriptRefCborHex().isEmpty()) {
+            Script refScript = parseScriptRef(op.getScriptRefCborHex(), op.getScriptRefType());
+            tx.payToAddress(op.getAddress(), op.getAmounts(), refScript);
+        } else {
+            tx.payToAddress(op.getAddress(), op.getAmounts());
+        }
     }
 
     private static void applyPayToContract(Tx tx, TxOperation op) {
@@ -125,6 +159,11 @@ public class TxSpecMapper {
             throw new IllegalArgumentException("pay_to_contract requires 'amounts'");
         }
 
+        Script refScript = null;
+        if (op.getScriptRefCborHex() != null && !op.getScriptRefCborHex().isEmpty()) {
+            refScript = parseScriptRef(op.getScriptRefCborHex(), op.getScriptRefType());
+        }
+
         if (op.getDatumCborHex() != null && !op.getDatumCborHex().isEmpty()) {
             PlutusData datum;
             try {
@@ -132,7 +171,11 @@ public class TxSpecMapper {
             } catch (Exception e) {
                 throw new IllegalArgumentException("Invalid datum CBOR: " + e.getMessage(), e);
             }
-            tx.payToContract(op.getAddress(), op.getAmounts(), datum);
+            if (refScript != null) {
+                tx.payToContract(op.getAddress(), op.getAmounts(), datum, refScript);
+            } else {
+                tx.payToContract(op.getAddress(), op.getAmounts(), datum);
+            }
         } else if (op.getDatumHash() != null && !op.getDatumHash().isEmpty()) {
             tx.payToContract(op.getAddress(), op.getAmounts(), op.getDatumHash());
         } else {
@@ -305,7 +348,10 @@ public class TxSpecMapper {
             throw new IllegalArgumentException("unregister_drep requires 'credential_hash'");
         }
         Credential credential = parseCredential(op.getCredentialHash(), op.getCredentialType());
-        if (op.getRefundAddress() != null && !op.getRefundAddress().isEmpty()) {
+        if (op.getRefundAmount() != null && !op.getRefundAmount().isEmpty()
+                && op.getRefundAddress() != null && !op.getRefundAddress().isEmpty()) {
+            tx.unregisterDRep(credential, op.getRefundAddress(), new BigInteger(op.getRefundAmount()));
+        } else if (op.getRefundAddress() != null && !op.getRefundAddress().isEmpty()) {
             tx.unregisterDRep(credential, op.getRefundAddress());
         } else {
             tx.unregisterDRep(credential);
@@ -401,13 +447,230 @@ public class TxSpecMapper {
                 tx.createProposal(action, op.getReturnAddress(), anchor);
                 break;
             }
+            case "no_confidence": {
+                NoConfidence.NoConfidenceBuilder builder = NoConfidence.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor);
+                break;
+            }
+            case "update_committee": {
+                UpdateCommittee.UpdateCommitteeBuilder builder = UpdateCommittee.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                if (op.getMembersToRemove() != null) {
+                    Set<Credential> removals = new LinkedHashSet<>();
+                    for (Map<String, String> m : op.getMembersToRemove()) {
+                        removals.add(parseCredential(m.get("hash"), m.get("type")));
+                    }
+                    builder.membersForRemoval(removals);
+                }
+                if (op.getNewMembers() != null) {
+                    Map<Credential, Integer> newMembersMap = new LinkedHashMap<>();
+                    for (Map<String, Object> m : op.getNewMembers()) {
+                        Credential cred = parseCredential((String) m.get("hash"), (String) m.get("type"));
+                        int epoch = ((Number) m.get("epoch")).intValue();
+                        newMembersMap.put(cred, epoch);
+                    }
+                    builder.newMembersAndTerms(newMembersMap);
+                }
+                if (op.getQuorumNumerator() != null && op.getQuorumDenominator() != null) {
+                    builder.quorumThreshold(new UnitInterval(
+                            new BigInteger(op.getQuorumNumerator()),
+                            new BigInteger(op.getQuorumDenominator())));
+                }
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor);
+                break;
+            }
+            case "new_constitution": {
+                NewConstitution.NewConstitutionBuilder builder = NewConstitution.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                Anchor constitutionAnchor = parseAnchor(op.getConstitutionAnchorUrl(), op.getConstitutionAnchorDataHash());
+                Constitution.ConstitutionBuilder cBuilder = Constitution.builder();
+                if (constitutionAnchor != null) cBuilder.anchor(constitutionAnchor);
+                if (op.getConstitutionScriptHash() != null) cBuilder.scripthash(op.getConstitutionScriptHash());
+                builder.constitution(cBuilder.build());
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor);
+                break;
+            }
+            case "hard_fork_initiation": {
+                HardForkInitiationAction.HardForkInitiationActionBuilder builder = HardForkInitiationAction.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                if (op.getProtocolVersionMajor() == null || op.getProtocolVersionMinor() == null) {
+                    throw new IllegalArgumentException(
+                            "hard_fork_initiation requires 'protocol_version_major' and 'protocol_version_minor'");
+                }
+                builder.protocolVersion(new ProtocolVersion(op.getProtocolVersionMajor(), op.getProtocolVersionMinor()));
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor);
+                break;
+            }
+            case "parameter_change": {
+                ParameterChangeAction.ParameterChangeActionBuilder builder = ParameterChangeAction.builder();
+                GovActionId prevId = parsePrevGovActionId(op.getGovActionTxHash(), op.getGovActionIndex());
+                if (prevId != null) builder.prevGovActionId(prevId);
+                if (op.getPolicyHash() != null && !op.getPolicyHash().isEmpty()) {
+                    builder.policyHash(HexUtil.decodeHexString(op.getPolicyHash()));
+                }
+                // ProtocolParamUpdate is complex — pass as CBOR hex if provided
+                if (op.getProtocolParamUpdateJson() != null && !op.getProtocolParamUpdateJson().isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "parameter_change protocol_param_update_json is not yet supported. " +
+                            "Use the raw transaction builder for parameter change proposals.");
+                }
+                tx.createProposal(builder.build(), op.getReturnAddress(), anchor);
+                break;
+            }
             default:
                 throw new IllegalArgumentException(
                         "Unsupported gov_action_type: " + op.getGovActionType());
         }
     }
 
+    // --- Pool operations (Gap 3) ---
+
+    private static void applyRegisterPool(Tx tx, TxOperation op) {
+        tx.registerPool(buildPoolRegistration(op));
+    }
+
+    private static void applyUpdatePool(Tx tx, TxOperation op) {
+        tx.updatePool(buildPoolRegistration(op));
+    }
+
+    private static PoolRegistration buildPoolRegistration(TxOperation op) {
+        if (op.getOperator() == null) throw new IllegalArgumentException("Pool operation requires 'operator'");
+        if (op.getVrfKeyHash() == null) throw new IllegalArgumentException("Pool operation requires 'vrf_key_hash'");
+        if (op.getPledge() == null) throw new IllegalArgumentException("Pool operation requires 'pledge'");
+        if (op.getCost() == null) throw new IllegalArgumentException("Pool operation requires 'cost'");
+        if (op.getMarginNumerator() == null || op.getMarginDenominator() == null) {
+            throw new IllegalArgumentException("Pool operation requires 'margin_numerator' and 'margin_denominator'");
+        }
+        if (op.getRewardAddress() == null) throw new IllegalArgumentException("Pool operation requires 'reward_address'");
+        if (op.getPoolOwners() == null || op.getPoolOwners().isEmpty()) {
+            throw new IllegalArgumentException("Pool operation requires 'pool_owners'");
+        }
+
+        PoolRegistration.PoolRegistrationBuilder builder = PoolRegistration.builder()
+                .operator(HexUtil.decodeHexString(op.getOperator()))
+                .vrfKeyHash(HexUtil.decodeHexString(op.getVrfKeyHash()))
+                .pledge(new BigInteger(op.getPledge()))
+                .cost(new BigInteger(op.getCost()))
+                .margin(new UnitInterval(new BigInteger(op.getMarginNumerator()), new BigInteger(op.getMarginDenominator())))
+                .rewardAccount(op.getRewardAddress())
+                .poolOwners(new LinkedHashSet<>(op.getPoolOwners()));
+
+        if (op.getRelays() != null) {
+            builder.relays(parseRelays(op.getRelays()));
+        }
+        if (op.getPoolMetadataUrl() != null) {
+            builder.poolMetadataUrl(op.getPoolMetadataUrl());
+        }
+        if (op.getPoolMetadataHash() != null) {
+            builder.poolMetadataHash(op.getPoolMetadataHash());
+        }
+
+        return builder.build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Relay> parseRelays(List<Map<String, Object>> relayList) {
+        List<Relay> relays = new ArrayList<>();
+        for (Map<String, Object> r : relayList) {
+            String type = (String) r.get("type");
+            if (type == null) throw new IllegalArgumentException("Relay requires 'type'");
+            switch (type.toLowerCase()) {
+                case "single_host_addr": {
+                    SingleHostAddr.SingleHostAddrBuilder b = SingleHostAddr.builder();
+                    if (r.get("port") != null) b.port(((Number) r.get("port")).intValue());
+                    if (r.get("ipv4") != null) {
+                        try {
+                            b.ipv4((Inet4Address) Inet4Address.getByName((String) r.get("ipv4")));
+                        } catch (UnknownHostException e) {
+                            throw new IllegalArgumentException("Invalid ipv4: " + r.get("ipv4"), e);
+                        }
+                    }
+                    if (r.get("ipv6") != null) {
+                        try {
+                            b.ipv6((Inet6Address) Inet6Address.getByName((String) r.get("ipv6")));
+                        } catch (UnknownHostException e) {
+                            throw new IllegalArgumentException("Invalid ipv6: " + r.get("ipv6"), e);
+                        }
+                    }
+                    relays.add(b.build());
+                    break;
+                }
+                case "single_host_name": {
+                    SingleHostName.SingleHostNameBuilder b = SingleHostName.builder();
+                    if (r.get("port") != null) b.port(((Number) r.get("port")).intValue());
+                    b.dnsName((String) r.get("dns_name"));
+                    relays.add(b.build());
+                    break;
+                }
+                case "multi_host_name": {
+                    relays.add(MultiHostName.builder().dnsName((String) r.get("dns_name")).build());
+                    break;
+                }
+                default:
+                    throw new IllegalArgumentException("Unknown relay type: " + type);
+            }
+        }
+        return relays;
+    }
+
+    private static void applyRetirePool(Tx tx, TxOperation op) {
+        if (op.getPoolId() == null) throw new IllegalArgumentException("retire_pool requires 'pool_id'");
+        if (op.getEpoch() == null) throw new IllegalArgumentException("retire_pool requires 'epoch'");
+        tx.retirePool(op.getPoolId(), op.getEpoch());
+    }
+
+    // --- Treasury donation (Gap 4) ---
+
+    private static void applyDonateToTreasury(Tx tx, TxOperation op) {
+        if (op.getTreasuryValue() == null) {
+            throw new IllegalArgumentException("donate_to_treasury requires 'treasury_value'");
+        }
+        if (op.getDonationAmount() == null) {
+            throw new IllegalArgumentException("donate_to_treasury requires 'donation_amount'");
+        }
+        tx.donateToTreasury(new BigInteger(op.getTreasuryValue()), new BigInteger(op.getDonationAmount()));
+    }
+
+    // --- Attach native script standalone (Gap 5) ---
+
+    private static void applyAttachNativeScript(Tx tx, TxOperation op) {
+        if (op.getScriptJson() == null) {
+            throw new IllegalArgumentException("attach_native_script requires 'script_json'");
+        }
+        NativeScript script;
+        try {
+            script = NativeScript.deserializeJson(op.getScriptJson());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid native script JSON: " + e.getMessage(), e);
+        }
+        tx.attachNativeScript(script);
+    }
+
     // --- Helper methods ---
+
+    private static GovActionId parsePrevGovActionId(String txHash, Integer index) {
+        if (txHash == null || txHash.isEmpty()) return null;
+        return new GovActionId(txHash, index != null ? index : 0);
+    }
+
+    private static Script parseScriptRef(String cborHex, String scriptRefType) {
+        if (scriptRefType == null || scriptRefType.isEmpty()) {
+            throw new IllegalArgumentException("script_ref_type is required when script_ref_cbor_hex is provided. " +
+                    "Supported: plutus_v1, plutus_v2, plutus_v3");
+        }
+        return switch (scriptRefType.toLowerCase()) {
+            case "plutus_v1" -> PlutusV1Script.builder().cborHex(cborHex).build();
+            case "plutus_v2" -> PlutusV2Script.builder().cborHex(cborHex).build();
+            case "plutus_v3" -> PlutusV3Script.builder().cborHex(cborHex).build();
+            default -> throw new IllegalArgumentException("Unsupported script_ref_type: " + scriptRefType
+                    + ". Supported: plutus_v1, plutus_v2, plutus_v3");
+        };
+    }
 
     private static Credential parseCredential(String hash, String type) {
         if ("script".equalsIgnoreCase(type)) {

@@ -70,22 +70,30 @@ class TxBuilder:
         self._merge_outputs = None
         self._signer_count = 1
 
-    def pay_to_address(self, address, *amounts):
+    def pay_to_address(self, address, *amounts, script_ref_cbor_hex=None, script_ref_type=None):
         """Add a payment to an address.
 
         Args:
             address: Bech32 destination address
             *amounts: One or more Amount dicts (from Amount.ada(), Amount.lovelace(), etc.)
+            script_ref_cbor_hex: Optional reference script CBOR hex to attach to output
+            script_ref_type: Script type for ref script ('plutus_v1', 'plutus_v2', 'plutus_v3')
         """
         amount_list = list(amounts)
-        self._operations.append({
+        op = {
             "type": "pay_to_address",
             "address": address,
             "amounts": amount_list,
-        })
+        }
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
+        self._operations.append(op)
         return self
 
-    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None):
+    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None,
+                        script_ref_cbor_hex=None, script_ref_type=None):
         """Add a payment to a contract address with datum.
 
         Args:
@@ -93,6 +101,8 @@ class TxBuilder:
             amounts: List of Amount dicts
             datum_cbor_hex: Inline datum as CBOR hex
             datum_hash: Datum hash hex
+            script_ref_cbor_hex: Optional reference script CBOR hex
+            script_ref_type: Script type for ref script
         """
         op = {
             "type": "pay_to_contract",
@@ -103,6 +113,10 @@ class TxBuilder:
             op["datum_cbor_hex"] = datum_cbor_hex
         if datum_hash:
             op["datum_hash"] = datum_hash
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
         self._operations.append(op)
         return self
 
@@ -188,11 +202,13 @@ class TxBuilder:
         self._operations.append(op)
         return self
 
-    def unregister_drep(self, credential_hash, credential_type='key', refund_address=None):
+    def unregister_drep(self, credential_hash, credential_type='key', refund_address=None, refund_amount=None):
         """Unregister a DRep."""
         op = {"type": "unregister_drep", "credential_hash": credential_hash, "credential_type": credential_type}
         if refund_address:
             op["refund_address"] = refund_address
+        if refund_amount is not None:
+            op["refund_amount"] = str(refund_amount)
         self._operations.append(op)
         return self
 
@@ -233,14 +249,111 @@ class TxBuilder:
     # Governance
 
     def create_proposal(self, gov_action_type, return_address, anchor_url, anchor_data_hash, **kwargs):
-        """Create a governance proposal."""
+        """Create a governance proposal.
+
+        Supported gov_action_types: info_action, treasury_withdrawals, no_confidence,
+        update_committee, new_constitution, hard_fork_initiation, parameter_change.
+        """
         op = {
             "type": "create_proposal", "gov_action_type": gov_action_type,
             "return_address": return_address, "anchor_url": anchor_url, "anchor_data_hash": anchor_data_hash,
         }
         if "withdrawals" in kwargs:
             op["withdrawals"] = kwargs["withdrawals"]
+        # Previous governance action reference
+        if "gov_action_tx_hash" in kwargs:
+            op["gov_action_tx_hash"] = kwargs["gov_action_tx_hash"]
+        if "gov_action_index" in kwargs:
+            op["gov_action_index"] = kwargs["gov_action_index"]
+        # update_committee fields
+        if "members_to_remove" in kwargs:
+            op["members_to_remove"] = kwargs["members_to_remove"]
+        if "new_members" in kwargs:
+            op["new_members"] = kwargs["new_members"]
+        if "quorum_numerator" in kwargs:
+            op["quorum_numerator"] = str(kwargs["quorum_numerator"])
+        if "quorum_denominator" in kwargs:
+            op["quorum_denominator"] = str(kwargs["quorum_denominator"])
+        # new_constitution fields
+        if "constitution_anchor_url" in kwargs:
+            op["constitution_anchor_url"] = kwargs["constitution_anchor_url"]
+        if "constitution_anchor_data_hash" in kwargs:
+            op["constitution_anchor_data_hash"] = kwargs["constitution_anchor_data_hash"]
+        if "constitution_script_hash" in kwargs:
+            op["constitution_script_hash"] = kwargs["constitution_script_hash"]
+        # hard_fork_initiation fields
+        if "protocol_version_major" in kwargs:
+            op["protocol_version_major"] = kwargs["protocol_version_major"]
+        if "protocol_version_minor" in kwargs:
+            op["protocol_version_minor"] = kwargs["protocol_version_minor"]
+        # parameter_change fields
+        if "policy_hash" in kwargs:
+            op["policy_hash"] = kwargs["policy_hash"]
         self._operations.append(op)
+        return self
+
+    # Pool operations
+
+    def register_pool(self, operator, vrf_key_hash, pledge, cost, margin_numerator, margin_denominator,
+                      reward_address, pool_owners, relays=None, pool_metadata_url=None, pool_metadata_hash=None):
+        """Register a staking pool."""
+        op = {
+            "type": "register_pool", "operator": operator, "vrf_key_hash": vrf_key_hash,
+            "pledge": str(pledge), "cost": str(cost),
+            "margin_numerator": str(margin_numerator), "margin_denominator": str(margin_denominator),
+            "reward_address": reward_address, "pool_owners": pool_owners,
+        }
+        if relays:
+            op["relays"] = relays
+        if pool_metadata_url:
+            op["pool_metadata_url"] = pool_metadata_url
+        if pool_metadata_hash:
+            op["pool_metadata_hash"] = pool_metadata_hash
+        self._operations.append(op)
+        return self
+
+    def update_pool(self, operator, vrf_key_hash, pledge, cost, margin_numerator, margin_denominator,
+                    reward_address, pool_owners, relays=None, pool_metadata_url=None, pool_metadata_hash=None):
+        """Update a staking pool."""
+        op = {
+            "type": "update_pool", "operator": operator, "vrf_key_hash": vrf_key_hash,
+            "pledge": str(pledge), "cost": str(cost),
+            "margin_numerator": str(margin_numerator), "margin_denominator": str(margin_denominator),
+            "reward_address": reward_address, "pool_owners": pool_owners,
+        }
+        if relays:
+            op["relays"] = relays
+        if pool_metadata_url:
+            op["pool_metadata_url"] = pool_metadata_url
+        if pool_metadata_hash:
+            op["pool_metadata_hash"] = pool_metadata_hash
+        self._operations.append(op)
+        return self
+
+    def retire_pool(self, pool_id, epoch):
+        """Retire a staking pool."""
+        self._operations.append({"type": "retire_pool", "pool_id": pool_id, "epoch": epoch})
+        return self
+
+    # Treasury donation
+
+    def donate_to_treasury(self, treasury_value, donation_amount):
+        """Donate ADA to the treasury."""
+        self._operations.append({
+            "type": "donate_to_treasury",
+            "treasury_value": str(treasury_value),
+            "donation_amount": str(donation_amount),
+        })
+        return self
+
+    # Native script attachment
+
+    def attach_native_script(self, script_json):
+        """Attach a native script to the transaction witness set."""
+        self._operations.append({
+            "type": "attach_native_script",
+            "script_json": script_json if isinstance(script_json, str) else json.dumps(script_json),
+        })
         return self
 
     def from_address(self, address):
@@ -371,15 +484,21 @@ class Tx:
         self._from = None
         self._change_address = None
 
-    def pay_to_address(self, address, *amounts):
-        self._operations.append({
+    def pay_to_address(self, address, *amounts, script_ref_cbor_hex=None, script_ref_type=None):
+        op = {
             "type": "pay_to_address",
             "address": address,
             "amounts": list(amounts),
-        })
+        }
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
+        self._operations.append(op)
         return self
 
-    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None):
+    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None,
+                        script_ref_cbor_hex=None, script_ref_type=None):
         op = {
             "type": "pay_to_contract",
             "address": address,
@@ -389,6 +508,10 @@ class Tx:
             op["datum_cbor_hex"] = datum_cbor_hex
         if datum_hash:
             op["datum_hash"] = datum_hash
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
         self._operations.append(op)
         return self
 
@@ -451,10 +574,12 @@ class Tx:
         self._operations.append(op)
         return self
 
-    def unregister_drep(self, credential_hash, credential_type='key', refund_address=None):
+    def unregister_drep(self, credential_hash, credential_type='key', refund_address=None, refund_amount=None):
         op = {"type": "unregister_drep", "credential_hash": credential_hash, "credential_type": credential_type}
         if refund_address:
             op["refund_address"] = refund_address
+        if refund_amount is not None:
+            op["refund_amount"] = str(refund_amount)
         self._operations.append(op)
         return self
 
@@ -498,7 +623,90 @@ class Tx:
         }
         if "withdrawals" in kwargs:
             op["withdrawals"] = kwargs["withdrawals"]
+        if "gov_action_tx_hash" in kwargs:
+            op["gov_action_tx_hash"] = kwargs["gov_action_tx_hash"]
+        if "gov_action_index" in kwargs:
+            op["gov_action_index"] = kwargs["gov_action_index"]
+        if "members_to_remove" in kwargs:
+            op["members_to_remove"] = kwargs["members_to_remove"]
+        if "new_members" in kwargs:
+            op["new_members"] = kwargs["new_members"]
+        if "quorum_numerator" in kwargs:
+            op["quorum_numerator"] = str(kwargs["quorum_numerator"])
+        if "quorum_denominator" in kwargs:
+            op["quorum_denominator"] = str(kwargs["quorum_denominator"])
+        if "constitution_anchor_url" in kwargs:
+            op["constitution_anchor_url"] = kwargs["constitution_anchor_url"]
+        if "constitution_anchor_data_hash" in kwargs:
+            op["constitution_anchor_data_hash"] = kwargs["constitution_anchor_data_hash"]
+        if "constitution_script_hash" in kwargs:
+            op["constitution_script_hash"] = kwargs["constitution_script_hash"]
+        if "protocol_version_major" in kwargs:
+            op["protocol_version_major"] = kwargs["protocol_version_major"]
+        if "protocol_version_minor" in kwargs:
+            op["protocol_version_minor"] = kwargs["protocol_version_minor"]
+        if "policy_hash" in kwargs:
+            op["policy_hash"] = kwargs["policy_hash"]
         self._operations.append(op)
+        return self
+
+    # Pool operations
+
+    def register_pool(self, operator, vrf_key_hash, pledge, cost, margin_numerator, margin_denominator,
+                      reward_address, pool_owners, relays=None, pool_metadata_url=None, pool_metadata_hash=None):
+        op = {
+            "type": "register_pool", "operator": operator, "vrf_key_hash": vrf_key_hash,
+            "pledge": str(pledge), "cost": str(cost),
+            "margin_numerator": str(margin_numerator), "margin_denominator": str(margin_denominator),
+            "reward_address": reward_address, "pool_owners": pool_owners,
+        }
+        if relays:
+            op["relays"] = relays
+        if pool_metadata_url:
+            op["pool_metadata_url"] = pool_metadata_url
+        if pool_metadata_hash:
+            op["pool_metadata_hash"] = pool_metadata_hash
+        self._operations.append(op)
+        return self
+
+    def update_pool(self, operator, vrf_key_hash, pledge, cost, margin_numerator, margin_denominator,
+                    reward_address, pool_owners, relays=None, pool_metadata_url=None, pool_metadata_hash=None):
+        op = {
+            "type": "update_pool", "operator": operator, "vrf_key_hash": vrf_key_hash,
+            "pledge": str(pledge), "cost": str(cost),
+            "margin_numerator": str(margin_numerator), "margin_denominator": str(margin_denominator),
+            "reward_address": reward_address, "pool_owners": pool_owners,
+        }
+        if relays:
+            op["relays"] = relays
+        if pool_metadata_url:
+            op["pool_metadata_url"] = pool_metadata_url
+        if pool_metadata_hash:
+            op["pool_metadata_hash"] = pool_metadata_hash
+        self._operations.append(op)
+        return self
+
+    def retire_pool(self, pool_id, epoch):
+        self._operations.append({"type": "retire_pool", "pool_id": pool_id, "epoch": epoch})
+        return self
+
+    # Treasury donation
+
+    def donate_to_treasury(self, treasury_value, donation_amount):
+        self._operations.append({
+            "type": "donate_to_treasury",
+            "treasury_value": str(treasury_value),
+            "donation_amount": str(donation_amount),
+        })
+        return self
+
+    # Native script attachment
+
+    def attach_native_script(self, script_json):
+        self._operations.append({
+            "type": "attach_native_script",
+            "script_json": script_json if isinstance(script_json, str) else json.dumps(script_json),
+        })
         return self
 
     def from_address(self, address):
@@ -543,16 +751,22 @@ class ScriptTxBuilder:
 
     # --- Common operations (same as TxBuilder) ---
 
-    def pay_to_address(self, address, *amounts):
+    def pay_to_address(self, address, *amounts, script_ref_cbor_hex=None, script_ref_type=None):
         """Add a payment to an address."""
-        self._operations.append({
+        op = {
             "type": "pay_to_address",
             "address": address,
             "amounts": list(amounts),
-        })
+        }
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
+        self._operations.append(op)
         return self
 
-    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None):
+    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None,
+                        script_ref_cbor_hex=None, script_ref_type=None):
         """Add a payment to a contract address with datum."""
         op = {
             "type": "pay_to_contract",
@@ -563,6 +777,10 @@ class ScriptTxBuilder:
             op["datum_cbor_hex"] = datum_cbor_hex
         if datum_hash:
             op["datum_hash"] = datum_hash
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
         self._operations.append(op)
         return self
 
@@ -742,7 +960,7 @@ class ScriptTxBuilder:
         return self
 
     def unregister_drep(self, credential_hash, credential_type, redeemer_cbor_hex,
-                        refund_address=None):
+                        refund_address=None, refund_amount=None):
         """Unregister a DRep with redeemer."""
         op = {
             "type": "unregister_drep",
@@ -752,6 +970,8 @@ class ScriptTxBuilder:
         }
         if refund_address:
             op["refund_address"] = refund_address
+        if refund_amount is not None:
+            op["refund_amount"] = str(refund_amount)
         self._operations.append(op)
         return self
 
@@ -808,7 +1028,7 @@ class ScriptTxBuilder:
     # --- Governance (with redeemer) ---
 
     def create_proposal(self, gov_action_type, return_address, anchor_url, anchor_data_hash,
-                        redeemer_cbor_hex, withdrawals=None):
+                        redeemer_cbor_hex, **kwargs):
         """Create a governance proposal with redeemer."""
         op = {
             "type": "create_proposal",
@@ -818,9 +1038,45 @@ class ScriptTxBuilder:
             "anchor_data_hash": anchor_data_hash,
             "redeemer_cbor_hex": redeemer_cbor_hex,
         }
-        if withdrawals:
-            op["withdrawals"] = withdrawals
+        if "withdrawals" in kwargs:
+            op["withdrawals"] = kwargs["withdrawals"]
+        if "gov_action_tx_hash" in kwargs:
+            op["gov_action_tx_hash"] = kwargs["gov_action_tx_hash"]
+        if "gov_action_index" in kwargs:
+            op["gov_action_index"] = kwargs["gov_action_index"]
+        if "members_to_remove" in kwargs:
+            op["members_to_remove"] = kwargs["members_to_remove"]
+        if "new_members" in kwargs:
+            op["new_members"] = kwargs["new_members"]
+        if "quorum_numerator" in kwargs:
+            op["quorum_numerator"] = str(kwargs["quorum_numerator"])
+        if "quorum_denominator" in kwargs:
+            op["quorum_denominator"] = str(kwargs["quorum_denominator"])
+        if "constitution_anchor_url" in kwargs:
+            op["constitution_anchor_url"] = kwargs["constitution_anchor_url"]
+        if "constitution_anchor_data_hash" in kwargs:
+            op["constitution_anchor_data_hash"] = kwargs["constitution_anchor_data_hash"]
+        if "constitution_script_hash" in kwargs:
+            op["constitution_script_hash"] = kwargs["constitution_script_hash"]
+        if "protocol_version_major" in kwargs:
+            op["protocol_version_major"] = kwargs["protocol_version_major"]
+        if "protocol_version_minor" in kwargs:
+            op["protocol_version_minor"] = kwargs["protocol_version_minor"]
+        if "policy_hash" in kwargs:
+            op["policy_hash"] = kwargs["policy_hash"]
         self._operations.append(op)
+        return self
+
+    # Treasury donation
+
+    def donate_to_treasury(self, treasury_value, donation_amount, redeemer_cbor_hex):
+        """Donate ADA to the treasury with redeemer."""
+        self._operations.append({
+            "type": "donate_to_treasury",
+            "treasury_value": str(treasury_value),
+            "donation_amount": str(donation_amount),
+            "redeemer_cbor_hex": redeemer_cbor_hex,
+        })
         return self
 
     # --- Builder configuration ---
@@ -980,15 +1236,21 @@ class ScriptTx:
 
     # --- Common operations ---
 
-    def pay_to_address(self, address, *amounts):
-        self._operations.append({
+    def pay_to_address(self, address, *amounts, script_ref_cbor_hex=None, script_ref_type=None):
+        op = {
             "type": "pay_to_address",
             "address": address,
             "amounts": list(amounts),
-        })
+        }
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
+        self._operations.append(op)
         return self
 
-    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None):
+    def pay_to_contract(self, address, amounts, datum_cbor_hex=None, datum_hash=None,
+                        script_ref_cbor_hex=None, script_ref_type=None):
         op = {
             "type": "pay_to_contract",
             "address": address,
@@ -998,6 +1260,10 @@ class ScriptTx:
             op["datum_cbor_hex"] = datum_cbor_hex
         if datum_hash:
             op["datum_hash"] = datum_hash
+        if script_ref_cbor_hex:
+            op["script_ref_cbor_hex"] = script_ref_cbor_hex
+        if script_ref_type:
+            op["script_ref_type"] = script_ref_type
         self._operations.append(op)
         return self
 
@@ -1147,7 +1413,7 @@ class ScriptTx:
         return self
 
     def unregister_drep(self, credential_hash, credential_type, redeemer_cbor_hex,
-                        refund_address=None):
+                        refund_address=None, refund_amount=None):
         op = {
             "type": "unregister_drep",
             "credential_hash": credential_hash,
@@ -1156,6 +1422,8 @@ class ScriptTx:
         }
         if refund_address:
             op["refund_address"] = refund_address
+        if refund_amount is not None:
+            op["refund_amount"] = str(refund_amount)
         self._operations.append(op)
         return self
 
@@ -1209,7 +1477,7 @@ class ScriptTx:
     # --- Governance (with redeemer) ---
 
     def create_proposal(self, gov_action_type, return_address, anchor_url, anchor_data_hash,
-                        redeemer_cbor_hex, withdrawals=None):
+                        redeemer_cbor_hex, **kwargs):
         op = {
             "type": "create_proposal",
             "gov_action_type": gov_action_type,
@@ -1218,9 +1486,44 @@ class ScriptTx:
             "anchor_data_hash": anchor_data_hash,
             "redeemer_cbor_hex": redeemer_cbor_hex,
         }
-        if withdrawals:
-            op["withdrawals"] = withdrawals
+        if "withdrawals" in kwargs:
+            op["withdrawals"] = kwargs["withdrawals"]
+        if "gov_action_tx_hash" in kwargs:
+            op["gov_action_tx_hash"] = kwargs["gov_action_tx_hash"]
+        if "gov_action_index" in kwargs:
+            op["gov_action_index"] = kwargs["gov_action_index"]
+        if "members_to_remove" in kwargs:
+            op["members_to_remove"] = kwargs["members_to_remove"]
+        if "new_members" in kwargs:
+            op["new_members"] = kwargs["new_members"]
+        if "quorum_numerator" in kwargs:
+            op["quorum_numerator"] = str(kwargs["quorum_numerator"])
+        if "quorum_denominator" in kwargs:
+            op["quorum_denominator"] = str(kwargs["quorum_denominator"])
+        if "constitution_anchor_url" in kwargs:
+            op["constitution_anchor_url"] = kwargs["constitution_anchor_url"]
+        if "constitution_anchor_data_hash" in kwargs:
+            op["constitution_anchor_data_hash"] = kwargs["constitution_anchor_data_hash"]
+        if "constitution_script_hash" in kwargs:
+            op["constitution_script_hash"] = kwargs["constitution_script_hash"]
+        if "protocol_version_major" in kwargs:
+            op["protocol_version_major"] = kwargs["protocol_version_major"]
+        if "protocol_version_minor" in kwargs:
+            op["protocol_version_minor"] = kwargs["protocol_version_minor"]
+        if "policy_hash" in kwargs:
+            op["policy_hash"] = kwargs["policy_hash"]
         self._operations.append(op)
+        return self
+
+    # Treasury donation
+
+    def donate_to_treasury(self, treasury_value, donation_amount, redeemer_cbor_hex):
+        self._operations.append({
+            "type": "donate_to_treasury",
+            "treasury_value": str(treasury_value),
+            "donation_amount": str(donation_amount),
+            "redeemer_cbor_hex": redeemer_cbor_hex,
+        })
         return self
 
     # --- Address configuration ---
