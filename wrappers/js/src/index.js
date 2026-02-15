@@ -360,6 +360,14 @@ class QuickTxApi {
     return new Tx();
   }
 
+  newScriptTx() {
+    return new ScriptTxBuilder(this._b);
+  }
+
+  scriptTx() {
+    return new ScriptTx();
+  }
+
   compose(...txs) {
     return new ComposeTxBuilder(this._b, txs);
   }
@@ -575,6 +583,7 @@ export class TxBuilder {
     if (providerConfig) {
       spec.provider = { name: providerConfig.name, url: providerConfig.url };
       if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
+      if (providerConfig.enableCostEvaluation !== undefined) spec.provider.enable_cost_evaluation = providerConfig.enableCostEvaluation;
       if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
     } else {
       spec.utxos = this._utxos;
@@ -812,6 +821,7 @@ export class ComposeTxBuilder {
     if (providerConfig) {
       spec.provider = { name: providerConfig.name, url: providerConfig.url };
       if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
+      if (providerConfig.enableCostEvaluation !== undefined) spec.provider.enable_cost_evaluation = providerConfig.enableCostEvaluation;
       if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
     } else {
       spec.utxos = this._utxos;
@@ -844,5 +854,573 @@ export class ComposeTxBuilder {
       this._protocolParams = await provider.getProtocolParams();
     }
     return this.build();
+  }
+}
+
+export class ScriptTxBuilder {
+  constructor(bridge) {
+    this._b = bridge;
+    this._operations = [];
+    this._from = null;
+    this._changeAddress = null;
+    this._feePayer = null;
+    this._utxos = null;
+    this._protocolParams = null;
+    this._validity = {};
+    this._mergeOutputs = null;
+    this._signerCount = 1;
+    this._changeDatumCborHex = null;
+    this._changeDatumHash = null;
+  }
+
+  payToAddress(address, ...amounts) {
+    this._operations.push({
+      type: 'pay_to_address',
+      address,
+      amounts: [...amounts],
+    });
+    return this;
+  }
+
+  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+    const op = {
+      type: 'pay_to_contract',
+      address,
+      amounts: Array.isArray(amounts) ? amounts : [amounts],
+    };
+    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
+    if (datumHash) op.datum_hash = datumHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  attachMetadata(label, metadata) {
+    this._operations.push({
+      type: 'attach_metadata',
+      label,
+      metadata,
+    });
+    return this;
+  }
+
+  collectFrom(utxos) {
+    this._operations.push({
+      type: 'collect_from',
+      collect_utxos: utxos,
+    });
+    return this;
+  }
+
+  collectFromScript(utxos, redeemerCborHex, datumCborHex = null) {
+    const op = {
+      type: 'collect_from',
+      collect_utxos: utxos,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
+    this._operations.push(op);
+    return this;
+  }
+
+  readFrom(referenceInputs) {
+    this._operations.push({
+      type: 'read_from',
+      reference_inputs: referenceInputs.map(ri => ({ tx_hash: ri.txHash, output_index: ri.outputIndex })),
+    });
+    return this;
+  }
+
+  mintPlutusAssets(scriptCborHex, scriptType, assets, redeemerCborHex, receiver = null, outputDatumCborHex = null) {
+    const op = {
+      type: 'mint_plutus_assets',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+      assets,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (receiver) op.receiver = receiver;
+    if (outputDatumCborHex) op.output_datum_cbor_hex = outputDatumCborHex;
+    this._operations.push(op);
+    return this;
+  }
+
+  attachSpendingValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_spending_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachCertificateValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_certificate_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachRewardValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_reward_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachProposingValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_proposing_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachVotingValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_voting_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  // Staking (with redeemer)
+  deregisterStakeAddress(address, redeemerCborHex, refundAddress = null) {
+    const op = { type: 'deregister_stake_address', address, redeemer_cbor_hex: redeemerCborHex };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  delegateTo(address, poolId, redeemerCborHex) {
+    this._operations.push({
+      type: 'delegate_to', address, pool_id: poolId, redeemer_cbor_hex: redeemerCborHex,
+    });
+    return this;
+  }
+
+  withdraw(rewardAddress, amount, redeemerCborHex, receiver = null) {
+    const op = {
+      type: 'withdraw', reward_address: rewardAddress, amount: String(amount),
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (receiver) op.receiver = receiver;
+    this._operations.push(op);
+    return this;
+  }
+
+  // DRep (with redeemer)
+  registerDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  unregisterDRep(credentialHash, credentialType, redeemerCborHex, refundAddress = null) {
+    const op = {
+      type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  updateDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Voting (with redeemer)
+  delegateVotingPowerTo(address, drepType, drepHash, redeemerCborHex) {
+    this._operations.push({
+      type: 'delegate_voting_power_to', address, drep_type: drepType,
+      drep_hash: drepHash, redeemer_cbor_hex: redeemerCborHex,
+    });
+    return this;
+  }
+
+  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
+      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Governance (with redeemer)
+  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, redeemerCborHex, options = {}) {
+    const op = {
+      type: 'create_proposal', gov_action_type: govActionType,
+      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (options.withdrawals) op.withdrawals = options.withdrawals;
+    this._operations.push(op);
+    return this;
+  }
+
+  from(address) {
+    this._from = address;
+    return this;
+  }
+
+  changeAddress(address) {
+    this._changeAddress = address;
+    return this;
+  }
+
+  changeDatum(datumCborHex) {
+    this._changeDatumCborHex = datumCborHex;
+    return this;
+  }
+
+  changeDatumHash(hash) {
+    this._changeDatumHash = hash;
+    return this;
+  }
+
+  feePayer(address) {
+    this._feePayer = address;
+    return this;
+  }
+
+  withUtxos(utxos) {
+    this._utxos = utxos;
+    return this;
+  }
+
+  withProtocolParams(params) {
+    this._protocolParams = params;
+    return this;
+  }
+
+  validFrom(slot) {
+    this._validity.valid_from = slot;
+    return this;
+  }
+
+  validTo(slot) {
+    this._validity.valid_to = slot;
+    return this;
+  }
+
+  mergeOutputs(merge) {
+    this._mergeOutputs = merge;
+    return this;
+  }
+
+  signerCount(count) {
+    this._signerCount = count;
+    return this;
+  }
+
+  build(providerConfig = null) {
+    const spec = {
+      tx_type: 'script_tx',
+      operations: this._operations,
+      from: this._from,
+      signer_count: this._signerCount,
+    };
+
+    if (providerConfig) {
+      spec.provider = { name: providerConfig.name, url: providerConfig.url };
+      if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
+      if (providerConfig.enableCostEvaluation !== undefined) spec.provider.enable_cost_evaluation = providerConfig.enableCostEvaluation;
+      if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
+    } else {
+      spec.utxos = this._utxos;
+      spec.protocol_params = this._protocolParams;
+    }
+
+    if (this._changeAddress) spec.change_address = this._changeAddress;
+    if (this._feePayer) spec.fee_payer = this._feePayer;
+    if (Object.keys(this._validity).length > 0) spec.validity = this._validity;
+    if (this._mergeOutputs !== null) spec.merge_outputs = this._mergeOutputs;
+    if (this._changeDatumCborHex) spec.change_datum_cbor_hex = this._changeDatumCborHex;
+    if (this._changeDatumHash) spec.change_datum_hash = this._changeDatumHash;
+
+    const specJson = JSON.stringify(spec);
+    const rc = this._b._lib.ccl_quicktx_build(this._b._thread, cstr(specJson));
+    return JSON.parse(this._b._check(rc));
+  }
+
+  async buildWithProvider(provider) {
+    if (this._utxos === null && this._from) {
+      this._utxos = await provider.getUtxos(this._from);
+    }
+    if (this._protocolParams === null) {
+      this._protocolParams = await provider.getProtocolParams();
+    }
+    return this.build();
+  }
+}
+
+export class ScriptTx {
+  constructor() {
+    this._operations = [];
+    this._from = null;
+    this._changeAddress = null;
+    this._changeDatumCborHex = null;
+    this._changeDatumHash = null;
+  }
+
+  payToAddress(address, ...amounts) {
+    this._operations.push({
+      type: 'pay_to_address',
+      address,
+      amounts: [...amounts],
+    });
+    return this;
+  }
+
+  payToContract(address, amounts, { datumCborHex, datumHash } = {}) {
+    const op = {
+      type: 'pay_to_contract',
+      address,
+      amounts: Array.isArray(amounts) ? amounts : [amounts],
+    };
+    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
+    if (datumHash) op.datum_hash = datumHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  attachMetadata(label, metadata) {
+    this._operations.push({
+      type: 'attach_metadata',
+      label,
+      metadata,
+    });
+    return this;
+  }
+
+  collectFrom(utxos) {
+    this._operations.push({
+      type: 'collect_from',
+      collect_utxos: utxos,
+    });
+    return this;
+  }
+
+  collectFromScript(utxos, redeemerCborHex, datumCborHex = null) {
+    const op = {
+      type: 'collect_from',
+      collect_utxos: utxos,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
+    this._operations.push(op);
+    return this;
+  }
+
+  readFrom(referenceInputs) {
+    this._operations.push({
+      type: 'read_from',
+      reference_inputs: referenceInputs.map(ri => ({ tx_hash: ri.txHash, output_index: ri.outputIndex })),
+    });
+    return this;
+  }
+
+  mintPlutusAssets(scriptCborHex, scriptType, assets, redeemerCborHex, receiver = null, outputDatumCborHex = null) {
+    const op = {
+      type: 'mint_plutus_assets',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+      assets,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (receiver) op.receiver = receiver;
+    if (outputDatumCborHex) op.output_datum_cbor_hex = outputDatumCborHex;
+    this._operations.push(op);
+    return this;
+  }
+
+  attachSpendingValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_spending_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachCertificateValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_certificate_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachRewardValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_reward_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachProposingValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_proposing_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  attachVotingValidator(scriptCborHex, scriptType) {
+    this._operations.push({
+      type: 'attach_voting_validator',
+      script_cbor_hex: scriptCborHex,
+      script_type: scriptType,
+    });
+    return this;
+  }
+
+  // Staking (with redeemer)
+  deregisterStakeAddress(address, redeemerCborHex, refundAddress = null) {
+    const op = { type: 'deregister_stake_address', address, redeemer_cbor_hex: redeemerCborHex };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  delegateTo(address, poolId, redeemerCborHex) {
+    this._operations.push({
+      type: 'delegate_to', address, pool_id: poolId, redeemer_cbor_hex: redeemerCborHex,
+    });
+    return this;
+  }
+
+  withdraw(rewardAddress, amount, redeemerCborHex, receiver = null) {
+    const op = {
+      type: 'withdraw', reward_address: rewardAddress, amount: String(amount),
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (receiver) op.receiver = receiver;
+    this._operations.push(op);
+    return this;
+  }
+
+  // DRep (with redeemer)
+  registerDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  unregisterDRep(credentialHash, credentialType, redeemerCborHex, refundAddress = null) {
+    const op = {
+      type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (refundAddress) op.refund_address = refundAddress;
+    this._operations.push(op);
+    return this;
+  }
+
+  updateDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Voting (with redeemer)
+  delegateVotingPowerTo(address, drepType, drepHash, redeemerCborHex) {
+    this._operations.push({
+      type: 'delegate_voting_power_to', address, drep_type: drepType,
+      drep_hash: drepHash, redeemer_cbor_hex: redeemerCborHex,
+    });
+    return this;
+  }
+
+  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
+    const op = {
+      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
+      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (anchorUrl) op.anchor_url = anchorUrl;
+    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
+    this._operations.push(op);
+    return this;
+  }
+
+  // Governance (with redeemer)
+  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, redeemerCborHex, options = {}) {
+    const op = {
+      type: 'create_proposal', gov_action_type: govActionType,
+      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
+      redeemer_cbor_hex: redeemerCborHex,
+    };
+    if (options.withdrawals) op.withdrawals = options.withdrawals;
+    this._operations.push(op);
+    return this;
+  }
+
+  from(address) {
+    this._from = address;
+    return this;
+  }
+
+  changeAddress(address) {
+    this._changeAddress = address;
+    return this;
+  }
+
+  changeDatum(datumCborHex) {
+    this._changeDatumCborHex = datumCborHex;
+    return this;
+  }
+
+  changeDatumHash(hash) {
+    this._changeDatumHash = hash;
+    return this;
+  }
+
+  _toSpec() {
+    const spec = {
+      tx_type: 'script_tx',
+      from: this._from,
+      operations: this._operations,
+    };
+    if (this._changeAddress) spec.change_address = this._changeAddress;
+    if (this._changeDatumCborHex) spec.change_datum_cbor_hex = this._changeDatumCborHex;
+    if (this._changeDatumHash) spec.change_datum_hash = this._changeDatumHash;
+    return spec;
   }
 }

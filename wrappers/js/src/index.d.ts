@@ -97,10 +97,21 @@ export declare class Amount {
     static asset(unit: string, quantity: number): AmountSpec;
 }
 
+export interface ReferenceInput {
+    txHash: string;
+    outputIndex: number;
+}
+
+export interface MintAsset {
+    name: string;
+    quantity: string;
+}
+
 export interface ProviderConfig {
     name: string;
     url: string;
     apiKey?: string;
+    enableCostEvaluation?: boolean;
 }
 
 export declare class TxBuilder {
@@ -172,10 +183,85 @@ export declare class ComposeTxBuilder {
     buildWithProvider(provider: Provider): Promise<QuickTxResult>;
 }
 
+export declare class ScriptTxBuilder {
+    payToAddress(address: string, ...amounts: AmountSpec[]): ScriptTxBuilder;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): ScriptTxBuilder;
+    attachMetadata(label: number, metadata: any): ScriptTxBuilder;
+    collectFrom(utxos: any[]): ScriptTxBuilder;
+    collectFromScript(utxos: any[], redeemerCborHex: string, datumCborHex?: string | null): ScriptTxBuilder;
+    readFrom(referenceInputs: ReferenceInput[]): ScriptTxBuilder;
+    mintPlutusAssets(scriptCborHex: string, scriptType: string, assets: MintAsset[], redeemerCborHex: string, receiver?: string | null, outputDatumCborHex?: string | null): ScriptTxBuilder;
+    attachSpendingValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
+    attachCertificateValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
+    attachRewardValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
+    attachProposingValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
+    attachVotingValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
+    // Staking (with redeemer)
+    deregisterStakeAddress(address: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTxBuilder;
+    delegateTo(address: string, poolId: string, redeemerCborHex: string): ScriptTxBuilder;
+    withdraw(rewardAddress: string, amount: string | number, redeemerCborHex: string, receiver?: string | null): ScriptTxBuilder;
+    // DRep (with redeemer)
+    registerDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
+    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTxBuilder;
+    updateDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
+    // Voting (with redeemer)
+    delegateVotingPowerTo(address: string, drepType: string, drepHash: string, redeemerCborHex: string): ScriptTxBuilder;
+    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
+    // Governance (with redeemer)
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): ScriptTxBuilder;
+    from(address: string): ScriptTxBuilder;
+    changeAddress(address: string): ScriptTxBuilder;
+    changeDatum(datumCborHex: string): ScriptTxBuilder;
+    changeDatumHash(hash: string): ScriptTxBuilder;
+    feePayer(address: string): ScriptTxBuilder;
+    withUtxos(utxos: any[]): ScriptTxBuilder;
+    withProtocolParams(params: any): ScriptTxBuilder;
+    validFrom(slot: number): ScriptTxBuilder;
+    validTo(slot: number): ScriptTxBuilder;
+    mergeOutputs(merge: boolean): ScriptTxBuilder;
+    signerCount(count: number): ScriptTxBuilder;
+    build(providerConfig?: ProviderConfig | null): QuickTxResult;
+    buildWithProvider(provider: Provider): Promise<QuickTxResult>;
+}
+
+export declare class ScriptTx {
+    payToAddress(address: string, ...amounts: AmountSpec[]): ScriptTx;
+    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string }): ScriptTx;
+    attachMetadata(label: number, metadata: any): ScriptTx;
+    collectFrom(utxos: any[]): ScriptTx;
+    collectFromScript(utxos: any[], redeemerCborHex: string, datumCborHex?: string | null): ScriptTx;
+    readFrom(referenceInputs: ReferenceInput[]): ScriptTx;
+    mintPlutusAssets(scriptCborHex: string, scriptType: string, assets: MintAsset[], redeemerCborHex: string, receiver?: string | null, outputDatumCborHex?: string | null): ScriptTx;
+    attachSpendingValidator(scriptCborHex: string, scriptType: string): ScriptTx;
+    attachCertificateValidator(scriptCborHex: string, scriptType: string): ScriptTx;
+    attachRewardValidator(scriptCborHex: string, scriptType: string): ScriptTx;
+    attachProposingValidator(scriptCborHex: string, scriptType: string): ScriptTx;
+    attachVotingValidator(scriptCborHex: string, scriptType: string): ScriptTx;
+    // Staking (with redeemer)
+    deregisterStakeAddress(address: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTx;
+    delegateTo(address: string, poolId: string, redeemerCborHex: string): ScriptTx;
+    withdraw(rewardAddress: string, amount: string | number, redeemerCborHex: string, receiver?: string | null): ScriptTx;
+    // DRep (with redeemer)
+    registerDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
+    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTx;
+    updateDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
+    // Voting (with redeemer)
+    delegateVotingPowerTo(address: string, drepType: string, drepHash: string, redeemerCborHex: string): ScriptTx;
+    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
+    // Governance (with redeemer)
+    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: { withdrawals?: Array<{ reward_address: string; amount: string }> }): ScriptTx;
+    from(address: string): ScriptTx;
+    changeAddress(address: string): ScriptTx;
+    changeDatum(datumCborHex: string): ScriptTx;
+    changeDatumHash(hash: string): ScriptTx;
+}
+
 export declare class QuickTxApi {
     newTx(): TxBuilder;
     tx(): Tx;
-    compose(...txs: Tx[]): ComposeTxBuilder;
+    newScriptTx(): ScriptTxBuilder;
+    scriptTx(): ScriptTx;
+    compose(...txs: (Tx | ScriptTx)[]): ComposeTxBuilder;
 }
 
 export declare class Provider {

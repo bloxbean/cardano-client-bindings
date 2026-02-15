@@ -340,6 +340,7 @@ fn test_integration_provider_config_simple_transfer() {
         name: "yaci".to_string(),
         url: DEVKIT_PROVIDER_URL.to_string(),
         api_key: None,
+        enable_cost_evaluation: None,
     };
 
     // Build using ProviderConfig — Java fetches UTXOs and PP lazily via HTTP
@@ -382,6 +383,7 @@ fn test_integration_provider_config_multiple_receivers() {
         name: "yaci".to_string(),
         url: DEVKIT_PROVIDER_URL.to_string(),
         api_key: None,
+        enable_cost_evaluation: None,
     };
 
     let result = bridge
@@ -418,6 +420,7 @@ fn test_integration_provider_config_with_metadata() {
         name: "yaci".to_string(),
         url: DEVKIT_PROVIDER_URL.to_string(),
         api_key: None,
+        enable_cost_evaluation: None,
     };
 
     let result = bridge

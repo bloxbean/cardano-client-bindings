@@ -15,6 +15,9 @@ public class ProviderConfig {
     @JsonProperty("api_key")
     private String apiKey;
 
+    @JsonProperty("enable_cost_evaluation")
+    private Boolean enableCostEvaluation;
+
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
@@ -23,6 +26,9 @@ public class ProviderConfig {
 
     public String getApiKey() { return apiKey; }
     public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+
+    public Boolean getEnableCostEvaluation() { return enableCostEvaluation; }
+    public void setEnableCostEvaluation(Boolean enableCostEvaluation) { this.enableCostEvaluation = enableCostEvaluation; }
 
     public void validate() {
         if (name == null || name.isEmpty())

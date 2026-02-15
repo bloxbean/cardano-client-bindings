@@ -1,8 +1,8 @@
 package ccl
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../core/build/native/nativeCompile
-#cgo LDFLAGS: -L${SRCDIR}/../../core/build/native/nativeCompile -lccl
+#cgo CFLAGS: -I${SRCDIR}/../../../core/build/native/nativeCompile
+#cgo LDFLAGS: -L${SRCDIR}/../../../core/build/native/nativeCompile -lccl
 
 #include "libccl.h"
 #include <stdlib.h>
@@ -579,9 +579,21 @@ type AnchorOption struct {
 
 // ProviderConfig configures Java-side lazy provider fetching.
 type ProviderConfig struct {
-	Name   string `json:"name"`
-	URL    string `json:"url"`
-	APIKey string `json:"api_key,omitempty"`
+	Name                 string `json:"name"`
+	URL                  string `json:"url"`
+	APIKey               string `json:"api_key,omitempty"`
+	EnableCostEvaluation *bool  `json:"enable_cost_evaluation,omitempty"`
+}
+
+// ReferenceInput represents a reference input (read-only) for script transactions.
+type ReferenceInput struct {
+	TxHash      string `json:"tx_hash"`
+	OutputIndex int    `json:"output_index"`
+}
+
+// Composable is implemented by Tx and ScriptTx for use with Compose().
+type Composable interface {
+	ToSpec() map[string]interface{}
 }
 
 // ProposalWithdrawal represents a treasury withdrawal in a proposal.
@@ -605,9 +617,19 @@ func (q *QuickTxApi) Tx() *Tx {
 	return &Tx{}
 }
 
-// Compose creates a ComposeTxBuilder from multiple Tx objects.
-func (q *QuickTxApi) Compose(txs ...*Tx) *ComposeTxBuilder {
+// Compose creates a ComposeTxBuilder from multiple Composable objects (Tx or ScriptTx).
+func (q *QuickTxApi) Compose(txs ...Composable) *ComposeTxBuilder {
 	return &ComposeTxBuilder{bridge: q.bridge, txs: txs}
+}
+
+// NewScriptTx creates a new ScriptTxBuilder for building a single script transaction.
+func (q *QuickTxApi) NewScriptTx() *ScriptTxBuilder {
+	return &ScriptTxBuilder{bridge: q.bridge, signerCount: 1}
+}
+
+// ScriptTx creates a new ScriptTx for use with Compose().
+func (q *QuickTxApi) ScriptTx() *ScriptTx {
+	return &ScriptTx{}
 }
 
 // --- TxBuilder ---
@@ -1110,7 +1132,7 @@ func (tx *Tx) ChangeAddress(address string) *Tx {
 	return tx
 }
 
-func (tx *Tx) toSpec() map[string]interface{} {
+func (tx *Tx) ToSpec() map[string]interface{} {
 	spec := map[string]interface{}{
 		"from":       tx.from,
 		"operations": tx.operations,
@@ -1123,10 +1145,10 @@ func (tx *Tx) toSpec() map[string]interface{} {
 
 // --- ComposeTxBuilder ---
 
-// ComposeTxBuilder composes multiple Tx objects into a single transaction.
+// ComposeTxBuilder composes multiple Composable objects into a single transaction.
 type ComposeTxBuilder struct {
 	bridge         *Bridge
-	txs            []*Tx
+	txs            []Composable
 	feePayer       string
 	utxos          interface{}
 	protocolParams interface{}
@@ -1189,7 +1211,7 @@ func (cb *ComposeTxBuilder) BuildWithProvider(config ProviderConfig) (*TxResult,
 func (cb *ComposeTxBuilder) doBuild(providerConfig *ProviderConfig) (*TxResult, error) {
 	txSpecs := make([]map[string]interface{}, len(cb.txs))
 	for i, tx := range cb.txs {
-		txSpecs[i] = tx.toSpec()
+		txSpecs[i] = tx.ToSpec()
 	}
 
 	spec := map[string]interface{}{
@@ -1234,4 +1256,667 @@ func (cb *ComposeTxBuilder) doBuild(providerConfig *ProviderConfig) (*TxResult, 
 		return nil, fmt.Errorf("failed to parse tx result: %w", err)
 	}
 	return &txResult, nil
+}
+
+// --- ScriptTxBuilder ---
+
+// ScriptTxBuilder builds a single script transaction spec.
+type ScriptTxBuilder struct {
+	bridge            *Bridge
+	operations        []map[string]interface{}
+	from              string
+	changeAddress     string
+	feePayer          string
+	utxos             interface{}
+	protocolParams    interface{}
+	validity          map[string]interface{}
+	mergeOutputs      *bool
+	signerCount       int
+	changeDatumCbor   string
+	changeDatumHash   string
+}
+
+func (sb *ScriptTxBuilder) PayToAddress(address string, amounts ...Amount) *ScriptTxBuilder {
+	amountList := make([]Amount, len(amounts))
+	copy(amountList, amounts)
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amountList,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type":    "pay_to_contract",
+		"address": address,
+		"amounts": amounts,
+	}
+	if datumCborHex != "" {
+		op["datum_cbor_hex"] = datumCborHex
+	}
+	if datumHash != "" {
+		op["datum_hash"] = datumHash
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) AttachMetadata(label int, metadata interface{}) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type":     "attach_metadata",
+		"label":    label,
+		"metadata": metadata,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) CollectFrom(utxos []map[string]interface{}) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type":          "collect_from",
+		"collect_utxos": utxos,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) CollectFromScript(utxos []map[string]interface{}, redeemerCborHex, datumCborHex string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type":              "collect_from",
+		"collect_utxos":     utxos,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if datumCborHex != "" {
+		op["datum_cbor_hex"] = datumCborHex
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) ReadFrom(referenceInputs []ReferenceInput) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type":             "read_from",
+		"reference_inputs": referenceInputs,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) MintPlutusAssets(scriptCborHex, scriptType string, assets []MintAsset, redeemerCborHex, receiver, outputDatumCborHex string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type":              "mint_plutus_assets",
+		"script_cbor_hex":   scriptCborHex,
+		"script_type":       scriptType,
+		"assets":            assets,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if receiver != "" {
+		op["receiver"] = receiver
+	}
+	if outputDatumCborHex != "" {
+		op["output_datum_cbor_hex"] = outputDatumCborHex
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) AttachSpendingValidator(scriptCborHex, scriptType string) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type": "attach_spending_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) AttachCertificateValidator(scriptCborHex, scriptType string) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type": "attach_certificate_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) AttachRewardValidator(scriptCborHex, scriptType string) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type": "attach_reward_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) AttachProposingValidator(scriptCborHex, scriptType string) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type": "attach_proposing_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) AttachVotingValidator(scriptCborHex, scriptType string) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type": "attach_voting_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return sb
+}
+
+// Redeemer-enhanced staking/governance
+
+func (sb *ScriptTxBuilder) DeregisterStakeAddress(address, redeemerCborHex, refundAddress string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "deregister_stake_address", "address": address, "redeemer_cbor_hex": redeemerCborHex,
+	}
+	if refundAddress != "" {
+		op["refund_address"] = refundAddress
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) DelegateTo(address, poolID, redeemerCborHex string) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type": "delegate_to", "address": address, "pool_id": poolID, "redeemer_cbor_hex": redeemerCborHex,
+	})
+	return sb
+}
+
+func (sb *ScriptTxBuilder) Withdraw(rewardAddress, amount, redeemerCborHex, receiver string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "withdraw", "reward_address": rewardAddress, "amount": amount, "redeemer_cbor_hex": redeemerCborHex,
+	}
+	if receiver != "" {
+		op["receiver"] = receiver
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) RegisterDRep(credHash, credType, redeemerCborHex, anchorURL, anchorDataHash string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "register_drep", "credential_hash": credHash, "credential_type": credType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if anchorURL != "" {
+		op["anchor_url"] = anchorURL
+	}
+	if anchorDataHash != "" {
+		op["anchor_data_hash"] = anchorDataHash
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) UnregisterDRep(credHash, credType, redeemerCborHex, refundAddress string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if refundAddress != "" {
+		op["refund_address"] = refundAddress
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) UpdateDRep(credHash, credType, redeemerCborHex, anchorURL, anchorDataHash string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "update_drep", "credential_hash": credHash, "credential_type": credType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if anchorURL != "" {
+		op["anchor_url"] = anchorURL
+	}
+	if anchorDataHash != "" {
+		op["anchor_data_hash"] = anchorDataHash
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) DelegateVotingPowerTo(address, drepType, drepHash, redeemerCborHex string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "delegate_voting_power_to", "address": address, "drep_type": drepType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if drepHash != "" {
+		op["drep_hash"] = drepHash
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) CreateVote(voterType, voterHash, govActionTxHash string, govActionIndex int, vote, redeemerCborHex, anchorURL, anchorDataHash string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "create_vote", "voter_type": voterType, "voter_hash": voterHash,
+		"gov_action_tx_hash": govActionTxHash, "gov_action_index": govActionIndex, "vote": vote,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if anchorURL != "" {
+		op["anchor_url"] = anchorURL
+	}
+	if anchorDataHash != "" {
+		op["anchor_data_hash"] = anchorDataHash
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) CreateProposal(govActionType, returnAddress, anchorURL, anchorDataHash, redeemerCborHex string, withdrawals []map[string]string) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type": "create_proposal", "gov_action_type": govActionType,
+		"return_address": returnAddress, "anchor_url": anchorURL, "anchor_data_hash": anchorDataHash,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if len(withdrawals) > 0 {
+		op["withdrawals"] = withdrawals
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+// Config
+
+func (sb *ScriptTxBuilder) From(address string) *ScriptTxBuilder {
+	sb.from = address
+	return sb
+}
+
+func (sb *ScriptTxBuilder) ChangeAddress(address string) *ScriptTxBuilder {
+	sb.changeAddress = address
+	return sb
+}
+
+func (sb *ScriptTxBuilder) ChangeDatum(datumCborHex string) *ScriptTxBuilder {
+	sb.changeDatumCbor = datumCborHex
+	return sb
+}
+
+func (sb *ScriptTxBuilder) ChangeDatumHash(hash string) *ScriptTxBuilder {
+	sb.changeDatumHash = hash
+	return sb
+}
+
+func (sb *ScriptTxBuilder) FeePayer(address string) *ScriptTxBuilder {
+	sb.feePayer = address
+	return sb
+}
+
+func (sb *ScriptTxBuilder) WithUtxos(utxos interface{}) *ScriptTxBuilder {
+	sb.utxos = utxos
+	return sb
+}
+
+func (sb *ScriptTxBuilder) WithProtocolParams(params interface{}) *ScriptTxBuilder {
+	sb.protocolParams = params
+	return sb
+}
+
+func (sb *ScriptTxBuilder) ValidFrom(slot int64) *ScriptTxBuilder {
+	if sb.validity == nil {
+		sb.validity = make(map[string]interface{})
+	}
+	sb.validity["valid_from"] = slot
+	return sb
+}
+
+func (sb *ScriptTxBuilder) ValidTo(slot int64) *ScriptTxBuilder {
+	if sb.validity == nil {
+		sb.validity = make(map[string]interface{})
+	}
+	sb.validity["valid_to"] = slot
+	return sb
+}
+
+func (sb *ScriptTxBuilder) MergeOutputs(merge bool) *ScriptTxBuilder {
+	sb.mergeOutputs = &merge
+	return sb
+}
+
+func (sb *ScriptTxBuilder) SignerCount(count int) *ScriptTxBuilder {
+	sb.signerCount = count
+	return sb
+}
+
+func (sb *ScriptTxBuilder) buildSpec(providerConfig *ProviderConfig) map[string]interface{} {
+	spec := map[string]interface{}{
+		"tx_type":      "script_tx",
+		"operations":   sb.operations,
+		"from":         sb.from,
+		"signer_count": sb.signerCount,
+	}
+	if providerConfig != nil {
+		spec["provider"] = providerConfig
+	} else {
+		spec["utxos"] = sb.utxos
+	}
+	if sb.protocolParams != nil {
+		spec["protocol_params"] = sb.protocolParams
+	}
+	if sb.changeAddress != "" {
+		spec["change_address"] = sb.changeAddress
+	}
+	if sb.feePayer != "" {
+		spec["fee_payer"] = sb.feePayer
+	}
+	if len(sb.validity) > 0 {
+		spec["validity"] = sb.validity
+	}
+	if sb.mergeOutputs != nil {
+		spec["merge_outputs"] = *sb.mergeOutputs
+	}
+	if sb.changeDatumCbor != "" {
+		spec["change_datum_cbor_hex"] = sb.changeDatumCbor
+	}
+	if sb.changeDatumHash != "" {
+		spec["change_datum_hash"] = sb.changeDatumHash
+	}
+	return spec
+}
+
+// Build builds the script transaction. Returns TxResult with tx_cbor, tx_hash, fee.
+func (sb *ScriptTxBuilder) Build() (*TxResult, error) {
+	return sb.doBuild(nil)
+}
+
+// BuildWithProvider builds with a Java-side provider config for lazy UTXO fetching.
+func (sb *ScriptTxBuilder) BuildWithProvider(config ProviderConfig) (*TxResult, error) {
+	return sb.doBuild(&config)
+}
+
+func (sb *ScriptTxBuilder) doBuild(providerConfig *ProviderConfig) (*TxResult, error) {
+	spec := sb.buildSpec(providerConfig)
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal spec: %w", err)
+	}
+
+	cs := cstr(string(specJSON))
+	defer C.free(unsafe.Pointer(cs))
+
+	rc := C.ccl_quicktx_build(sb.bridge.thread, cs)
+	result, err := sb.bridge.check(rc)
+	if err != nil {
+		return nil, err
+	}
+
+	var txResult TxResult
+	if err := json.Unmarshal([]byte(result), &txResult); err != nil {
+		return nil, fmt.Errorf("failed to parse tx result: %w", err)
+	}
+	return &txResult, nil
+}
+
+// --- ScriptTx (for Compose) ---
+
+// ScriptTx is a lightweight operation collector for script transactions in Compose.
+type ScriptTx struct {
+	operations      []map[string]interface{}
+	from            string
+	changeAddress   string
+	changeDatumCbor string
+	changeDatumHash string
+}
+
+func (st *ScriptTx) PayToAddress(address string, amounts ...Amount) *ScriptTx {
+	amountList := make([]Amount, len(amounts))
+	copy(amountList, amounts)
+	st.operations = append(st.operations, map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amountList,
+	})
+	return st
+}
+
+func (st *ScriptTx) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *ScriptTx {
+	op := map[string]interface{}{
+		"type":    "pay_to_contract",
+		"address": address,
+		"amounts": amounts,
+	}
+	if datumCborHex != "" {
+		op["datum_cbor_hex"] = datumCborHex
+	}
+	if datumHash != "" {
+		op["datum_hash"] = datumHash
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) AttachMetadata(label int, metadata interface{}) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type":     "attach_metadata",
+		"label":    label,
+		"metadata": metadata,
+	})
+	return st
+}
+
+func (st *ScriptTx) CollectFrom(utxos []map[string]interface{}) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type":          "collect_from",
+		"collect_utxos": utxos,
+	})
+	return st
+}
+
+func (st *ScriptTx) CollectFromScript(utxos []map[string]interface{}, redeemerCborHex, datumCborHex string) *ScriptTx {
+	op := map[string]interface{}{
+		"type":              "collect_from",
+		"collect_utxos":     utxos,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if datumCborHex != "" {
+		op["datum_cbor_hex"] = datumCborHex
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) ReadFrom(referenceInputs []ReferenceInput) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type":             "read_from",
+		"reference_inputs": referenceInputs,
+	})
+	return st
+}
+
+func (st *ScriptTx) MintPlutusAssets(scriptCborHex, scriptType string, assets []MintAsset, redeemerCborHex, receiver, outputDatumCborHex string) *ScriptTx {
+	op := map[string]interface{}{
+		"type":              "mint_plutus_assets",
+		"script_cbor_hex":   scriptCborHex,
+		"script_type":       scriptType,
+		"assets":            assets,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if receiver != "" {
+		op["receiver"] = receiver
+	}
+	if outputDatumCborHex != "" {
+		op["output_datum_cbor_hex"] = outputDatumCborHex
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) AttachSpendingValidator(scriptCborHex, scriptType string) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type": "attach_spending_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return st
+}
+
+func (st *ScriptTx) AttachCertificateValidator(scriptCborHex, scriptType string) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type": "attach_certificate_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return st
+}
+
+func (st *ScriptTx) AttachRewardValidator(scriptCborHex, scriptType string) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type": "attach_reward_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return st
+}
+
+func (st *ScriptTx) AttachProposingValidator(scriptCborHex, scriptType string) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type": "attach_proposing_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return st
+}
+
+func (st *ScriptTx) AttachVotingValidator(scriptCborHex, scriptType string) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type": "attach_voting_validator", "script_cbor_hex": scriptCborHex, "script_type": scriptType,
+	})
+	return st
+}
+
+// Redeemer-enhanced staking/governance
+
+func (st *ScriptTx) DeregisterStakeAddress(address, redeemerCborHex, refundAddress string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "deregister_stake_address", "address": address, "redeemer_cbor_hex": redeemerCborHex,
+	}
+	if refundAddress != "" {
+		op["refund_address"] = refundAddress
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) DelegateTo(address, poolID, redeemerCborHex string) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type": "delegate_to", "address": address, "pool_id": poolID, "redeemer_cbor_hex": redeemerCborHex,
+	})
+	return st
+}
+
+func (st *ScriptTx) Withdraw(rewardAddress, amount, redeemerCborHex, receiver string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "withdraw", "reward_address": rewardAddress, "amount": amount, "redeemer_cbor_hex": redeemerCborHex,
+	}
+	if receiver != "" {
+		op["receiver"] = receiver
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) RegisterDRep(credHash, credType, redeemerCborHex, anchorURL, anchorDataHash string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "register_drep", "credential_hash": credHash, "credential_type": credType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if anchorURL != "" {
+		op["anchor_url"] = anchorURL
+	}
+	if anchorDataHash != "" {
+		op["anchor_data_hash"] = anchorDataHash
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) UnregisterDRep(credHash, credType, redeemerCborHex, refundAddress string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if refundAddress != "" {
+		op["refund_address"] = refundAddress
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) UpdateDRep(credHash, credType, redeemerCborHex, anchorURL, anchorDataHash string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "update_drep", "credential_hash": credHash, "credential_type": credType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if anchorURL != "" {
+		op["anchor_url"] = anchorURL
+	}
+	if anchorDataHash != "" {
+		op["anchor_data_hash"] = anchorDataHash
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) DelegateVotingPowerTo(address, drepType, drepHash, redeemerCborHex string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "delegate_voting_power_to", "address": address, "drep_type": drepType,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if drepHash != "" {
+		op["drep_hash"] = drepHash
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) CreateVote(voterType, voterHash, govActionTxHash string, govActionIndex int, vote, redeemerCborHex, anchorURL, anchorDataHash string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "create_vote", "voter_type": voterType, "voter_hash": voterHash,
+		"gov_action_tx_hash": govActionTxHash, "gov_action_index": govActionIndex, "vote": vote,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if anchorURL != "" {
+		op["anchor_url"] = anchorURL
+	}
+	if anchorDataHash != "" {
+		op["anchor_data_hash"] = anchorDataHash
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) CreateProposal(govActionType, returnAddress, anchorURL, anchorDataHash, redeemerCborHex string, withdrawals []map[string]string) *ScriptTx {
+	op := map[string]interface{}{
+		"type": "create_proposal", "gov_action_type": govActionType,
+		"return_address": returnAddress, "anchor_url": anchorURL, "anchor_data_hash": anchorDataHash,
+		"redeemer_cbor_hex": redeemerCborHex,
+	}
+	if len(withdrawals) > 0 {
+		op["withdrawals"] = withdrawals
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) From(address string) *ScriptTx {
+	st.from = address
+	return st
+}
+
+func (st *ScriptTx) ChangeAddress(address string) *ScriptTx {
+	st.changeAddress = address
+	return st
+}
+
+func (st *ScriptTx) ChangeDatum(datumCborHex string) *ScriptTx {
+	st.changeDatumCbor = datumCborHex
+	return st
+}
+
+func (st *ScriptTx) ChangeDatumHash(hash string) *ScriptTx {
+	st.changeDatumHash = hash
+	return st
+}
+
+func (st *ScriptTx) ToSpec() map[string]interface{} {
+	spec := map[string]interface{}{
+		"tx_type":    "script_tx",
+		"from":       st.from,
+		"operations": st.operations,
+	}
+	if st.changeAddress != "" {
+		spec["change_address"] = st.changeAddress
+	}
+	if st.changeDatumCbor != "" {
+		spec["change_datum_cbor_hex"] = st.changeDatumCbor
+	}
+	if st.changeDatumHash != "" {
+		spec["change_datum_hash"] = st.changeDatumHash
+	}
+	return spec
 }

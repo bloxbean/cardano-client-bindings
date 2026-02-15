@@ -2,11 +2,12 @@ package com.bloxbean.cardano.bridge.api.quicktx;
 
 import com.bloxbean.cardano.bridge.util.JsonHelper;
 import com.bloxbean.cardano.client.api.ProtocolParamsSupplier;
+import com.bloxbean.cardano.client.api.TransactionEvaluator;
 import com.bloxbean.cardano.client.api.UtxoSupplier;
 import com.bloxbean.cardano.client.common.cbor.CborSerializationUtil;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.client.quicktx.AbstractTx;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
-import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.transaction.spec.Transaction;
 import com.bloxbean.cardano.client.util.HexUtil;
 
@@ -46,18 +47,40 @@ public class QuickTxService {
             ppSupplier = () -> spec.getProtocolParams();
         }
 
+        // Create evaluator for script cost evaluation if provider is configured
+        TransactionEvaluator evaluator = null;
+        if (spec.getProvider() != null) {
+            boolean enableEval = spec.getProvider().getEnableCostEvaluation() == null
+                    || spec.getProvider().getEnableCostEvaluation();
+            if (enableEval) {
+                evaluator = new YaciTransactionEvaluator(spec.getProvider().getUrl());
+            }
+        }
+
         // Build with QuickTxBuilder
         QuickTxBuilder builder = new QuickTxBuilder(utxoSupplier, ppSupplier, null);
 
         // Detect compose vs single mode
         QuickTxBuilder.TxContext txContext;
         if (spec.getTransactions() != null && !spec.getTransactions().isEmpty()) {
-            Tx[] txs = spec.getTransactions().stream()
-                    .map(TxSpecMapper::toTx)
-                    .toArray(Tx[]::new);
+            // Compose mode — each item can be Tx or ScriptTx
+            AbstractTx<?>[] txs = spec.getTransactions().stream()
+                    .map(item -> {
+                        if ("script_tx".equals(item.getTxType())) {
+                            return (AbstractTx<?>) ScriptTxSpecMapper.toScriptTx(item);
+                        } else {
+                            return (AbstractTx<?>) TxSpecMapper.toTx(item);
+                        }
+                    })
+                    .toArray(AbstractTx[]::new);
             txContext = builder.compose(txs);
         } else {
-            txContext = builder.compose(TxSpecMapper.toTx(spec));
+            // Single mode
+            if ("script_tx".equals(spec.getTxType())) {
+                txContext = builder.compose(ScriptTxSpecMapper.toScriptTx(spec));
+            } else {
+                txContext = builder.compose(TxSpecMapper.toTx(spec));
+            }
         }
 
         // Set additional signers count for fee estimation
@@ -87,8 +110,18 @@ public class QuickTxService {
         }
 
         // Set fee payer
+        // For script_tx mode, feePayer is required since ScriptTx.from() is package-private.
+        // TxContext.feePayer() sets both the feePayer and calls ScriptTx.from() internally.
         if (spec.getFeePayer() != null && !spec.getFeePayer().isEmpty()) {
             txContext.feePayer(spec.getFeePayer());
+        } else if ("script_tx".equals(spec.getTxType())
+                && spec.getFrom() != null && !spec.getFrom().isEmpty()) {
+            txContext.feePayer(spec.getFrom());
+        }
+
+        // Set transaction evaluator for script cost evaluation
+        if (evaluator != null) {
+            txContext.withTxEvaluator(evaluator);
         }
 
         // Build the transaction

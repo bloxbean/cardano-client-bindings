@@ -1,4 +1,4 @@
-use ccl::{Amount, Bridge, MintAsset, ProviderConfig, ProposalWithdrawal, TxResult};
+use ccl::{Amount, Bridge, ComposableTx, MintAsset, ProviderConfig, ProposalWithdrawal, TxResult};
 use serde_json::{json, Value};
 
 // A known valid transaction CBOR hex (built from Java tests)
@@ -925,7 +925,7 @@ fn test_quicktx_compose() {
 
     let result = bridge
         .quicktx()
-        .compose(vec![tx1, tx2])
+        .compose(vec![ComposableTx::Regular(tx1), ComposableTx::Regular(tx2)])
         .fee_payer(&sender1)
         .with_utxos(utxos)
         .with_protocol_params(test_protocol_params())
@@ -945,6 +945,7 @@ fn test_quicktx_provider_config() {
         name: "yaci_devkit".to_string(),
         url: "http://localhost:3000".to_string(),
         api_key: None,
+        enable_cost_evaluation: None,
     };
 
     // Provider config will attempt Java-side HTTP; expect an error since no provider is running

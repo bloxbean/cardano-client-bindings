@@ -44,6 +44,15 @@ public class TxSpec {
     @JsonProperty("provider")
     private ProviderConfig provider;
 
+    @JsonProperty("tx_type")
+    private String txType;
+
+    @JsonProperty("change_datum_cbor_hex")
+    private String changeDatumCborHex;
+
+    @JsonProperty("change_datum_hash")
+    private String changeDatumHash;
+
     public List<TxOperation> getOperations() { return operations; }
     public void setOperations(List<TxOperation> operations) { this.operations = operations; }
 
@@ -77,6 +86,15 @@ public class TxSpec {
     public ProviderConfig getProvider() { return provider; }
     public void setProvider(ProviderConfig provider) { this.provider = provider; }
 
+    public String getTxType() { return txType; }
+    public void setTxType(String txType) { this.txType = txType; }
+
+    public String getChangeDatumCborHex() { return changeDatumCborHex; }
+    public void setChangeDatumCborHex(String changeDatumCborHex) { this.changeDatumCborHex = changeDatumCborHex; }
+
+    public String getChangeDatumHash() { return changeDatumHash; }
+    public void setChangeDatumHash(String changeDatumHash) { this.changeDatumHash = changeDatumHash; }
+
     public void validate() {
         if (transactions != null && !transactions.isEmpty()) {
             // Compose mode
@@ -91,7 +109,7 @@ public class TxSpec {
             if (operations == null || operations.isEmpty()) {
                 throw new IllegalArgumentException("At least one operation is required");
             }
-            if (from == null || from.isEmpty()) {
+            if (!"script_tx".equals(txType) && (from == null || from.isEmpty())) {
                 throw new IllegalArgumentException("'from' address is required");
             }
         }

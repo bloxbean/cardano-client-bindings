@@ -108,6 +108,22 @@ public class TxOperation {
     @JsonProperty("withdrawals")
     private List<Map<String, String>> withdrawals;
 
+    // ScriptTx fields
+    @JsonProperty("redeemer_cbor_hex")
+    private String redeemerCborHex;
+
+    @JsonProperty("script_cbor_hex")
+    private String scriptCborHex;
+
+    @JsonProperty("script_type")
+    private String scriptType;
+
+    @JsonProperty("reference_inputs")
+    private List<ReferenceInput> referenceInputs;
+
+    @JsonProperty("output_datum_cbor_hex")
+    private String outputDatumCborHex;
+
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
 
@@ -194,6 +210,36 @@ public class TxOperation {
 
     public List<Map<String, String>> getWithdrawals() { return withdrawals; }
     public void setWithdrawals(List<Map<String, String>> withdrawals) { this.withdrawals = withdrawals; }
+
+    public String getRedeemerCborHex() { return redeemerCborHex; }
+    public void setRedeemerCborHex(String redeemerCborHex) { this.redeemerCborHex = redeemerCborHex; }
+
+    public String getScriptCborHex() { return scriptCborHex; }
+    public void setScriptCborHex(String scriptCborHex) { this.scriptCborHex = scriptCborHex; }
+
+    public String getScriptType() { return scriptType; }
+    public void setScriptType(String scriptType) { this.scriptType = scriptType; }
+
+    public List<ReferenceInput> getReferenceInputs() { return referenceInputs; }
+    public void setReferenceInputs(List<ReferenceInput> referenceInputs) { this.referenceInputs = referenceInputs; }
+
+    public String getOutputDatumCborHex() { return outputDatumCborHex; }
+    public void setOutputDatumCborHex(String outputDatumCborHex) { this.outputDatumCborHex = outputDatumCborHex; }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class ReferenceInput {
+        @JsonProperty("tx_hash")
+        private String txHash;
+
+        @JsonProperty("output_index")
+        private int outputIndex;
+
+        public String getTxHash() { return txHash; }
+        public void setTxHash(String txHash) { this.txHash = txHash; }
+
+        public int getOutputIndex() { return outputIndex; }
+        public void setOutputIndex(int outputIndex) { this.outputIndex = outputIndex; }
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class MintAsset {
