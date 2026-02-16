@@ -799,6 +799,7 @@ func TestQuickTxUnregisterDRep(t *testing.T) {
 		WithUtxos(makeUtxos(sender.BaseAddress, 100_000_000)).
 		WithProtocolParams(testProtocolParams()).
 		Build()
+	// The UnregisterDRep now takes optional UnregisterDRepOption - calling without opts should work
 	if err != nil {
 		t.Fatalf("Build() failed: %v", err)
 	}
@@ -1028,4 +1029,161 @@ func TestQuickTxInsufficientFunds(t *testing.T) {
 	if cclErr.Code >= 0 {
 		t.Errorf("expected negative error code, got %d", cclErr.Code)
 	}
+}
+
+func TestQuickTxRegisterPool(t *testing.T) {
+	sender, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	operatorHash := strings.Repeat("ab", 28)                  // 28-byte (56 hex chars) pool operator key hash
+	vrfKeyHash := strings.Repeat("cd", 32)                    // 32-byte (64 hex chars) VRF key hash
+	rewardAccountHex := "e0" + strings.Repeat("ab", 28) // testnet reward address (hex)
+	result, err := bridge.QuickTx.NewTx().
+		RegisterPool(operatorHash, vrfKeyHash, "500000000", "340000000", "1", "5",
+			rewardAccountHex, []string{operatorHash}).
+		From(sender.BaseAddress).
+		WithUtxos(makeUtxos(sender.BaseAddress, 1_000_000_000)).
+		WithProtocolParams(testProtocolParams()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+	assertTxResult(t, result)
+}
+
+func TestQuickTxUpdatePool(t *testing.T) {
+	sender, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	operatorHash := strings.Repeat("ab", 28)                  // 28-byte (56 hex chars) pool operator key hash
+	vrfKeyHash := strings.Repeat("cd", 32)                    // 32-byte (64 hex chars) VRF key hash
+	metadataHash := strings.Repeat("ef", 32)                  // 32-byte (64 hex chars) metadata hash
+	rewardAccountHex := "e0" + strings.Repeat("ab", 28) // testnet reward address (hex)
+	result, err := bridge.QuickTx.NewTx().
+		UpdatePool(operatorHash, vrfKeyHash, "600000000", "340000000", "1", "10",
+			rewardAccountHex, []string{operatorHash}, PoolOptions{
+				PoolMetadataURL:  "https://example.com/pool.json",
+				PoolMetadataHash: metadataHash,
+			}).
+		From(sender.BaseAddress).
+		WithUtxos(makeUtxos(sender.BaseAddress, 1_000_000_000)).
+		WithProtocolParams(testProtocolParams()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+	assertTxResult(t, result)
+}
+
+func TestQuickTxRetirePool(t *testing.T) {
+	sender, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	poolID := "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+	result, err := bridge.QuickTx.NewTx().
+		RetirePool(poolID, 100).
+		From(sender.BaseAddress).
+		WithUtxos(makeUtxos(sender.BaseAddress, 100_000_000)).
+		WithProtocolParams(testProtocolParams()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+	assertTxResult(t, result)
+}
+
+func TestQuickTxDonateToTreasury(t *testing.T) {
+	sender, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	result, err := bridge.QuickTx.NewTx().
+		DonateToTreasury("5000000", "1000000").
+		From(sender.BaseAddress).
+		WithUtxos(makeUtxos(sender.BaseAddress, 100_000_000)).
+		WithProtocolParams(testProtocolParams()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+	assertTxResult(t, result)
+}
+
+func TestQuickTxAttachNativeScript(t *testing.T) {
+	sender, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	addrInfo, err := bridge.Address.Info(sender.BaseAddress)
+	if err != nil {
+		t.Fatalf("address info: %v", err)
+	}
+
+	scriptJSON := fmt.Sprintf(`{"type":"sig","keyHash":"%s"}`, addrInfo.PaymentCredentialHash)
+	result, err := bridge.QuickTx.NewTx().
+		PayToAddress(sender.BaseAddress, Ada(2)).
+		AttachNativeScript(scriptJSON).
+		From(sender.BaseAddress).
+		WithUtxos(makeUtxos(sender.BaseAddress, 100_000_000)).
+		WithProtocolParams(testProtocolParams()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+	assertTxResult(t, result)
+}
+
+func TestQuickTxPayWithScriptRef(t *testing.T) {
+	sender, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+	receiver, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create receiver: %v", err)
+	}
+
+	// Always-succeeds PlutusV3 script CBOR
+	scriptRefCbor := "46450101002499"
+
+	result, err := bridge.QuickTx.NewTx().
+		PayToAddressWithScriptRef(receiver.BaseAddress, []Amount{Ada(5)}, ScriptRefOption{
+			ScriptRefCborHex: scriptRefCbor,
+			ScriptRefType:    "plutus_v3",
+		}).
+		From(sender.BaseAddress).
+		WithUtxos(makeUtxos(sender.BaseAddress, 100_000_000)).
+		WithProtocolParams(testProtocolParams()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+	assertTxResult(t, result)
+}
+
+func TestQuickTxUnregisterDRepWithRefundAmount(t *testing.T) {
+	sender, err := bridge.Account.Create(Testnet)
+	if err != nil {
+		t.Fatalf("create sender: %v", err)
+	}
+
+	credHash := strings.Repeat("ab", 28)
+	result, err := bridge.QuickTx.NewTx().
+		UnregisterDRep(credHash, "key", UnregisterDRepOption{RefundAmount: "2000000"}).
+		From(sender.BaseAddress).
+		WithUtxos(makeUtxos(sender.BaseAddress, 100_000_000)).
+		WithProtocolParams(testProtocolParams()).
+		Build()
+	if err != nil {
+		t.Fatalf("Build() failed: %v", err)
+	}
+	assertTxResult(t, result)
 }

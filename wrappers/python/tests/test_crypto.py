@@ -54,3 +54,23 @@ def test_crypto_verify_rejects_wrong_signature(ccl):
 def test_version(ccl):
     version = ccl.version()
     assert version == "0.1.0"
+
+
+# --- Negative / Error Tests ---
+
+def test_crypto_blake2b_256_invalid_hex(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.crypto.blake2b_256("not_valid_hex!")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected
+
+
+def test_crypto_sign_invalid_key(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.crypto.sign("68656c6c6f", "zz" * 32)
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected

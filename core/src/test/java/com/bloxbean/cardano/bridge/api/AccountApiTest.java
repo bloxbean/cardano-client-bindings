@@ -93,4 +93,29 @@ class AccountApiTest {
         assertTrue(account.enterpriseAddress().startsWith("addr1"));
         assertTrue(account.stakeAddress().startsWith("stake1"));
     }
+
+    // --- Negative / Error Tests ---
+
+    @Test
+    void testAccountFromInvalidMnemonic() {
+        assertThrows(Exception.class, () ->
+            Account.createFromMnemonic(Networks.mainnet(),
+                "invalid words that are not a valid mnemonic phrase at all here now", 0, 0)
+        );
+    }
+
+    @Test
+    void testAccountFromEmptyMnemonic() {
+        assertThrows(Exception.class, () ->
+            Account.createFromMnemonic(Networks.mainnet(), "", 0, 0)
+        );
+    }
+
+    @Test
+    void testAccountFromPartialMnemonic() {
+        // Only 6 words - too short for a valid mnemonic
+        assertThrows(Exception.class, () ->
+            Account.createFromMnemonic(Networks.mainnet(), "test walk nut penalty hip pave", 0, 0)
+        );
+    }
 }

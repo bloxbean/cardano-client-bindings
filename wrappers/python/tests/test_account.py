@@ -53,3 +53,33 @@ def test_account_drep_id(ccl):
 
     drep_id = ccl.account.get_drep_id(mnemonic, CclLib.MAINNET)
     assert drep_id.startswith('drep1')
+
+
+# --- Negative / Error Tests ---
+
+def test_account_from_invalid_mnemonic(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.account.from_mnemonic("invalid words that are not a valid mnemonic phrase at all", CclLib.MAINNET)
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected
+
+
+def test_account_from_empty_mnemonic(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.account.from_mnemonic("", CclLib.MAINNET)
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected
+
+
+def test_account_sign_tx_invalid_cbor(ccl):
+    from ccl._ffi import CclError
+    created = ccl.account.create(CclLib.TESTNET)
+    try:
+        ccl.account.sign_tx(created['mnemonic'], "deadbeef", CclLib.TESTNET)
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected

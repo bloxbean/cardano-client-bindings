@@ -33,3 +33,23 @@ def test_plutus_data_json_roundtrip(ccl):
     roundtrip_cbor = ccl.plutus.data_from_json(json_str)
     roundtrip_hash = ccl.plutus.data_hash(roundtrip_cbor)
     assert original_hash == roundtrip_hash
+
+
+# --- Negative / Error Tests ---
+
+def test_plutus_data_hash_invalid_cbor(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.plutus.data_hash("zzzz")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected
+
+
+def test_plutus_data_hash_empty(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.plutus.data_hash("")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected

@@ -15,5 +15,5 @@ task test(type: Exec) {
     environment 'DYLD_LIBRARY_PATH', nativeDir
     environment 'LD_LIBRARY_PATH', nativeDir
 
-    commandLine 'bun', 'test', 'test/ccl.test.js'
+    commandLine 'bash', '-c', 'bun test test/ccl.test.js'
 }

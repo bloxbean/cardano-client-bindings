@@ -99,4 +99,47 @@ class CryptoApiTest {
         boolean valid = CryptoConfiguration.INSTANCE.getSigningProvider().verify(signature, message, account2.publicKeyBytes());
         assertFalse(valid);
     }
+
+    // --- Negative / Error Tests ---
+
+    @Test
+    void testBlake2b256EmptyInput() {
+        byte[] hash = Blake2bUtil.blake2bHash256(new byte[0]);
+        assertNotNull(hash);
+        assertEquals(32, hash.length);
+    }
+
+    @Test
+    void testBlake2b224EmptyInput() {
+        byte[] hash = Blake2bUtil.blake2bHash224(new byte[0]);
+        assertNotNull(hash);
+        assertEquals(28, hash.length);
+    }
+
+    @Test
+    void testValidateMnemonicWithGibberish() {
+        assertThrows(Exception.class, () ->
+            MnemonicUtil.validateMnemonic("zzz xxx yyy www vvv uuu ttt sss rrr qqq ppp ooo")
+        );
+    }
+
+    @Test
+    void testValidateEmptyMnemonic() {
+        assertThrows(Exception.class, () ->
+            MnemonicUtil.validateMnemonic("")
+        );
+    }
+
+    @Test
+    void testVerifyWithWrongMessage() {
+        com.bloxbean.cardano.client.account.Account account =
+            new com.bloxbean.cardano.client.account.Account(
+                com.bloxbean.cardano.client.common.model.Networks.mainnet());
+
+        byte[] message = "original message".getBytes();
+        byte[] wrongMessage = "tampered message".getBytes();
+        byte[] signature = CryptoConfiguration.INSTANCE.getSigningProvider().signExtended(message, account.privateKeyBytes());
+        boolean valid = CryptoConfiguration.INSTANCE.getSigningProvider().verify(signature, wrongMessage, account.publicKeyBytes());
+        assertFalse(valid);
+    }
 }

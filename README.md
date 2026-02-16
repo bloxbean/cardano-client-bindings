@@ -4,20 +4,21 @@ CCL Bridge compiles [Cardano Client Lib (CCL)](https://github.com/bloxbean/carda
 
 ## Why?
 
-CCL is one of the most complete Cardano SDKs, but it's Java-only. Many Cardano developers work in Python, Go, Rust, or JavaScript where the SDK ecosystem is incomplete. CCL Bridge fills this gap by exposing CCL through a standard C ABI that any language can call.
+[Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib) is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. CCL Bridge makes selected CCL modules available as a **native shared library with a C ABI**, so languages like Python, Go, Rust, and JavaScript can use it directly — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
 
 ## What's Included
 
 The bridge exposes CCL's **offline/local** operations:
 
-- **Account** - Create accounts, derive keys, export public/private keys, sign transactions
-- **Address** - Parse, validate, convert between bech32 and bytes
-- **Crypto** - Blake2b hashing, mnemonic generation/validation, Ed25519 sign/verify
-- **Transaction** - Serialize, deserialize, hash, sign transactions
-- **Plutus** - PlutusData CBOR/JSON conversion, datum hashing
-- **Script** - Native script parsing, script hashing
-- **Governance** - DRep, committee cold/hot key derivation
-- **HD Wallet** - Create wallets, derive addresses
+- **Account** — Create accounts, derive keys, export public/private keys, sign transactions
+- **Address** — Parse, validate, convert between bech32 and bytes
+- **Crypto** — Blake2b hashing, mnemonic generation/validation, Ed25519 sign/verify
+- **Transaction** — Serialize, deserialize, hash, sign transactions
+- **Plutus** — PlutusData CBOR/JSON conversion, datum hashing
+- **Script** — Native script parsing, script hashing
+- **Governance** — DRep, committee cold/hot key derivation
+- **HD Wallet** — Create wallets, derive addresses
+- **QuickTx** — JSON-driven offline transaction builder supporting payments, staking, governance, Plutus scripts, and multi-party compose ([documentation](docs/quicktx.md))
 
 Backend/HTTP modules (Blockfrost, Koios, Ogmios) are intentionally excluded — every language has good HTTP libraries, and CCL's real value is the hard parts listed above.
 
@@ -27,13 +28,15 @@ Backend/HTTP modules (Blockfrost, Koios, Ogmios) are intentionally excluded — 
 ccl-bridge/
 ├── core/                    # Java bridge + GraalVM native-image → libccl
 │   ├── src/main/java/       # @CEntryPoint API classes
-│   └── src/test/java/       # JVM unit tests (24 tests)
+│   └── src/test/java/       # JVM unit tests (72+ tests)
 ├── native-test/             # C smoke tests
 ├── wrappers/
 │   ├── python/              # Python bindings (ctypes)
 │   ├── go/                  # Go bindings (cgo)
 │   ├── rust/                # Rust bindings (FFI)
 │   └── js/                  # JavaScript bindings (Bun FFI)
+├── docs/                    # Documentation
+│   └── quicktx.md           # QuickTx transaction builder reference
 ├── build.gradle
 └── settings.gradle
 ```
@@ -41,14 +44,33 @@ ccl-bridge/
 ## Prerequisites
 
 **Required:**
-- [GraalVM 25+](https://www.graalvm.org/) (includes `native-image`)
+- **[GraalVM 25+](https://www.graalvm.org/)** (includes `native-image`)
+  ```bash
+  sdk install java 25.0.2-graal   # via SDKMAN
+  ```
 
 **For running wrapper tests (install whichever you need):**
-- Python 3.8+ with pytest (`pip install pytest`)
-- Go 1.21+
-- Rust 1.70+ with cargo
-- [Bun](https://bun.sh/) 1.0+ (for JavaScript — Node.js is not supported due to GraalVM FFI incompatibility)
-- C compiler (gcc/clang) for native C tests
+
+- **Python 3.8+**
+  ```bash
+  pip install pytest
+  ```
+- **Go 1.21+** — install from [go.dev](https://go.dev/dl/)
+- **Rust 1.70+**
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+- **[Bun](https://bun.sh/) 1.0+** (for JavaScript — Node.js is not supported due to GraalVM FFI incompatibility)
+  ```bash
+  curl -fsSL https://bun.sh/install | bash
+  ```
+- **C compiler**
+  ```bash
+  # macOS
+  xcode-select --install
+  # Linux (Debian/Ubuntu)
+  sudo apt install build-essential
+  ```
 
 ## Quick Start
 
@@ -356,16 +378,11 @@ bridge.close();
 | `ccl_wallet_from_mnemonic` | Restore HD wallet from mnemonic |
 | `ccl_wallet_get_address` | Derive address at given index |
 
-## Test Summary
+### QuickTx
 
-| Wrapper | Runtime | Tests | Status |
-|---------|---------|-------|--------|
-| Java (JVM) | JUnit 5 | 24 | Pass |
-| C | Native | 19 assertions | Pass |
-| Python | ctypes + pytest | 31 pass, 5 skipped | Pass |
-| Go | cgo | 25 | Pass |
-| Rust | cargo test | 26 | Pass |
-| JavaScript | Bun FFI | 30 | Pass |
+| Function | Description |
+|----------|-------------|
+| `ccl_quicktx_build` | Build an unsigned transaction from a JSON spec ([documentation](docs/quicktx.md)) |
 
 ## Upstream
 
@@ -374,4 +391,4 @@ bridge.close();
 
 ## License
 
-Same license as [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib).
+[MIT License](LICENSE)

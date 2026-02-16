@@ -1,4 +1,4 @@
-I now have the full picture. The Yaci DevKit API at port 10000 provides exactly what we need:
+Devkit Admin URLs at port  10000:
 
 - POST /local-cluster/api/admin/devnet/reset - Reset devnet
 - POST /local-cluster/api/addresses/topup - Fund addresses ({"address": "...", "adaAmount": 100})

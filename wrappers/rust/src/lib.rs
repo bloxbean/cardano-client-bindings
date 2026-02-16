@@ -707,12 +707,25 @@ pub struct TxBuilder<'a> {
 }
 
 impl<'a> TxBuilder<'a> {
-    pub fn pay_to_address(&mut self, address: &str, amounts: &[Value]) -> &mut Self {
-        self.operations.push(json!({
+    pub fn pay_to_address(
+        &mut self,
+        address: &str,
+        amounts: &[Value],
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
             "type": "pay_to_address",
             "address": address,
             "amounts": amounts,
-        }));
+        });
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
+        }
+        self.operations.push(op);
         self
     }
 
@@ -722,6 +735,8 @@ impl<'a> TxBuilder<'a> {
         amounts: &[Value],
         datum_cbor_hex: Option<&str>,
         datum_hash: Option<&str>,
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "pay_to_contract",
@@ -733,6 +748,12 @@ impl<'a> TxBuilder<'a> {
         }
         if let Some(h) = datum_hash {
             op["datum_hash"] = json!(h);
+        }
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
         }
         self.operations.push(op);
         self
@@ -841,6 +862,7 @@ impl<'a> TxBuilder<'a> {
         cred_hash: &str,
         cred_type: &str,
         refund_address: Option<&str>,
+        refund_amount: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "unregister_drep",
@@ -849,6 +871,9 @@ impl<'a> TxBuilder<'a> {
         });
         if let Some(r) = refund_address {
             op["refund_address"] = json!(r);
+        }
+        if let Some(a) = refund_amount {
+            op["refund_amount"] = json!(a);
         }
         self.operations.push(op);
         self
@@ -942,6 +967,111 @@ impl<'a> TxBuilder<'a> {
             op["withdrawals"] = serde_json::to_value(w).unwrap_or_default();
         }
         self.operations.push(op);
+        self
+    }
+
+    // Pool Operations
+
+    pub fn register_pool(
+        &mut self,
+        operator: &str,
+        vrf_key_hash: &str,
+        pledge: &str,
+        cost: &str,
+        margin_numerator: &str,
+        margin_denominator: &str,
+        reward_address: &str,
+        pool_owners: &[&str],
+        relays: Option<&[Value]>,
+        pool_metadata_url: Option<&str>,
+        pool_metadata_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "register_pool",
+            "operator": operator,
+            "vrf_key_hash": vrf_key_hash,
+            "pledge": pledge,
+            "cost": cost,
+            "margin_numerator": margin_numerator,
+            "margin_denominator": margin_denominator,
+            "reward_address": reward_address,
+            "pool_owners": pool_owners,
+        });
+        if let Some(r) = relays {
+            op["relays"] = json!(r);
+        }
+        if let Some(u) = pool_metadata_url {
+            op["pool_metadata_url"] = json!(u);
+        }
+        if let Some(h) = pool_metadata_hash {
+            op["pool_metadata_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn update_pool(
+        &mut self,
+        operator: &str,
+        vrf_key_hash: &str,
+        pledge: &str,
+        cost: &str,
+        margin_numerator: &str,
+        margin_denominator: &str,
+        reward_address: &str,
+        pool_owners: &[&str],
+        relays: Option<&[Value]>,
+        pool_metadata_url: Option<&str>,
+        pool_metadata_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "update_pool",
+            "operator": operator,
+            "vrf_key_hash": vrf_key_hash,
+            "pledge": pledge,
+            "cost": cost,
+            "margin_numerator": margin_numerator,
+            "margin_denominator": margin_denominator,
+            "reward_address": reward_address,
+            "pool_owners": pool_owners,
+        });
+        if let Some(r) = relays {
+            op["relays"] = json!(r);
+        }
+        if let Some(u) = pool_metadata_url {
+            op["pool_metadata_url"] = json!(u);
+        }
+        if let Some(h) = pool_metadata_hash {
+            op["pool_metadata_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn retire_pool(&mut self, pool_id: &str, epoch: u64) -> &mut Self {
+        self.operations
+            .push(json!({"type": "retire_pool", "pool_id": pool_id, "epoch": epoch}));
+        self
+    }
+
+    // Treasury
+
+    pub fn donate_to_treasury(&mut self, treasury_value: &str, donation_amount: &str) -> &mut Self {
+        self.operations.push(json!({
+            "type": "donate_to_treasury",
+            "treasury_value": treasury_value,
+            "donation_amount": donation_amount,
+        }));
+        self
+    }
+
+    // Native Script
+
+    pub fn attach_native_script(&mut self, script_json: &str) -> &mut Self {
+        self.operations.push(json!({
+            "type": "attach_native_script",
+            "script_json": script_json,
+        }));
         self
     }
 
@@ -1059,12 +1189,25 @@ pub struct Tx {
 }
 
 impl Tx {
-    pub fn pay_to_address(&mut self, address: &str, amounts: &[Value]) -> &mut Self {
-        self.operations.push(json!({
+    pub fn pay_to_address(
+        &mut self,
+        address: &str,
+        amounts: &[Value],
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
             "type": "pay_to_address",
             "address": address,
             "amounts": amounts,
-        }));
+        });
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
+        }
+        self.operations.push(op);
         self
     }
 
@@ -1074,6 +1217,8 @@ impl Tx {
         amounts: &[Value],
         datum_cbor_hex: Option<&str>,
         datum_hash: Option<&str>,
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "pay_to_contract",
@@ -1085,6 +1230,12 @@ impl Tx {
         }
         if let Some(h) = datum_hash {
             op["datum_hash"] = json!(h);
+        }
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
         }
         self.operations.push(op);
         self
@@ -1189,6 +1340,7 @@ impl Tx {
         cred_hash: &str,
         cred_type: &str,
         refund_address: Option<&str>,
+        refund_amount: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "unregister_drep",
@@ -1197,6 +1349,9 @@ impl Tx {
         });
         if let Some(r) = refund_address {
             op["refund_address"] = json!(r);
+        }
+        if let Some(a) = refund_amount {
+            op["refund_amount"] = json!(a);
         }
         self.operations.push(op);
         self
@@ -1286,6 +1441,111 @@ impl Tx {
             op["withdrawals"] = serde_json::to_value(w).unwrap_or_default();
         }
         self.operations.push(op);
+        self
+    }
+
+    // Pool Operations
+
+    pub fn register_pool(
+        &mut self,
+        operator: &str,
+        vrf_key_hash: &str,
+        pledge: &str,
+        cost: &str,
+        margin_numerator: &str,
+        margin_denominator: &str,
+        reward_address: &str,
+        pool_owners: &[&str],
+        relays: Option<&[Value]>,
+        pool_metadata_url: Option<&str>,
+        pool_metadata_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "register_pool",
+            "operator": operator,
+            "vrf_key_hash": vrf_key_hash,
+            "pledge": pledge,
+            "cost": cost,
+            "margin_numerator": margin_numerator,
+            "margin_denominator": margin_denominator,
+            "reward_address": reward_address,
+            "pool_owners": pool_owners,
+        });
+        if let Some(r) = relays {
+            op["relays"] = json!(r);
+        }
+        if let Some(u) = pool_metadata_url {
+            op["pool_metadata_url"] = json!(u);
+        }
+        if let Some(h) = pool_metadata_hash {
+            op["pool_metadata_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn update_pool(
+        &mut self,
+        operator: &str,
+        vrf_key_hash: &str,
+        pledge: &str,
+        cost: &str,
+        margin_numerator: &str,
+        margin_denominator: &str,
+        reward_address: &str,
+        pool_owners: &[&str],
+        relays: Option<&[Value]>,
+        pool_metadata_url: Option<&str>,
+        pool_metadata_hash: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
+            "type": "update_pool",
+            "operator": operator,
+            "vrf_key_hash": vrf_key_hash,
+            "pledge": pledge,
+            "cost": cost,
+            "margin_numerator": margin_numerator,
+            "margin_denominator": margin_denominator,
+            "reward_address": reward_address,
+            "pool_owners": pool_owners,
+        });
+        if let Some(r) = relays {
+            op["relays"] = json!(r);
+        }
+        if let Some(u) = pool_metadata_url {
+            op["pool_metadata_url"] = json!(u);
+        }
+        if let Some(h) = pool_metadata_hash {
+            op["pool_metadata_hash"] = json!(h);
+        }
+        self.operations.push(op);
+        self
+    }
+
+    pub fn retire_pool(&mut self, pool_id: &str, epoch: u64) -> &mut Self {
+        self.operations
+            .push(json!({"type": "retire_pool", "pool_id": pool_id, "epoch": epoch}));
+        self
+    }
+
+    // Treasury
+
+    pub fn donate_to_treasury(&mut self, treasury_value: &str, donation_amount: &str) -> &mut Self {
+        self.operations.push(json!({
+            "type": "donate_to_treasury",
+            "treasury_value": treasury_value,
+            "donation_amount": donation_amount,
+        }));
+        self
+    }
+
+    // Native Script
+
+    pub fn attach_native_script(&mut self, script_json: &str) -> &mut Self {
+        self.operations.push(json!({
+            "type": "attach_native_script",
+            "script_json": script_json,
+        }));
         self
     }
 
@@ -1455,12 +1715,25 @@ pub struct ScriptTxBuilder<'a> {
 }
 
 impl<'a> ScriptTxBuilder<'a> {
-    pub fn pay_to_address(&mut self, address: &str, amounts: &[Value]) -> &mut Self {
-        self.operations.push(json!({
+    pub fn pay_to_address(
+        &mut self,
+        address: &str,
+        amounts: &[Value],
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
             "type": "pay_to_address",
             "address": address,
             "amounts": amounts,
-        }));
+        });
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
+        }
+        self.operations.push(op);
         self
     }
 
@@ -1470,6 +1743,8 @@ impl<'a> ScriptTxBuilder<'a> {
         amounts: &[Value],
         datum_cbor_hex: Option<&str>,
         datum_hash: Option<&str>,
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "pay_to_contract",
@@ -1481,6 +1756,12 @@ impl<'a> ScriptTxBuilder<'a> {
         }
         if let Some(h) = datum_hash {
             op["datum_hash"] = json!(h);
+        }
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
         }
         self.operations.push(op);
         self
@@ -1711,6 +1992,7 @@ impl<'a> ScriptTxBuilder<'a> {
         cred_type: &str,
         redeemer_cbor_hex: &str,
         refund_address: Option<&str>,
+        refund_amount: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "unregister_drep",
@@ -1720,6 +2002,9 @@ impl<'a> ScriptTxBuilder<'a> {
         });
         if let Some(r) = refund_address {
             op["refund_address"] = json!(r);
+        }
+        if let Some(a) = refund_amount {
+            op["refund_amount"] = json!(a);
         }
         self.operations.push(op);
         self
@@ -1824,6 +2109,23 @@ impl<'a> ScriptTxBuilder<'a> {
             op["withdrawals"] = serde_json::to_value(w).unwrap_or_default();
         }
         self.operations.push(op);
+        self
+    }
+
+    // Treasury
+
+    pub fn donate_to_treasury(
+        &mut self,
+        treasury_value: &str,
+        donation_amount: &str,
+        redeemer_cbor_hex: &str,
+    ) -> &mut Self {
+        self.operations.push(json!({
+            "type": "donate_to_treasury",
+            "treasury_value": treasury_value,
+            "donation_amount": donation_amount,
+            "redeemer_cbor_hex": redeemer_cbor_hex,
+        }));
         self
     }
 
@@ -1962,12 +2264,25 @@ pub struct ScriptTx {
 }
 
 impl ScriptTx {
-    pub fn pay_to_address(&mut self, address: &str, amounts: &[Value]) -> &mut Self {
-        self.operations.push(json!({
+    pub fn pay_to_address(
+        &mut self,
+        address: &str,
+        amounts: &[Value],
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
+    ) -> &mut Self {
+        let mut op = json!({
             "type": "pay_to_address",
             "address": address,
             "amounts": amounts,
-        }));
+        });
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
+        }
+        self.operations.push(op);
         self
     }
 
@@ -1977,6 +2292,8 @@ impl ScriptTx {
         amounts: &[Value],
         datum_cbor_hex: Option<&str>,
         datum_hash: Option<&str>,
+        script_ref_cbor_hex: Option<&str>,
+        script_ref_type: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "pay_to_contract",
@@ -1988,6 +2305,12 @@ impl ScriptTx {
         }
         if let Some(h) = datum_hash {
             op["datum_hash"] = json!(h);
+        }
+        if let Some(s) = script_ref_cbor_hex {
+            op["script_ref_cbor_hex"] = json!(s);
+        }
+        if let Some(t) = script_ref_type {
+            op["script_ref_type"] = json!(t);
         }
         self.operations.push(op);
         self
@@ -2218,6 +2541,7 @@ impl ScriptTx {
         cred_type: &str,
         redeemer_cbor_hex: &str,
         refund_address: Option<&str>,
+        refund_amount: Option<&str>,
     ) -> &mut Self {
         let mut op = json!({
             "type": "unregister_drep",
@@ -2227,6 +2551,9 @@ impl ScriptTx {
         });
         if let Some(r) = refund_address {
             op["refund_address"] = json!(r);
+        }
+        if let Some(a) = refund_amount {
+            op["refund_amount"] = json!(a);
         }
         self.operations.push(op);
         self
@@ -2331,6 +2658,23 @@ impl ScriptTx {
             op["withdrawals"] = serde_json::to_value(w).unwrap_or_default();
         }
         self.operations.push(op);
+        self
+    }
+
+    // Treasury
+
+    pub fn donate_to_treasury(
+        &mut self,
+        treasury_value: &str,
+        donation_amount: &str,
+        redeemer_cbor_hex: &str,
+    ) -> &mut Self {
+        self.operations.push(json!({
+            "type": "donate_to_treasury",
+            "treasury_value": treasury_value,
+            "donation_amount": donation_amount,
+            "redeemer_cbor_hex": redeemer_cbor_hex,
+        }));
         self
     }
 

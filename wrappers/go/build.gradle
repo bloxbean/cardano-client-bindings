@@ -17,5 +17,5 @@ task test(type: Exec) {
     environment 'LD_LIBRARY_PATH', nativeDir
     environment 'GOARCH', 'arm64'
 
-    commandLine 'go', 'test', '-v', './...'
+    commandLine 'bash', '-c', 'go test -v ./...'
 }

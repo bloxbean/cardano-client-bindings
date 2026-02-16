@@ -114,4 +114,51 @@ class TransactionApiTest {
         assertNotNull(signedTx.getWitnessSet());
         assertFalse(signedTx.getWitnessSet().getVkeyWitnesses().isEmpty());
     }
+
+    // --- Negative / Error Tests ---
+
+    @Test
+    void testDeserializeMalformedCbor() {
+        assertThrows(Exception.class, () ->
+            Transaction.deserialize(HexUtil.decodeHexString("deadbeef"))
+        );
+    }
+
+    @Test
+    void testDeserializeEmptyCbor() {
+        assertThrows(Exception.class, () ->
+            Transaction.deserialize(new byte[0])
+        );
+    }
+
+    @Test
+    void testDeserializeInvalidHex() {
+        assertThrows(Exception.class, () ->
+            Transaction.deserialize(HexUtil.decodeHexString("zzzz"))
+        );
+    }
+
+    @Test
+    void testTransactionHashDeterministic() throws Exception {
+        TransactionInput input = new TransactionInput(
+            "73198b7ad003862b9798106b88fbccfca464b1a38afb34958275c4a7d7d8d002",
+            1
+        );
+
+        TransactionOutput output = TransactionOutput.builder()
+            .address("addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp")
+            .value(new Value(BigInteger.valueOf(2000000), null))
+            .build();
+
+        TransactionBody body = TransactionBody.builder()
+            .inputs(List.of(input))
+            .outputs(List.of(output))
+            .fee(BigInteger.valueOf(170000))
+            .build();
+
+        byte[] bodyBytes = CborSerializationUtil.serialize(body.serialize());
+        byte[] hash1 = Blake2bUtil.blake2bHash256(bodyBytes);
+        byte[] hash2 = Blake2bUtil.blake2bHash256(bodyBytes);
+        assertArrayEquals(hash1, hash2);
+    }
 }

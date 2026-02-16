@@ -46,3 +46,29 @@ def test_tx_sign_with_secret_key(ccl):
     private_key = ccl.account.get_private_key(created['mnemonic'], CclLib.TESTNET)
     signed_tx = ccl.tx.sign_with_secret_key(SAMPLE_TX_CBOR, private_key)
     assert len(signed_tx) > len(SAMPLE_TX_CBOR)
+
+
+# --- Negative / Error Tests ---
+
+def test_tx_hash_malformed_cbor(ccl):
+    try:
+        ccl.tx.hash("deadbeef")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected
+
+
+def test_tx_hash_invalid_hex(ccl):
+    try:
+        ccl.tx.hash("not_hex!")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected
+
+
+def test_tx_deserialize_malformed(ccl):
+    try:
+        ccl.tx.deserialize("deadbeef")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected

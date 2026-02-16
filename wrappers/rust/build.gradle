@@ -15,5 +15,5 @@ task test(type: Exec) {
     environment 'DYLD_LIBRARY_PATH', nativeDir
     environment 'LD_LIBRARY_PATH', nativeDir
 
-    commandLine 'cargo', 'test', '--', '--test-threads=1'
+    commandLine 'bash', '-c', 'cargo test -- --test-threads=1'
 }

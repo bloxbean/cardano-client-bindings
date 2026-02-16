@@ -602,6 +602,25 @@ type ProposalWithdrawal struct {
 	Amount        string `json:"amount"`
 }
 
+// PoolOptions holds optional fields for pool registration/update.
+type PoolOptions struct {
+	Relays           []interface{}
+	PoolMetadataURL  string
+	PoolMetadataHash string
+}
+
+// ScriptRefOption holds optional script reference fields.
+type ScriptRefOption struct {
+	ScriptRefCborHex string
+	ScriptRefType    string
+}
+
+// UnregisterDRepOption holds optional fields for DRep unregistration.
+type UnregisterDRepOption struct {
+	RefundAddress string
+	RefundAmount  string
+}
+
 // QuickTxApi provides transaction building via QuickTx.
 type QuickTxApi struct {
 	bridge *Bridge
@@ -659,7 +678,24 @@ func (tb *TxBuilder) PayToAddress(address string, amounts ...Amount) *TxBuilder 
 	return tb
 }
 
-func (tb *TxBuilder) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *TxBuilder {
+// PayToAddressWithScriptRef is like PayToAddress but attaches a reference script to the output.
+func (tb *TxBuilder) PayToAddressWithScriptRef(address string, amounts []Amount, scriptRef ScriptRefOption) *TxBuilder {
+	op := map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amounts,
+	}
+	if scriptRef.ScriptRefCborHex != "" {
+		op["script_ref_cbor_hex"] = scriptRef.ScriptRefCborHex
+	}
+	if scriptRef.ScriptRefType != "" {
+		op["script_ref_type"] = scriptRef.ScriptRefType
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string, scriptRef ...ScriptRefOption) *TxBuilder {
 	op := map[string]interface{}{
 		"type":    "pay_to_contract",
 		"address": address,
@@ -670,6 +706,14 @@ func (tb *TxBuilder) PayToContract(address string, amounts []Amount, datumCborHe
 	}
 	if datumHash != "" {
 		op["datum_hash"] = datumHash
+	}
+	if len(scriptRef) > 0 {
+		if scriptRef[0].ScriptRefCborHex != "" {
+			op["script_ref_cbor_hex"] = scriptRef[0].ScriptRefCborHex
+		}
+		if scriptRef[0].ScriptRefType != "" {
+			op["script_ref_type"] = scriptRef[0].ScriptRefType
+		}
 	}
 	tb.operations = append(tb.operations, op)
 	return tb
@@ -756,12 +800,17 @@ func (tb *TxBuilder) RegisterDRep(credHash, credType string, anchor ...AnchorOpt
 	return tb
 }
 
-func (tb *TxBuilder) UnregisterDRep(credHash, credType string, refundAddress ...string) *TxBuilder {
+func (tb *TxBuilder) UnregisterDRep(credHash, credType string, opts ...UnregisterDRepOption) *TxBuilder {
 	op := map[string]interface{}{
 		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
 	}
-	if len(refundAddress) > 0 && refundAddress[0] != "" {
-		op["refund_address"] = refundAddress[0]
+	if len(opts) > 0 {
+		if opts[0].RefundAddress != "" {
+			op["refund_address"] = opts[0].RefundAddress
+		}
+		if opts[0].RefundAmount != "" {
+			op["refund_amount"] = opts[0].RefundAmount
+		}
 	}
 	tb.operations = append(tb.operations, op)
 	return tb
@@ -824,6 +873,77 @@ func (tb *TxBuilder) CreateProposal(govActionType, returnAddress, anchorURL, anc
 		op["withdrawals"] = withdrawals[0]
 	}
 	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+// Pool Operations
+
+func (tb *TxBuilder) RegisterPool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator, rewardAddress string, poolOwners []string, opts ...PoolOptions) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "register_pool", "operator": operator, "vrf_key_hash": vrfKeyHash,
+		"pledge": pledge, "cost": cost, "margin_numerator": marginNumerator,
+		"margin_denominator": marginDenominator, "reward_address": rewardAddress,
+		"pool_owners": poolOwners,
+	}
+	if len(opts) > 0 {
+		if len(opts[0].Relays) > 0 {
+			op["relays"] = opts[0].Relays
+		}
+		if opts[0].PoolMetadataURL != "" {
+			op["pool_metadata_url"] = opts[0].PoolMetadataURL
+		}
+		if opts[0].PoolMetadataHash != "" {
+			op["pool_metadata_hash"] = opts[0].PoolMetadataHash
+		}
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) UpdatePool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator, rewardAddress string, poolOwners []string, opts ...PoolOptions) *TxBuilder {
+	op := map[string]interface{}{
+		"type": "update_pool", "operator": operator, "vrf_key_hash": vrfKeyHash,
+		"pledge": pledge, "cost": cost, "margin_numerator": marginNumerator,
+		"margin_denominator": marginDenominator, "reward_address": rewardAddress,
+		"pool_owners": poolOwners,
+	}
+	if len(opts) > 0 {
+		if len(opts[0].Relays) > 0 {
+			op["relays"] = opts[0].Relays
+		}
+		if opts[0].PoolMetadataURL != "" {
+			op["pool_metadata_url"] = opts[0].PoolMetadataURL
+		}
+		if opts[0].PoolMetadataHash != "" {
+			op["pool_metadata_hash"] = opts[0].PoolMetadataHash
+		}
+	}
+	tb.operations = append(tb.operations, op)
+	return tb
+}
+
+func (tb *TxBuilder) RetirePool(poolID string, epoch int) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type": "retire_pool", "pool_id": poolID, "epoch": epoch,
+	})
+	return tb
+}
+
+// Treasury
+
+func (tb *TxBuilder) DonateToTreasury(treasuryValue, donationAmount string) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type": "donate_to_treasury", "treasury_value": treasuryValue, "donation_amount": donationAmount,
+	})
+	return tb
+}
+
+// Native Script
+
+func (tb *TxBuilder) AttachNativeScript(scriptJSON string) *TxBuilder {
+	tb.operations = append(tb.operations, map[string]interface{}{
+		"type": "attach_native_script", "script_json": scriptJSON,
+	})
 	return tb
 }
 
@@ -962,7 +1082,24 @@ func (tx *Tx) PayToAddress(address string, amounts ...Amount) *Tx {
 	return tx
 }
 
-func (tx *Tx) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *Tx {
+// PayToAddressWithScriptRef is like PayToAddress but attaches a reference script to the output.
+func (tx *Tx) PayToAddressWithScriptRef(address string, amounts []Amount, scriptRef ScriptRefOption) *Tx {
+	op := map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amounts,
+	}
+	if scriptRef.ScriptRefCborHex != "" {
+		op["script_ref_cbor_hex"] = scriptRef.ScriptRefCborHex
+	}
+	if scriptRef.ScriptRefType != "" {
+		op["script_ref_type"] = scriptRef.ScriptRefType
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string, scriptRef ...ScriptRefOption) *Tx {
 	op := map[string]interface{}{
 		"type":    "pay_to_contract",
 		"address": address,
@@ -973,6 +1110,14 @@ func (tx *Tx) PayToContract(address string, amounts []Amount, datumCborHex, datu
 	}
 	if datumHash != "" {
 		op["datum_hash"] = datumHash
+	}
+	if len(scriptRef) > 0 {
+		if scriptRef[0].ScriptRefCborHex != "" {
+			op["script_ref_cbor_hex"] = scriptRef[0].ScriptRefCborHex
+		}
+		if scriptRef[0].ScriptRefType != "" {
+			op["script_ref_type"] = scriptRef[0].ScriptRefType
+		}
 	}
 	tx.operations = append(tx.operations, op)
 	return tx
@@ -1055,12 +1200,17 @@ func (tx *Tx) RegisterDRep(credHash, credType string, anchor ...AnchorOption) *T
 	return tx
 }
 
-func (tx *Tx) UnregisterDRep(credHash, credType string, refundAddress ...string) *Tx {
+func (tx *Tx) UnregisterDRep(credHash, credType string, opts ...UnregisterDRepOption) *Tx {
 	op := map[string]interface{}{
 		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
 	}
-	if len(refundAddress) > 0 && refundAddress[0] != "" {
-		op["refund_address"] = refundAddress[0]
+	if len(opts) > 0 {
+		if opts[0].RefundAddress != "" {
+			op["refund_address"] = opts[0].RefundAddress
+		}
+		if opts[0].RefundAmount != "" {
+			op["refund_amount"] = opts[0].RefundAmount
+		}
 	}
 	tx.operations = append(tx.operations, op)
 	return tx
@@ -1119,6 +1269,77 @@ func (tx *Tx) CreateProposal(govActionType, returnAddress, anchorURL, anchorData
 		op["withdrawals"] = withdrawals[0]
 	}
 	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+// Pool Operations
+
+func (tx *Tx) RegisterPool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator, rewardAddress string, poolOwners []string, opts ...PoolOptions) *Tx {
+	op := map[string]interface{}{
+		"type": "register_pool", "operator": operator, "vrf_key_hash": vrfKeyHash,
+		"pledge": pledge, "cost": cost, "margin_numerator": marginNumerator,
+		"margin_denominator": marginDenominator, "reward_address": rewardAddress,
+		"pool_owners": poolOwners,
+	}
+	if len(opts) > 0 {
+		if len(opts[0].Relays) > 0 {
+			op["relays"] = opts[0].Relays
+		}
+		if opts[0].PoolMetadataURL != "" {
+			op["pool_metadata_url"] = opts[0].PoolMetadataURL
+		}
+		if opts[0].PoolMetadataHash != "" {
+			op["pool_metadata_hash"] = opts[0].PoolMetadataHash
+		}
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) UpdatePool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator, rewardAddress string, poolOwners []string, opts ...PoolOptions) *Tx {
+	op := map[string]interface{}{
+		"type": "update_pool", "operator": operator, "vrf_key_hash": vrfKeyHash,
+		"pledge": pledge, "cost": cost, "margin_numerator": marginNumerator,
+		"margin_denominator": marginDenominator, "reward_address": rewardAddress,
+		"pool_owners": poolOwners,
+	}
+	if len(opts) > 0 {
+		if len(opts[0].Relays) > 0 {
+			op["relays"] = opts[0].Relays
+		}
+		if opts[0].PoolMetadataURL != "" {
+			op["pool_metadata_url"] = opts[0].PoolMetadataURL
+		}
+		if opts[0].PoolMetadataHash != "" {
+			op["pool_metadata_hash"] = opts[0].PoolMetadataHash
+		}
+	}
+	tx.operations = append(tx.operations, op)
+	return tx
+}
+
+func (tx *Tx) RetirePool(poolID string, epoch int) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type": "retire_pool", "pool_id": poolID, "epoch": epoch,
+	})
+	return tx
+}
+
+// Treasury
+
+func (tx *Tx) DonateToTreasury(treasuryValue, donationAmount string) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type": "donate_to_treasury", "treasury_value": treasuryValue, "donation_amount": donationAmount,
+	})
+	return tx
+}
+
+// Native Script
+
+func (tx *Tx) AttachNativeScript(scriptJSON string) *Tx {
+	tx.operations = append(tx.operations, map[string]interface{}{
+		"type": "attach_native_script", "script_json": scriptJSON,
+	})
 	return tx
 }
 
@@ -1287,7 +1508,24 @@ func (sb *ScriptTxBuilder) PayToAddress(address string, amounts ...Amount) *Scri
 	return sb
 }
 
-func (sb *ScriptTxBuilder) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *ScriptTxBuilder {
+// PayToAddressWithScriptRef is like PayToAddress but attaches a reference script to the output.
+func (sb *ScriptTxBuilder) PayToAddressWithScriptRef(address string, amounts []Amount, scriptRef ScriptRefOption) *ScriptTxBuilder {
+	op := map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amounts,
+	}
+	if scriptRef.ScriptRefCborHex != "" {
+		op["script_ref_cbor_hex"] = scriptRef.ScriptRefCborHex
+	}
+	if scriptRef.ScriptRefType != "" {
+		op["script_ref_type"] = scriptRef.ScriptRefType
+	}
+	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+func (sb *ScriptTxBuilder) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string, scriptRef ...ScriptRefOption) *ScriptTxBuilder {
 	op := map[string]interface{}{
 		"type":    "pay_to_contract",
 		"address": address,
@@ -1298,6 +1536,14 @@ func (sb *ScriptTxBuilder) PayToContract(address string, amounts []Amount, datum
 	}
 	if datumHash != "" {
 		op["datum_hash"] = datumHash
+	}
+	if len(scriptRef) > 0 {
+		if scriptRef[0].ScriptRefCborHex != "" {
+			op["script_ref_cbor_hex"] = scriptRef[0].ScriptRefCborHex
+		}
+		if scriptRef[0].ScriptRefType != "" {
+			op["script_ref_type"] = scriptRef[0].ScriptRefType
+		}
 	}
 	sb.operations = append(sb.operations, op)
 	return sb
@@ -1440,13 +1686,18 @@ func (sb *ScriptTxBuilder) RegisterDRep(credHash, credType, redeemerCborHex, anc
 	return sb
 }
 
-func (sb *ScriptTxBuilder) UnregisterDRep(credHash, credType, redeemerCborHex, refundAddress string) *ScriptTxBuilder {
+func (sb *ScriptTxBuilder) UnregisterDRep(credHash, credType, redeemerCborHex string, opts ...UnregisterDRepOption) *ScriptTxBuilder {
 	op := map[string]interface{}{
 		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
 		"redeemer_cbor_hex": redeemerCborHex,
 	}
-	if refundAddress != "" {
-		op["refund_address"] = refundAddress
+	if len(opts) > 0 {
+		if opts[0].RefundAddress != "" {
+			op["refund_address"] = opts[0].RefundAddress
+		}
+		if opts[0].RefundAmount != "" {
+			op["refund_amount"] = opts[0].RefundAmount
+		}
 	}
 	sb.operations = append(sb.operations, op)
 	return sb
@@ -1505,6 +1756,16 @@ func (sb *ScriptTxBuilder) CreateProposal(govActionType, returnAddress, anchorUR
 		op["withdrawals"] = withdrawals
 	}
 	sb.operations = append(sb.operations, op)
+	return sb
+}
+
+// Treasury
+
+func (sb *ScriptTxBuilder) DonateToTreasury(treasuryValue, donationAmount, redeemerCborHex string) *ScriptTxBuilder {
+	sb.operations = append(sb.operations, map[string]interface{}{
+		"type": "donate_to_treasury", "treasury_value": treasuryValue,
+		"donation_amount": donationAmount, "redeemer_cbor_hex": redeemerCborHex,
+	})
 	return sb
 }
 
@@ -1662,7 +1923,24 @@ func (st *ScriptTx) PayToAddress(address string, amounts ...Amount) *ScriptTx {
 	return st
 }
 
-func (st *ScriptTx) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string) *ScriptTx {
+// PayToAddressWithScriptRef is like PayToAddress but attaches a reference script to the output.
+func (st *ScriptTx) PayToAddressWithScriptRef(address string, amounts []Amount, scriptRef ScriptRefOption) *ScriptTx {
+	op := map[string]interface{}{
+		"type":    "pay_to_address",
+		"address": address,
+		"amounts": amounts,
+	}
+	if scriptRef.ScriptRefCborHex != "" {
+		op["script_ref_cbor_hex"] = scriptRef.ScriptRefCborHex
+	}
+	if scriptRef.ScriptRefType != "" {
+		op["script_ref_type"] = scriptRef.ScriptRefType
+	}
+	st.operations = append(st.operations, op)
+	return st
+}
+
+func (st *ScriptTx) PayToContract(address string, amounts []Amount, datumCborHex, datumHash string, scriptRef ...ScriptRefOption) *ScriptTx {
 	op := map[string]interface{}{
 		"type":    "pay_to_contract",
 		"address": address,
@@ -1673,6 +1951,14 @@ func (st *ScriptTx) PayToContract(address string, amounts []Amount, datumCborHex
 	}
 	if datumHash != "" {
 		op["datum_hash"] = datumHash
+	}
+	if len(scriptRef) > 0 {
+		if scriptRef[0].ScriptRefCborHex != "" {
+			op["script_ref_cbor_hex"] = scriptRef[0].ScriptRefCborHex
+		}
+		if scriptRef[0].ScriptRefType != "" {
+			op["script_ref_type"] = scriptRef[0].ScriptRefType
+		}
 	}
 	st.operations = append(st.operations, op)
 	return st
@@ -1815,13 +2101,18 @@ func (st *ScriptTx) RegisterDRep(credHash, credType, redeemerCborHex, anchorURL,
 	return st
 }
 
-func (st *ScriptTx) UnregisterDRep(credHash, credType, redeemerCborHex, refundAddress string) *ScriptTx {
+func (st *ScriptTx) UnregisterDRep(credHash, credType, redeemerCborHex string, opts ...UnregisterDRepOption) *ScriptTx {
 	op := map[string]interface{}{
 		"type": "unregister_drep", "credential_hash": credHash, "credential_type": credType,
 		"redeemer_cbor_hex": redeemerCborHex,
 	}
-	if refundAddress != "" {
-		op["refund_address"] = refundAddress
+	if len(opts) > 0 {
+		if opts[0].RefundAddress != "" {
+			op["refund_address"] = opts[0].RefundAddress
+		}
+		if opts[0].RefundAmount != "" {
+			op["refund_amount"] = opts[0].RefundAmount
+		}
 	}
 	st.operations = append(st.operations, op)
 	return st
@@ -1880,6 +2171,16 @@ func (st *ScriptTx) CreateProposal(govActionType, returnAddress, anchorURL, anch
 		op["withdrawals"] = withdrawals
 	}
 	st.operations = append(st.operations, op)
+	return st
+}
+
+// Treasury
+
+func (st *ScriptTx) DonateToTreasury(treasuryValue, donationAmount, redeemerCborHex string) *ScriptTx {
+	st.operations = append(st.operations, map[string]interface{}{
+		"type": "donate_to_treasury", "treasury_value": treasuryValue,
+		"donation_amount": donationAmount, "redeemer_cbor_hex": redeemerCborHex,
+	})
 	return st
 }
 

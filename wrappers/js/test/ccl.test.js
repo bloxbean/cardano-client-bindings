@@ -702,4 +702,65 @@ describe('CCL Bridge', () => {
                 .build();
         }).toThrow();
     });
+
+    // --- Negative / Error Tests ---
+
+    it('should throw on invalid mnemonic restore', () => {
+        expect(() => {
+            bridge.account.fromMnemonic('invalid words that are not a valid mnemonic phrase at all', MAINNET);
+        }).toThrow();
+    });
+
+    it('should throw on empty mnemonic restore', () => {
+        expect(() => {
+            bridge.account.fromMnemonic('', MAINNET);
+        }).toThrow();
+    });
+
+    it('should throw on invalid address info', () => {
+        expect(() => {
+            bridge.address.info('not_a_valid_address');
+        }).toThrow();
+    });
+
+    it('should throw on malformed tx CBOR hash', () => {
+        expect(() => {
+            bridge.tx.hash('deadbeef');
+        }).toThrow();
+    });
+
+    it('should throw on invalid hex in tx hash', () => {
+        expect(() => {
+            bridge.tx.hash('not_hex!');
+        }).toThrow();
+    });
+
+    it('should throw on malformed tx deserialize', () => {
+        expect(() => {
+            bridge.tx.deserialize('deadbeef');
+        }).toThrow();
+    });
+
+    it('should throw on invalid plutus data hash', () => {
+        expect(() => {
+            bridge.plutus.dataHash('zzzz');
+        }).toThrow();
+    });
+
+    it('should throw on sign tx with invalid CBOR', () => {
+        const account = bridge.account.create(TESTNET);
+        expect(() => {
+            bridge.account.signTx(account.mnemonic, TESTNET, 0, 0, 'deadbeef');
+        }).toThrow();
+    });
+
+    it('should throw on blake2b with invalid hex', () => {
+        expect(() => {
+            bridge.crypto.blake2b256('not_valid_hex!');
+        }).toThrow();
+    });
+
+    it('should reject invalid mnemonic validation', () => {
+        expect(bridge.crypto.validateMnemonic('zzz xxx yyy www vvv uuu ttt sss rrr qqq ppp ooo')).toBe(false);
+    });
 });

@@ -26,3 +26,23 @@ def test_address_validate(ccl):
     created = ccl.account.create(CclLib.MAINNET)
     assert ccl.address.validate(created['base_address']) is True
     assert ccl.address.validate("invalid_address") is False
+
+
+# --- Negative / Error Tests ---
+
+def test_address_info_invalid(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.address.info("not_a_valid_address")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected
+
+
+def test_address_from_bytes_invalid(ccl):
+    from ccl._ffi import CclError
+    try:
+        ccl.address.from_bytes("zzzz")
+        assert False, "Should have raised CclError"
+    except CclError:
+        pass  # expected

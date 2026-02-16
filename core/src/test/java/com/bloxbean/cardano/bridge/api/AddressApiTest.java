@@ -72,4 +72,23 @@ class AddressApiTest {
 
         assertEquals(AddressType.Reward, address.getAddressType());
     }
+
+    // --- Negative / Error Tests ---
+
+    @Test
+    void testInvalidBech32Address() {
+        assertThrows(Exception.class, () -> new Address("not_a_valid_bech32_address"));
+    }
+
+    @Test
+    void testEmptyAddressBytes() {
+        assertThrows(Exception.class, () -> new Address(new byte[0]));
+    }
+
+    @Test
+    void testMalformedHexBytes() {
+        assertThrows(Exception.class, () ->
+            new Address(HexUtil.decodeHexString("deadbeef"))
+        );
+    }
 }

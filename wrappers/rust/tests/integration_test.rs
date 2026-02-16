@@ -532,7 +532,7 @@ fn test_quicktx_simple_ada_payment() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(5.0)])
+        .pay_to_address(&receiver, &[Amount::ada(5.0)], None, None)
         .from(&sender)
         .with_utxos(make_utxos(&sender, 100_000_000))
         .with_protocol_params(test_protocol_params())
@@ -551,8 +551,8 @@ fn test_quicktx_multiple_receivers() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver1, &[Amount::ada(5.0)])
-        .pay_to_address(&receiver2, &[Amount::ada(3.0)])
+        .pay_to_address(&receiver1, &[Amount::ada(5.0)], None, None)
+        .pay_to_address(&receiver2, &[Amount::ada(3.0)], None, None)
         .from(&sender)
         .with_utxos(make_utxos(&sender, 100_000_000))
         .with_protocol_params(test_protocol_params())
@@ -570,7 +570,7 @@ fn test_quicktx_pay_to_contract() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_contract(&receiver, &[Amount::ada(5.0)], Some("182a"), None)
+        .pay_to_contract(&receiver, &[Amount::ada(5.0)], Some("182a"), None, None, None)
         .from(&sender)
         .with_utxos(make_utxos(&sender, 100_000_000))
         .with_protocol_params(test_protocol_params())
@@ -618,7 +618,7 @@ fn test_quicktx_attach_metadata() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(2.0)])
+        .pay_to_address(&receiver, &[Amount::ada(2.0)], None, None)
         .attach_metadata(674, json!({"msg": ["Hello from Rust"]}))
         .from(&sender)
         .with_utxos(make_utxos(&sender, 100_000_000))
@@ -641,7 +641,7 @@ fn test_quicktx_collect_from() {
         .quicktx()
         .new_tx()
         .collect_from(&utxo_array)
-        .pay_to_address(&receiver, &[Amount::ada(2.0)])
+        .pay_to_address(&receiver, &[Amount::ada(2.0)], None, None)
         .from(&sender)
         .with_utxos(utxos)
         .with_protocol_params(test_protocol_params())
@@ -753,7 +753,7 @@ fn test_quicktx_unregister_drep() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .unregister_drep(&cred_hash, "key", None)
+        .unregister_drep(&cred_hash, "key", None, None)
         .from(&sender)
         .with_utxos(make_utxos(&sender, 100_000_000))
         .with_protocol_params(test_protocol_params())
@@ -901,11 +901,11 @@ fn test_quicktx_compose() {
     let receiver2 = get_testnet_addr(&bridge);
 
     let mut tx1 = bridge.quicktx().tx();
-    tx1.pay_to_address(&receiver1, &[Amount::ada(5.0)])
+    tx1.pay_to_address(&receiver1, &[Amount::ada(5.0)], None, None)
         .from(&sender1);
 
     let mut tx2 = bridge.quicktx().tx();
-    tx2.pay_to_address(&receiver2, &[Amount::ada(3.0)])
+    tx2.pay_to_address(&receiver2, &[Amount::ada(3.0)], None, None)
         .from(&sender2);
 
     let utxos = json!([
@@ -952,7 +952,7 @@ fn test_quicktx_provider_config() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(5.0)])
+        .pay_to_address(&receiver, &[Amount::ada(5.0)], None, None)
         .from(&sender)
         .with_protocol_params(test_protocol_params())
         .build_with_provider(&config);
@@ -971,7 +971,7 @@ fn test_quicktx_insufficient_funds() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(200.0)])
+        .pay_to_address(&receiver, &[Amount::ada(200.0)], None, None)
         .from(&sender)
         .with_utxos(make_utxos(&sender, 1_000_000))
         .with_protocol_params(test_protocol_params())
@@ -980,4 +980,175 @@ fn test_quicktx_insufficient_funds() {
     assert!(result.is_err(), "Expected error for insufficient funds");
     let err = result.unwrap_err();
     assert!(err.code < 0, "Expected negative error code, got {}", err.code);
+}
+
+#[test]
+fn test_quicktx_register_pool() {
+    let bridge = Bridge::new().expect("Failed to create bridge");
+    let sender = get_testnet_addr(&bridge);
+    let operator_hash = "ab".repeat(28); // 28-byte (56 hex chars) pool operator key hash
+    let vrf_key_hash = "cd".repeat(32); // 32-byte (64 hex chars) VRF key hash
+    let reward_account_hex = format!("e0{}", "ab".repeat(28)); // testnet reward address (hex)
+
+    let result = bridge
+        .quicktx()
+        .new_tx()
+        .register_pool(
+            &operator_hash,
+            &vrf_key_hash,
+            "500000000",
+            "340000000",
+            "1",
+            "5",
+            &reward_account_hex,
+            &[operator_hash.as_str()],
+            None,
+            None,
+            None,
+        )
+        .from(&sender)
+        .with_utxos(make_utxos(&sender, 1_000_000_000))
+        .with_protocol_params(test_protocol_params())
+        .build()
+        .expect("Build failed");
+    assert_tx_result(&result);
+}
+
+#[test]
+fn test_quicktx_update_pool() {
+    let bridge = Bridge::new().expect("Failed to create bridge");
+    let sender = get_testnet_addr(&bridge);
+    let operator_hash = "ab".repeat(28); // 28-byte (56 hex chars) pool operator key hash
+    let vrf_key_hash = "cd".repeat(32); // 32-byte (64 hex chars) VRF key hash
+    let metadata_hash = "ef".repeat(32); // 32-byte (64 hex chars) metadata hash
+    let reward_account_hex = format!("e0{}", "ab".repeat(28)); // testnet reward address (hex)
+
+    let result = bridge
+        .quicktx()
+        .new_tx()
+        .update_pool(
+            &operator_hash,
+            &vrf_key_hash,
+            "600000000",
+            "340000000",
+            "1",
+            "10",
+            &reward_account_hex,
+            &[operator_hash.as_str()],
+            None,
+            Some("https://example.com/pool.json"),
+            Some(&metadata_hash),
+        )
+        .from(&sender)
+        .with_utxos(make_utxos(&sender, 1_000_000_000))
+        .with_protocol_params(test_protocol_params())
+        .build()
+        .expect("Build failed");
+    assert_tx_result(&result);
+}
+
+#[test]
+fn test_quicktx_retire_pool() {
+    let bridge = Bridge::new().expect("Failed to create bridge");
+    let sender = get_testnet_addr(&bridge);
+    let pool_id = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy";
+
+    let result = bridge
+        .quicktx()
+        .new_tx()
+        .retire_pool(pool_id, 100)
+        .from(&sender)
+        .with_utxos(make_utxos(&sender, 100_000_000))
+        .with_protocol_params(test_protocol_params())
+        .build()
+        .expect("Build failed");
+    assert_tx_result(&result);
+}
+
+#[test]
+fn test_quicktx_donate_to_treasury() {
+    let bridge = Bridge::new().expect("Failed to create bridge");
+    let sender = get_testnet_addr(&bridge);
+
+    let result = bridge
+        .quicktx()
+        .new_tx()
+        .donate_to_treasury("5000000", "1000000")
+        .from(&sender)
+        .with_utxos(make_utxos(&sender, 100_000_000))
+        .with_protocol_params(test_protocol_params())
+        .build()
+        .expect("Build failed");
+    assert_tx_result(&result);
+}
+
+#[test]
+fn test_quicktx_attach_native_script() {
+    let bridge = Bridge::new().expect("Failed to create bridge");
+    let sender = get_testnet_addr(&bridge);
+
+    let info_str = bridge
+        .address()
+        .info(&sender)
+        .expect("Failed to get address info");
+    let info: Value = serde_json::from_str(&info_str).expect("Invalid JSON");
+    let key_hash = info["payment_credential_hash"].as_str().unwrap();
+
+    let script_json = format!(r#"{{"type":"sig","keyHash":"{}"}}"#, key_hash);
+
+    let result = bridge
+        .quicktx()
+        .new_tx()
+        .pay_to_address(&sender, &[Amount::ada(2.0)], None, None)
+        .attach_native_script(&script_json)
+        .from(&sender)
+        .with_utxos(make_utxos(&sender, 100_000_000))
+        .with_protocol_params(test_protocol_params())
+        .build()
+        .expect("Build failed");
+    assert_tx_result(&result);
+}
+
+#[test]
+fn test_quicktx_pay_with_script_ref() {
+    let bridge = Bridge::new().expect("Failed to create bridge");
+    let sender = get_testnet_addr(&bridge);
+    let receiver = get_testnet_addr(&bridge);
+
+    // Always-succeeds PlutusV3 script CBOR
+    let script_ref_cbor = "46450101002499";
+
+    let result = bridge
+        .quicktx()
+        .new_tx()
+        .pay_to_address(
+            &receiver,
+            &[Amount::ada(5.0)],
+            Some(script_ref_cbor),
+            Some("plutus_v3"),
+        )
+        .from(&sender)
+        .with_utxos(make_utxos(&sender, 100_000_000))
+        .with_protocol_params(test_protocol_params())
+        .build()
+        .expect("Build failed");
+    assert_tx_result(&result);
+}
+
+#[test]
+fn test_quicktx_unregister_drep_with_refund_amount() {
+    let bridge = Bridge::new().expect("Failed to create bridge");
+    let sender = get_testnet_addr(&bridge);
+    let cred_hash = "ab".repeat(28);
+
+    let result = bridge
+        .quicktx()
+        .new_tx()
+        .unregister_drep(&cred_hash, "key", None, Some("2000000"))
+        .from(&sender)
+        .with_utxos(make_utxos(&sender, 100_000_000))
+        .with_protocol_params(test_protocol_params())
+        .build()
+        .expect("Build failed");
+    assert_tx_result(&result);
 }

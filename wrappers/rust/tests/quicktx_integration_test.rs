@@ -161,7 +161,7 @@ fn test_integration_simple_ada_transfer() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(5.0)])
+        .pay_to_address(&receiver, &[Amount::ada(5.0)], None, None)
         .from(&sender)
         .with_utxos(utxos)
         .with_protocol_params(pp)
@@ -204,8 +204,8 @@ fn test_integration_multiple_receivers() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&r1, &[Amount::ada(3.0)])
-        .pay_to_address(&r2, &[Amount::ada(2.0)])
+        .pay_to_address(&r1, &[Amount::ada(3.0)], None, None)
+        .pay_to_address(&r2, &[Amount::ada(2.0)], None, None)
         .from(&sender)
         .with_utxos(utxos)
         .with_protocol_params(pp)
@@ -239,7 +239,7 @@ fn test_integration_with_metadata() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(2.0)])
+        .pay_to_address(&receiver, &[Amount::ada(2.0)], None, None)
         .attach_metadata(674, json!({"msg": ["Hello from Rust integration"]}))
         .from(&sender)
         .with_utxos(utxos)
@@ -272,7 +272,7 @@ fn test_integration_insufficient_funds() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(100.0)])
+        .pay_to_address(&receiver, &[Amount::ada(100.0)], None, None)
         .from(&sender)
         .with_utxos(utxos)
         .with_protocol_params(pp)
@@ -296,7 +296,7 @@ fn test_integration_full_round_trip() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(10.0)])
+        .pay_to_address(&receiver, &[Amount::ada(10.0)], None, None)
         .from(&sender)
         .with_utxos(utxos)
         .with_protocol_params(pp)
@@ -347,7 +347,7 @@ fn test_integration_provider_config_simple_transfer() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(5.0)])
+        .pay_to_address(&receiver, &[Amount::ada(5.0)], None, None)
         .from(&sender)
         .build_with_provider(&config)
         .expect("build with provider failed");
@@ -389,8 +389,8 @@ fn test_integration_provider_config_multiple_receivers() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&r1, &[Amount::ada(3.0)])
-        .pay_to_address(&r2, &[Amount::ada(2.0)])
+        .pay_to_address(&r1, &[Amount::ada(3.0)], None, None)
+        .pay_to_address(&r2, &[Amount::ada(2.0)], None, None)
         .from(&sender)
         .build_with_provider(&config)
         .expect("build with provider failed");
@@ -426,7 +426,7 @@ fn test_integration_provider_config_with_metadata() {
     let result = bridge
         .quicktx()
         .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(2.0)])
+        .pay_to_address(&receiver, &[Amount::ada(2.0)], None, None)
         .attach_metadata(674, json!({"msg": ["Hello from Rust providerConfig"]}))
         .from(&sender)
         .build_with_provider(&config)
