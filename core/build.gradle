@@ -3,6 +3,8 @@ plugins {
     id 'org.graalvm.buildtools.native'
 }
 
+base.archivesName = 'ccl-bridge-core'
+
 def cclVersion = '0.7.1'
 
 dependencies {

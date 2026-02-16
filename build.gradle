@@ -4,7 +4,6 @@ plugins {
 
 subprojects {
     group = 'com.bloxbean.cardano'
-    version = '0.1.0-SNAPSHOT'
 
     repositories {
         mavenCentral()
