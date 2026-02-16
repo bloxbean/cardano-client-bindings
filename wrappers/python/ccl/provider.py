@@ -46,18 +46,19 @@ class Provider:
 class YaciDevKitProvider(Provider):
     """Provider backed by Yaci DevKit local cluster."""
 
-    def __init__(self, base_url="http://localhost:10000"):
-        self.base_url = f"{base_url}/local-cluster/api"
+    def __init__(self, store_url="http://localhost:8080/api/v1", admin_url="http://localhost:10000/local-cluster/api"):
+        self.store_url = store_url
+        self.admin_url = admin_url
 
     def get_utxos(self, address):
         """Fetch UTXOs for an address from DevKit."""
-        url = f"{self.base_url}/addresses/{address}/utxos"
+        url = f"{self.store_url}/addresses/{address}/utxos"
         with urllib.request.urlopen(url) as resp:
             return json.loads(resp.read())
 
     def get_protocol_params(self):
         """Fetch current protocol parameters from DevKit."""
-        url = f"{self.base_url}/epochs/parameters"
+        url = f"{self.store_url}/epochs/parameters"
         with urllib.request.urlopen(url) as resp:
             return json.loads(resp.read())
 
@@ -65,7 +66,7 @@ class YaciDevKitProvider(Provider):
         """Submit a signed transaction to DevKit."""
         tx_bytes = bytes.fromhex(tx_cbor_hex)
         req = urllib.request.Request(
-            f"{self.base_url}/tx/submit",
+            f"{self.store_url}/tx/submit",
             method="POST",
             data=tx_bytes,
             headers={"Content-Type": "application/cbor"},
@@ -79,7 +80,7 @@ class YaciDevKitProvider(Provider):
         """Fund an address with ADA (DevKit only)."""
         data = json.dumps({"address": address, "adaAmount": ada_amount}).encode()
         req = urllib.request.Request(
-            f"{self.base_url}/addresses/topup",
+            f"{self.admin_url}/addresses/topup",
             method="POST",
             data=data,
             headers={"Content-Type": "application/json"},
@@ -90,7 +91,7 @@ class YaciDevKitProvider(Provider):
     def reset(self):
         """Reset the devnet to initial state."""
         req = urllib.request.Request(
-            f"{self.base_url}/admin/devnet/reset",
+            f"{self.admin_url}/admin/devnet/reset",
             method="POST",
             data=b"",
         )
@@ -105,7 +106,7 @@ class YaciDevKitProvider(Provider):
         """Check if DevKit is running."""
         try:
             req = urllib.request.Request(
-                f"{self.base_url}/admin/devnet",
+                f"{self.admin_url}/admin/devnet",
                 method="GET",
             )
             with urllib.request.urlopen(req, timeout=3) as resp:

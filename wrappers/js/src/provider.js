@@ -20,9 +20,10 @@ export class Provider {
 }
 
 export class YaciDevKitProvider extends Provider {
-  constructor(baseUrl = "http://localhost:10000") {
+  constructor(baseUrl = "http://localhost:8080/api/v1", adminBaseUrl = "http://localhost:10000/local-cluster/api") {
     super();
-    this.baseUrl = `${baseUrl}/local-cluster/api`;
+    this.baseUrl = baseUrl;
+    this.adminBaseUrl = adminBaseUrl;
   }
 
   async getUtxos(address) {
@@ -49,7 +50,7 @@ export class YaciDevKitProvider extends Provider {
   // Convenience methods (not part of Provider interface)
 
   async topup(address, adaAmount = 100) {
-    const resp = await fetch(`${this.baseUrl}/addresses/topup`, {
+    const resp = await fetch(`${this.adminBaseUrl}/addresses/topup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address, adaAmount }),
@@ -58,7 +59,7 @@ export class YaciDevKitProvider extends Provider {
   }
 
   async reset() {
-    const resp = await fetch(`${this.baseUrl}/admin/devnet/reset`, {
+    const resp = await fetch(`${this.adminBaseUrl}/admin/devnet/reset`, {
       method: "POST",
     });
     return resp.status;
@@ -70,7 +71,7 @@ export class YaciDevKitProvider extends Provider {
 
   async isAvailable() {
     try {
-      const resp = await fetch(`${this.baseUrl}/admin/devnet`, {
+      const resp = await fetch(`${this.adminBaseUrl}/admin/devnet`, {
         signal: AbortSignal.timeout(3000),
       });
       return resp.status === 200;
