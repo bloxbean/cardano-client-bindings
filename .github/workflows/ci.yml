@@ -23,7 +23,7 @@ jobs:
           distribution: 'graalvm'
       - uses: oven-sh/setup-bun@v2
       - name: Install pytest
-        run: pip install pytest
+        run: python3 -m pip install pytest
       - name: Build native library
         run: ./gradlew :core:nativeCompile
       - name: Run JVM tests
