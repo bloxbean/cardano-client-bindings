@@ -43,13 +43,17 @@ ccl-bridge/
 
 ## Prerequisites
 
-**Required:**
+**For wrapper developers** (no GraalVM needed — uses pre-built binaries):
+- Install whichever language runtime you need (Python, Go, Rust, Bun, C compiler)
+- The pre-built native library is downloaded automatically via `make` or `-PusePrebuilt`
+
+**For core developers** (building from source):
 - **[GraalVM 25+](https://www.graalvm.org/)** (includes `native-image`)
   ```bash
   sdk install java 25.0.2-graal   # via SDKMAN
   ```
 
-**For running wrapper tests (install whichever you need):**
+**Language runtimes (install whichever you need):**
 
 - **Python 3.8+**
   ```bash
@@ -74,39 +78,45 @@ ccl-bridge/
 
 ## Quick Start
 
-### 1. Build the Native Library
+### Option A: Wrapper Development (no GraalVM needed)
+
+Use `make` to download the pre-built library and run tests:
 
 ```bash
-./gradlew :core:nativeCompile
+make test-python    # Download lib + run Python tests
+make test-go        # Download lib + run Go tests
+make test-rust      # Download lib + run Rust tests
+make test-js        # Download lib + run JS tests (Bun)
+make test-c         # Download lib + run C smoke tests
 ```
 
-This produces the shared library at `core/build/native/nativeCompile/libccl.dylib` (macOS) or `libccl.so` (Linux), along with `libccl.h` and `graal_isolate.h` headers.
+Or use Gradle with the `-PusePrebuilt` flag:
 
-### 2. Run JVM Unit Tests
+```bash
+./gradlew :wrappers:go:test -PusePrebuilt
+./gradlew :wrappers:python:test -PusePrebuilt
+```
+
+### Option B: Build from Source (needs GraalVM)
+
+```bash
+# Build the native library
+./gradlew :core:nativeCompile
+
+# Run wrapper tests (builds from source automatically)
+./gradlew :wrappers:go:test
+./gradlew :wrappers:python:test
+
+# Or build + run all tests
+make test-all
+```
+
+The native library is produced at `core/build/native/nativeCompile/libccl.dylib` (macOS) or `libccl.so` (Linux), along with `libccl.h` and `graal_isolate.h` headers.
+
+### Run JVM Unit Tests
 
 ```bash
 ./gradlew :core:test
-```
-
-### 3. Run All Wrapper Tests
-
-Each wrapper has a Gradle task that copies the native library and runs the language-specific tests:
-
-```bash
-# C smoke test
-./gradlew :native-test:test
-
-# Python
-./gradlew :wrappers:python:test
-
-# Go
-./gradlew :wrappers:go:test
-
-# Rust
-./gradlew :wrappers:rust:test
-
-# JavaScript (Bun)
-./gradlew :wrappers:js:test
 ```
 
 ## Installation

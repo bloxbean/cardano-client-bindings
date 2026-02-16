@@ -1,5 +1,7 @@
+def nativeLibTask = project.hasProperty('usePrebuilt') ? ':core:downloadNativeLib' : ':core:nativeCompile'
+
 task copyNativeLib(type: Copy) {
-    dependsOn ':core:nativeCompile'
+    dependsOn nativeLibTask
     from project(':core').layout.buildDirectory.dir('native/nativeCompile')
     into layout.buildDirectory.dir('native')
     include 'libccl.*'
@@ -15,7 +17,9 @@ task test(type: Exec) {
     environment 'CGO_LDFLAGS', "-L${nativeDir} -lccl"
     environment 'DYLD_LIBRARY_PATH', nativeDir
     environment 'LD_LIBRARY_PATH', nativeDir
-    environment 'GOARCH', 'arm64'
+
+    def goArch = System.getProperty("os.arch") == "aarch64" ? "arm64" : "amd64"
+    environment 'GOARCH', goArch
 
     commandLine 'bash', '-c', 'go test -v ./...'
 }

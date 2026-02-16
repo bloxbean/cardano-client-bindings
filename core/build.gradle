@@ -54,3 +54,57 @@ graalvmNative {
 test {
     useJUnitPlatform()
 }
+
+// --- Download pre-built native library from GitHub Releases ---
+def detectPlatform() {
+    def os = System.getProperty('os.name').toLowerCase()
+    def arch = System.getProperty('os.arch').toLowerCase()
+    if (os.contains('mac') || os.contains('darwin')) {
+        return [platform: 'macos-aarch64', ext: 'dylib']
+    } else if (os.contains('linux')) {
+        return [platform: 'linux-x86_64', ext: 'so']
+    } else {
+        throw new GradleException("Unsupported platform: ${os} ${arch}")
+    }
+}
+
+tasks.register('downloadNativeLib') {
+    group = 'build'
+    description = 'Download pre-built native library from GitHub Releases'
+
+    def nativeDir = layout.buildDirectory.dir('native/nativeCompile')
+    outputs.dir(nativeDir)
+
+    def platformInfo = detectPlatform()
+    def libVersion = project.findProperty('cclVersion') ?: "v${project.version}"
+    def libFile = platformInfo.ext == 'dylib' ? 'libccl.dylib' : 'libccl.so'
+
+    doLast {
+        def outDir = nativeDir.get().asFile
+        if (new File(outDir, libFile).exists()) {
+            logger.lifecycle("Native library already exists at ${outDir}/${libFile}, skipping download")
+            return
+        }
+
+        outDir.mkdirs()
+        def url = "https://github.com/bloxbean/ccl-bridge/releases/download/${libVersion}/ccl-bridge-${libVersion}-${platformInfo.platform}.tar.gz"
+        def tarball = new File(outDir, 'ccl-bridge.tar.gz')
+
+        logger.lifecycle("Downloading pre-built library from ${url}")
+        exec {
+            commandLine 'curl', '-fSL', '-o', tarball.absolutePath, url
+        }
+
+        logger.lifecycle("Extracting to ${outDir}")
+        exec {
+            commandLine 'tar', 'xzf', tarball.absolutePath, '-C', outDir.absolutePath
+        }
+
+        tarball.delete()
+
+        if (!new File(outDir, libFile).exists()) {
+            throw new GradleException("Download succeeded but ${libFile} not found in extracted archive")
+        }
+        logger.lifecycle("Native library ready at ${outDir}/${libFile}")
+    }
+}

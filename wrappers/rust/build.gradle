@@ -1,5 +1,7 @@
+def nativeLibTask = project.hasProperty('usePrebuilt') ? ':core:downloadNativeLib' : ':core:nativeCompile'
+
 task copyNativeLib(type: Copy) {
-    dependsOn ':core:nativeCompile'
+    dependsOn nativeLibTask
     from project(':core').layout.buildDirectory.dir('native/nativeCompile')
     into layout.buildDirectory.dir('native')
     include 'libccl.*'
