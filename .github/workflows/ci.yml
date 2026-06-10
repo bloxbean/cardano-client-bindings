@@ -42,3 +42,22 @@ jobs:
         run: ./gradlew :wrappers:rust:test
       - name: Run JS tests
         run: ./gradlew :wrappers:js:test
+
+  # Windows: verify the native library (libccl.dll) builds and core logic passes.
+  # Wrapper test coverage on Windows (Go cgo, C Makefile, etc.) is tracked separately
+  # in TODO.md.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25.0.3'
+          distribution: 'graalvm'
+      - name: Build native library (libccl.dll)
+        run: ./gradlew :core:nativeCompile
+      - name: Run JVM tests
+        run: ./gradlew :core:test
