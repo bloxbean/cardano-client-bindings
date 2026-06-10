@@ -23,7 +23,7 @@ dependencies {
     implementation "com.bloxbean.cardano:cardano-client-cip68:${cclVersion}"
 
     // GraalVM SDK for @CEntryPoint, CCharPointer, etc.
-    compileOnly "org.graalvm.sdk:nativeimage:25.0.0"
+    compileOnly "org.graalvm.sdk:nativeimage:25.0.3"
 
     // SLF4J NOP - avoids log framework init issues in native image
     implementation 'org.slf4j:slf4j-nop:2.0.11'

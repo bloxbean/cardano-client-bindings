@@ -50,7 +50,7 @@ ccl-bridge/
 **For core developers** (building from source):
 - **[GraalVM 25+](https://www.graalvm.org/)** (includes `native-image`)
   ```bash
-  sdk install java 25.0.2-graal   # via SDKMAN
+  sdk install java 25.0.3-graal   # Oracle GraalVM, via SDKMAN
   ```
 
 **Language runtimes (install whichever you need):**
@@ -397,7 +397,7 @@ bridge.close();
 ## Upstream
 
 - **Cardano Client Lib**: [bloxbean/cardano-client-lib](https://github.com/bloxbean/cardano-client-lib) v0.7.2
-- **GraalVM**: 25.0.2 (`native-image --shared`)
+- **GraalVM**: Oracle GraalVM 25.0.3 (`native-image --shared`)
 
 ## License
 
