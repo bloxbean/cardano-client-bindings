@@ -48,6 +48,11 @@ graalvmNative {
                 '--initialize-at-build-time=com.fasterxml.jackson',
                 '--initialize-at-build-time=co.nstant.in.cbor',
                 '--enable-url-protocols=http,https',
+                // Larger thread stack for isolate threads. Mitigates a GraalVM
+                // "yellow zone" StackOverflowError when the shared library is
+                // called from hosts with small native stacks (e.g. Go cgo on
+                // Linux x86_64). See TODO.md / wrappers/go.
+                '-R:StackSize=16m',
             )
         }
     }
