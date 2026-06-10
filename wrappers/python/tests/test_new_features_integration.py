@@ -44,8 +44,12 @@ def ccl_lib():
     lib.close()
 
 
-def fund_account(ccl_lib, devkit, ada=500):
-    """Create and fund a new account."""
+def fund_account(ccl_lib, devkit, ada=2000):
+    """Create and fund a new account.
+
+    Defaults high enough to cover a governance action deposit (1000 ADA on the
+    devnet) plus fees, which the proposal tests require.
+    """
     account = ccl_lib.account.create(CclLib.TESTNET)
     devkit.topup(account["base_address"], ada)
     devkit.wait_for_block(2)
