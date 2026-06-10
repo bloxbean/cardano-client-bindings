@@ -1,5 +1,6 @@
 package com.bloxbean.cardano.bridge.api.quicktx;
 
+import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.address.Credential;
 import com.bloxbean.cardano.client.metadata.cbor.CBORMetadata;
 import com.bloxbean.cardano.client.metadata.cbor.CBORMetadataList;
@@ -538,6 +539,17 @@ public class TxSpecMapper {
         tx.updatePool(buildPoolRegistration(op));
     }
 
+    // PoolRegistration.serialize() expects the reward account as hex-encoded address
+    // bytes, but callers pass a bech32 stake address. Convert bech32 -> hex; pass any
+    // already-hex value through unchanged.
+    private static String toRewardAccountHex(String rewardAddress) {
+        if (rewardAddress == null) return null;
+        if (rewardAddress.startsWith("stake") || rewardAddress.startsWith("addr")) {
+            return HexUtil.encodeHexString(new Address(rewardAddress).getBytes());
+        }
+        return rewardAddress;
+    }
+
     private static PoolRegistration buildPoolRegistration(TxOperation op) {
         if (op.getOperator() == null) throw new IllegalArgumentException("Pool operation requires 'operator'");
         if (op.getVrfKeyHash() == null) throw new IllegalArgumentException("Pool operation requires 'vrf_key_hash'");
@@ -557,7 +569,7 @@ public class TxSpecMapper {
                 .pledge(new BigInteger(op.getPledge()))
                 .cost(new BigInteger(op.getCost()))
                 .margin(new UnitInterval(new BigInteger(op.getMarginNumerator()), new BigInteger(op.getMarginDenominator())))
-                .rewardAccount(op.getRewardAddress())
+                .rewardAccount(toRewardAccountHex(op.getRewardAddress()))
                 .poolOwners(new LinkedHashSet<>(op.getPoolOwners()));
 
         if (op.getRelays() != null) {

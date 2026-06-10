@@ -62,8 +62,12 @@ class DevKitHelper:
             data=tx_bytes,
             headers={"Content-Type": "application/cbor"},
         )
-        with urllib.request.urlopen(req) as resp:
-            return resp.read().decode("utf-8").strip().strip('"')
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.read().decode("utf-8").strip().strip('"')
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")
+            raise RuntimeError(f"tx submit failed: HTTP {e.code}: {body}") from None
 
     def get_tx(self, tx_hash):
         """Get transaction details by hash."""
