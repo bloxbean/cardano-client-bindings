@@ -28,6 +28,7 @@ but there is no standalone "C wrapper" product.
 - [ ] `P1` Designate Python as the documented "reference wrapper" and write a parity checklist so all four wrappers stay in lockstep as the API grows.
 - [ ] `P2` Split the monolithic Go `wrappers/go/ccl/ccl.go` (~2k LOC) and Rust `wrappers/rust/src/lib.rs` into focused modules for maintainability.
 - [ ] `P2` Cross-wrapper error-handling review for consistent `CclError` semantics (codes, messages, idiomatic types).
+- [ ] `P2` Expose **stake-key signing** (CCL's `Account.signWithStakeKey`). `ccl_account_sign_tx` signs with the payment key only, so transactions whose certificates must be authorized by the stake key (e.g. vote-power delegation, stake delegation) fail to submit with `MissingVKeyWitnessesUTXOW`. Add an entrypoint / option to also sign with the stake key (and remember `signer_count(2)` for fee budgeting), wired through all four wrappers. The `delegate_voting_power` integration test is build-only until this lands.
 
 ## 2. Development — Build, CI & Distribution
 
