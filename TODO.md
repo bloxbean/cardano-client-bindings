@@ -36,7 +36,7 @@ but there is no standalone "C wrapper" product.
 - [ ] `P0` Bundle or auto-fetch the native lib per wrapper (wheel platform tags / Rust `build.rs` / npm `postinstall`) so users no longer hand-set `CCL_LIB_PATH` / `DYLD_LIBRARY_PATH` / `LD_LIBRARY_PATH`.
 - [ ] `P1` Add **linux-arm64** and **macos-x86_64** to the build/release matrix (currently only `ubuntu-latest` x86_64 + `macos-14` ARM64).
 - [ ] `P1` Publish wrappers to registries: PyPI (`ccl`), crates.io (`ccl`), npm (`@bloxbean/ccl`), and tag the Go module for the proxy.
-- [ ] `P1` Pin CI to Oracle GraalVM `25.0.3` exactly (CI currently floats `java-version: '25'`) for reproducible builds.
+- [x] `P1` Pin CI to Oracle GraalVM `25.0.3` exactly (CI currently floats `java-version: '25'`) for reproducible builds.
 - [ ] `P2` Fill in wrapper manifest metadata (`[project.urls]`, `repository`, `homepage`, `documentation`) in `pyproject.toml` / `Cargo.toml` / `package.json` / `go.mod`.
 - [ ] `P2` Automate version bumping from a single source of truth (the version is duplicated across `gradle.properties` and each wrapper manifest).
 
