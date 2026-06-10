@@ -24,8 +24,7 @@ but there is no standalone "C wrapper" product.
 
 ## 1. Development — Wrapper Parity & Features
 
-- [ ] `P0` Close JavaScript QuickTx gaps: `mint_plutus_assets`, `collect_from_script`, `read_from` (reference inputs).
-- [ ] `P0` Audit & confirm JS ScriptTx + `compose()` parity vs Python/Rust/Go; close whatever is missing (a `compose.integration.test.js` exists — verify it actually exercises compose).
+- [x] `P0` ~~Audit & confirm JS QuickTx/ScriptTx/compose parity vs Python.~~ **Done (verified against source):** JS is feature-complete — `mintPlutusAssets`, `collectFromScript`, `readFrom`, the full `ScriptTxBuilder`, and `compose()`/`ComposeTxBuilder` all exist in `wrappers/js/src/index.js`. No feature gap. The real gap is test coverage — see §3.
 - [ ] `P1` Designate Python as the documented "reference wrapper" and write a parity checklist so all four wrappers stay in lockstep as the API grows.
 - [ ] `P2` Split the monolithic Go `wrappers/go/ccl/ccl.go` (~2k LOC) and Rust `wrappers/rust/src/lib.rs` into focused modules for maintainability.
 - [ ] `P2` Cross-wrapper error-handling review for consistent `CclError` semantics (codes, messages, idiomatic types).
@@ -42,6 +41,7 @@ but there is no standalone "C wrapper" product.
 
 ## 3. Testing
 
+- [ ] `P1` Add JS integration tests for the script/Plutus paths — these are implemented in `wrappers/js/src/index.js` but have **zero** test coverage: `ScriptTxBuilder` validators + redeemers, `collectFromScript`, `mintPlutusAssets`, `readFrom` (reference inputs), and compose-with-`ScriptTx`. Python's `tests/` are the reference for what to assert.
 - [ ] `P1` Raise Go and Rust test breadth toward Python's (~100 cases vs ~61); port Python's per-module unit tests.
 - [ ] `P1` Add a cross-wrapper parity test matrix asserting every `@CEntryPoint` is exercised in every language.
 - [ ] `P2` Run the Yaci DevKit integration tests in CI (containerized DevKit) instead of skip-if-not-running.
