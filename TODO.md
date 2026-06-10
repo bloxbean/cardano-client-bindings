@@ -32,7 +32,8 @@ but there is no standalone "C wrapper" product.
 ## 2. Development — Build, CI & Distribution
 
 - [x] `P0` ~~Fix the Go wrapper's thread affinity on Linux x86_64.~~ **Done** — all FFI calls now run on a single dedicated OS thread that owns the isolate for the `Bridge`'s lifetime (`runtime.LockOSThread` + a channel-served executor goroutine in `wrappers/go/ccl/ccl.go`). This keeps the executing OS thread and the GraalVM `IsolateThread` in sync, eliminating the Linux "yellow zone" `StackOverflowError`. Linux Go CI is blocking again and green.
-- [ ] `P0` Add a **Windows** native build (`libccl.dll`) to CI and the release pipeline — the README already advertises `.dll` but it is never built.
+- [x] `P0` ~~Add a **Windows** native build (`libccl.dll`) to CI and the release pipeline.~~ **Done** — CI has a `windows-latest` job that builds `libccl.dll` (`:core:nativeCompile`) and runs the JVM tests; `release.yml` produces a `windows-x86_64` artifact (DLL + `libccl.lib` import library + headers). Verified green on CI.
+- [ ] `P1` Add **Windows wrapper test coverage** to CI (Python/Rust/JS/Go). The Windows job currently only builds the DLL + runs JVM tests; the wrapper test tasks assume a bash/`python3` shell and Unix `*_LIBRARY_PATH` semantics, and Go cgo + the C `native-test` Makefile need a Windows C toolchain. Each needs Windows-specific wiring.
 - [ ] `P0` Bundle or auto-fetch the native lib per wrapper (wheel platform tags / Rust `build.rs` / npm `postinstall`) so users no longer hand-set `CCL_LIB_PATH` / `DYLD_LIBRARY_PATH` / `LD_LIBRARY_PATH`.
 - [ ] `P1` Add **linux-arm64** and **macos-x86_64** to the build/release matrix (currently only `ubuntu-latest` x86_64 + `macos-14` ARM64).
 - [ ] `P1` Publish wrappers to registries: PyPI (`ccl`), crates.io (`ccl`), npm (`@bloxbean/ccl`), and tag the Go module for the proxy.
