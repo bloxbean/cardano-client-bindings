@@ -12,11 +12,11 @@ via the CCL Bridge native library, using `cgo`.
 - Go 1.21+ with `cgo` enabled (a C toolchain on `PATH`).
 - The native library `libccl.{dylib,so,dll}` for your platform.
 
-> **Known issue (Linux x86_64):** under heavy use the Go bindings can hit a GraalVM
-> `StackOverflowError`, because Go may migrate a goroutine to a different OS thread than
-> the one that created the GraalVM isolate. macOS is unaffected. A wrapper-level fix
-> (OS-thread pinning / per-call attach) is tracked in [`TODO.md`](../../TODO.md). If you
-> hit it, wrap your isolate usage in `runtime.LockOSThread()` for now.
+> **Threading:** all FFI calls run on a single dedicated OS thread that the `Bridge`
+> pins for its lifetime, so a `Bridge` is safe to share across goroutines and is immune
+> to Go's goroutine/OS-thread migration (which otherwise crashes the GraalVM isolate on
+> Linux x86_64). Calls are serialized; create multiple `Bridge` instances if you need
+> concurrent isolate work.
 
 ## Getting the native library
 
