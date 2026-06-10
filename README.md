@@ -396,7 +396,7 @@ bridge.close();
 
 ## Upstream
 
-- **Cardano Client Lib**: [bloxbean/cardano-client-lib](https://github.com/bloxbean/cardano-client-lib) v0.7.1
+- **Cardano Client Lib**: [bloxbean/cardano-client-lib](https://github.com/bloxbean/cardano-client-lib) v0.7.2
 - **GraalVM**: 25.0.2 (`native-image --shared`)
 
 ## License

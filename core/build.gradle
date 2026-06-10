@@ -5,7 +5,7 @@ plugins {
 
 base.archivesName = 'ccl-bridge-core'
 
-def cclVersion = '0.7.1'
+def cclVersion = '0.7.2'
 
 dependencies {
     // CCL core modules (offline-only, no backend HTTP)
