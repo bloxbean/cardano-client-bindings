@@ -54,6 +54,14 @@ jobs:
           echo "DevKit did not become ready in time." >&2
           exit 1
 
+      # TEMP diagnostic: dump DevKit's protocol params to see whether the Conway
+      # governance deposit fields (gov_action_deposit / drep_deposit) are present and
+      # how they are named. Drives the fix for the governance/DRep build NPEs.
+      - name: DEBUG dump DevKit protocol params
+        run: |
+          echo "--- /epochs/parameters ---"
+          curl -s http://localhost:10000/local-cluster/api/epochs/parameters | tr ',' '\n'
+
       - name: Python integration tests
         run: ./gradlew :wrappers:python:integrationTest
 
