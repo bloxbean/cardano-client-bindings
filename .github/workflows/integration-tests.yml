@@ -1,0 +1,76 @@
+name: Integration Tests (DevKit)
+
+# Runs the wrappers' integration tests against a local Yaci DevKit Cardano devnet.
+# These exercise real build -> sign -> submit round trips. The devnet's admin API is
+# exposed on :10000. Heavier than the unit CI, so it runs on PRs to main and on demand.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  integration-tests:
+    name: Integration Tests (Cardano Dev-Net)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25.0.3'
+          distribution: 'graalvm'
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - uses: dtolnay/rust-toolchain@stable
+      # Node.js is needed for the npm-based yaci-devkit CLI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install pytest
+        run: python3 -m pip install --break-system-packages pytest
+
+      - name: Install Yaci DevKit
+        run: npm install -g @bloxbean/yaci-devkit
+
+      # Start the devnet in the background; it warms up while the native lib builds.
+      - name: Start Yaci DevKit
+        run: nohup yaci-devkit up --enable-yaci-store > devkit.log 2>&1 &
+
+      - name: Build native library
+        run: ./gradlew :core:nativeCompile
+
+      - name: Wait for DevKit admin API (:10000)
+        run: |
+          echo "Waiting for Yaci DevKit admin API..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:10000/local-cluster/api/admin/devnet >/dev/null 2>&1; then
+              echo "DevKit is ready (attempt $i)."
+              exit 0
+            fi
+            echo "Attempt $i/60 - not ready yet, waiting 5s..."
+            sleep 5
+          done
+          echo "DevKit did not become ready in time." >&2
+          exit 1
+
+      - name: Python integration tests
+        run: ./gradlew :wrappers:python:integrationTest
+
+      # The Go and Rust test tasks already include their integration tests, which
+      # skip themselves when DevKit is down and run when it is up.
+      - name: Go integration tests
+        run: ./gradlew :wrappers:go:test
+
+      - name: Rust integration tests
+        run: ./gradlew :wrappers:rust:test
+
+      - name: JS integration tests
+        run: ./gradlew :wrappers:js:integrationTest
+
+      - name: Upload DevKit log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devkit-log
+          path: devkit.log

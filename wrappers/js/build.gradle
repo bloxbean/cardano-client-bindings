@@ -19,3 +19,17 @@ task test(type: Exec) {
 
     commandLine 'bash', '-c', 'bun test test/ccl.test.js'
 }
+
+// Full suite including the DevKit integration tests. Requires a running Yaci DevKit
+// on :10000 (the integration tests skip themselves if it is not available).
+task integrationTest(type: Exec) {
+    dependsOn copyNativeLib
+    workingDir projectDir
+
+    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
+    environment 'CCL_LIB_PATH', nativeDir
+    environment 'DYLD_LIBRARY_PATH', nativeDir
+    environment 'LD_LIBRARY_PATH', nativeDir
+
+    commandLine 'bash', '-c', 'bun test test/'
+}

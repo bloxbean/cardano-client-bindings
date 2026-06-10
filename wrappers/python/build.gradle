@@ -21,3 +21,18 @@ task test(type: Exec) {
     commandLine 'bash', '-c',
         'python3 -m pytest tests/ -v --ignore=tests/test_quicktx_integration.py --ignore=tests/test_new_features_integration.py'
 }
+
+// Full suite including the DevKit integration tests. Requires a running Yaci DevKit
+// on :10000 (the integration tests skip themselves if it is not available).
+task integrationTest(type: Exec) {
+    dependsOn copyNativeLib
+    workingDir projectDir
+
+    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
+    environment 'CCL_LIB_PATH', nativeDir
+    environment 'DYLD_LIBRARY_PATH', nativeDir
+    environment 'LD_LIBRARY_PATH', nativeDir
+    environment 'PYTHONPATH', projectDir.absolutePath
+
+    commandLine 'bash', '-c', 'python3 -m pytest tests/ -v'
+}
