@@ -51,7 +51,7 @@ but there is no standalone "C wrapper" product.
 ## 4. User Documentation
 
 - [x] `P1` Per-wrapper `README.md` (install, load the lib, first call) for python / go / rust / js. **Done** — added `wrappers/{python,go,rust,js}/README.md`.
-- [x] `P1` Add per-wrapper `examples/` with runnable offline samples. **Done** — each wrapper has account / primitives / transaction examples (offline build+sign, no DevKit). Python/Go/Rust verified running locally; JS cross-checked against source (Bun not installed locally). _Follow-up: richer samples (NFT mint, staking, governance) and a JS local run._
+- [x] `P1` Add per-wrapper `examples/` with runnable offline samples. **Done** — each wrapper has account / primitives / transaction examples (offline build+sign, no DevKit). All four verified running locally (Python, Go, Rust, JS/Bun). _Follow-up: richer samples (NFT mint, staking, governance)._
 - [ ] `P2` Generated API reference per language (Sphinx / rustdoc / godoc / JSDoc or TypeDoc).
 - [ ] `P2` Add project-meta docs: `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and GitHub issue/PR templates.
 - [ ] `P2` Expand the 7-line `devkit.md` into a proper Yaci DevKit integration-testing guide.
