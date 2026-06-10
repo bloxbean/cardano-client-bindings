@@ -44,7 +44,7 @@ describe("New QuickTx Features Integration (DevKit)", () => {
     if (bridge) bridge.close();
   });
 
-  async function fundAccount(ada = 500) {
+  async function fundAccount(ada = 2000) {
     const account = bridge.account.create(TESTNET);
     await devkit.topup(account.base_address, ada);
     await devkit.waitForBlock(2000);
@@ -276,7 +276,7 @@ describe("New QuickTx Features Integration (DevKit)", () => {
     const result = bridge.quicktx
       .newTx()
       .createProposal("hard_fork_initiation", sender.stake_address, ANCHOR_URL, ANCHOR_DATA_HASH, {
-        protocolVersionMajor: 10,
+        protocolVersionMajor: 11,
         protocolVersionMinor: 0,
       })
       .from(sender.base_address)
