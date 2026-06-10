@@ -22,6 +22,10 @@ jobs:
           java-version: '25.0.3'
           distribution: 'graalvm'
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - uses: dtolnay/rust-toolchain@stable
       - name: Install pytest
         run: python3 -m pip install --break-system-packages pytest
       - name: Build native library
