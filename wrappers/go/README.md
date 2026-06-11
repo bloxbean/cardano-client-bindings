@@ -5,7 +5,7 @@ via the CCL Bridge native library, using `cgo`.
 
 > Part of the [CCL Bridge](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
-> [`docs/quicktx.md`](../../docs/quicktx.md) for the transaction-builder spec.
+> [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
 ## Requirements
 
@@ -87,5 +87,9 @@ A `*Bridge` exposes these namespaces (all offline operations):
 `bridge.Script`, `bridge.Gov`, `bridge.Wallet`, `bridge.QuickTx`.
 
 Network IDs: `ccl.Mainnet` (0), `ccl.Testnet` (1), `ccl.Preprod` (2), `ccl.Preview` (3).
-Amount helpers: `ccl.Ada(5)`, `ccl.Lovelace(5_000_000)`, `ccl.Asset(unit, qty)`.
 Errors are returned as a `*ccl.CclError`.
+
+Transactions are built from a [TxPlan](https://github.com/bloxbean/cardano-client-lib)
+**YAML** document via `bridge.QuickTx.Build(yaml, utxos, protocolParams)`, fully offline —
+you supply the UTXOs and protocol parameters. See
+[`examples/transaction`](examples/transaction/main.go).
