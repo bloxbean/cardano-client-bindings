@@ -110,6 +110,7 @@ public final class CryptoApi {
 
             String mnemonic = MnemonicUtil.generateNew(words);
             ResultState.set(mnemonic);
+
             return ErrorCodes.CCL_SUCCESS;
         } catch (Exception e) {
             ErrorState.set(e.getMessage());

@@ -44,6 +44,7 @@ public final class PlutusApi {
             PlutusData plutusData = PlutusData.deserialize(datumBytes);
             String hash = plutusData.getDatumHash();
             ResultState.set(hash);
+
             return ErrorCodes.CCL_SUCCESS;
         } catch (Exception e) {
             ErrorState.set(e.getMessage());

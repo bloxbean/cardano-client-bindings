@@ -5,7 +5,7 @@ plugins {
 
 base.archivesName = 'ccl-bridge-core'
 
-def cclVersion = '0.7.2'
+def cclVersion = '0.8.0-pre4'
 
 dependencies {
     // CCL core modules (offline-only, no backend HTTP)
@@ -47,6 +47,9 @@ graalvmNative {
                 '--initialize-at-build-time=net.i2p.crypto.eddsa',
                 '--initialize-at-build-time=com.fasterxml.jackson',
                 '--initialize-at-build-time=co.nstant.in.cbor',
+                // snakeyaml is pulled in by CCL's TxPlan YAML support; its option enums
+                // must be initialized at build time for native-image.
+                '--initialize-at-build-time=org.yaml.snakeyaml',
                 '--enable-url-protocols=http,https',
             )
         }
