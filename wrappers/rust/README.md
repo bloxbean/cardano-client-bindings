@@ -5,7 +5,7 @@ via the CCL Bridge native library.
 
 > Part of the [CCL Bridge](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
-> [`docs/quicktx.md`](../../docs/quicktx.md) for the transaction-builder spec.
+> [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
 ## Requirements
 
@@ -70,9 +70,15 @@ A `Bridge` exposes namespaced accessors (all offline operations):
 `.gov()`, `.wallet()`, `.quicktx()`.
 
 Most methods return `Result<String>` where the `String` is JSON — parse it with
-`serde_json`. The QuickTx builder's `build()` returns a typed `TxResult`
-(`tx_cbor`, `tx_hash`, `fee`).
+`serde_json`.
+
+Transactions are defined as a [TxPlan](https://github.com/bloxbean/cardano-client-lib)
+**YAML** document and built fully offline — you supply the UTXOs and protocol parameters
+(as `serde_json::Value`):
+
+```rust
+let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params)?; // -> TxResult { tx_cbor, tx_hash, fee }
+```
 
 Network IDs: `network::MAINNET` (0), `network::TESTNET` (1), `network::PREPROD` (2),
-`network::PREVIEW` (3). Amount helpers: `Amount::ada(5.0)`, `Amount::lovelace(5_000_000)`,
-`Amount::asset(unit, qty)`. Errors are `ccl::CclError`.
+`network::PREVIEW` (3). Errors are `ccl::CclError`.

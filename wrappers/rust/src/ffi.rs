@@ -184,6 +184,8 @@ extern "C" {
     // QuickTx API
     pub fn ccl_quicktx_build(
         thread: *mut graal_isolatethread_t,
-        spec_json: *const c_char,
+        yaml: *const c_char,
+        utxos_json: *const c_char,
+        protocol_params_json: *const c_char,
     ) -> c_int;
 }

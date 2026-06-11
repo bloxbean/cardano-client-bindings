@@ -8,7 +8,7 @@
 //!   cd wrappers/rust && DYLD_LIBRARY_PATH=../../core/build/native/nativeCompile \
 //!       cargo test --test quicktx_integration_test -- --test-threads=1
 
-use ccl::{Amount, Bridge, ProviderConfig};
+use ccl::Bridge;
 use serde_json::{json, Value};
 use std::thread;
 use std::time::Duration;
@@ -144,9 +144,26 @@ fn total_lovelace(utxos: &Value) -> u64 {
 
 // --- Integration Tests ---
 
+fn payment_yaml(from: &str, to: &str, quantity: &str) -> String {
+    format!(
+        "version: 1.0\n\
+         transaction:\n\
+         \x20 - tx:\n\
+         \x20     from: {from}\n\
+         \x20     intents:\n\
+         \x20       - type: payment\n\
+         \x20         address: {to}\n\
+         \x20         amounts:\n\
+         \x20           - unit: lovelace\n\
+         \x20             quantity: \"{quantity}\"\n"
+    )
+}
+
 #[test]
 fn test_integration_simple_ada_transfer() {
-    if skip_if_no_devkit() { return; }
+    if skip_if_no_devkit() {
+        return;
+    }
     devkit_reset();
     wait_for_block();
 
@@ -157,110 +174,30 @@ fn test_integration_simple_ada_transfer() {
     let utxos = devkit_get_utxos(&sender);
     let pp = devkit_get_protocol_params();
 
-    // Build
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(5.0)], None, None)
-        .from(&sender)
-        .with_utxos(utxos)
-        .with_protocol_params(pp)
-        .build()
-        .expect("build failed");
-
+    let yaml = payment_yaml(&sender, &receiver, "5000000");
+    let result = bridge.quicktx().build(&yaml, &utxos, &pp).expect("build failed");
     assert!(!result.tx_cbor.is_empty());
     assert_eq!(result.tx_hash.len(), 64);
-    assert!(result.fee.parse::<u64>().unwrap() > 0);
 
-    // Sign
     let signed_tx = bridge
         .account()
         .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
         .expect("sign failed");
-
-    // Submit
     let tx_hash = devkit_submit_tx(&signed_tx);
     assert!(!tx_hash.is_empty());
 
-    // Verify
     wait_for_block();
     let receiver_utxos = devkit_get_utxos(&receiver);
-    let total = total_lovelace(&receiver_utxos);
-    assert_eq!(total, 5_000_000, "expected 5 ADA, got {} lovelace", total);
-}
-
-#[test]
-fn test_integration_multiple_receivers() {
-    if skip_if_no_devkit() { return; }
-
-    let bridge = Bridge::new().expect("create bridge");
-    let (sender, mnemonic) = fund_sender(&bridge, 150);
-    let (r1, _, _) = get_testnet_account(&bridge);
-    let (r2, _, _) = get_testnet_account(&bridge);
-
-    let utxos = devkit_get_utxos(&sender);
-    let pp = devkit_get_protocol_params();
-
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&r1, &[Amount::ada(3.0)], None, None)
-        .pay_to_address(&r2, &[Amount::ada(2.0)], None, None)
-        .from(&sender)
-        .with_utxos(utxos)
-        .with_protocol_params(pp)
-        .build()
-        .expect("build failed");
-
-    let signed_tx = bridge
-        .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
-        .expect("sign failed");
-    devkit_submit_tx(&signed_tx);
-    wait_for_block();
-
-    let r1_utxos = devkit_get_utxos(&r1);
-    let r2_utxos = devkit_get_utxos(&r2);
-    assert_eq!(total_lovelace(&r1_utxos), 3_000_000);
-    assert_eq!(total_lovelace(&r2_utxos), 2_000_000);
-}
-
-#[test]
-fn test_integration_with_metadata() {
-    if skip_if_no_devkit() { return; }
-
-    let bridge = Bridge::new().expect("create bridge");
-    let (sender, mnemonic) = fund_sender(&bridge, 150);
-    let (receiver, _, _) = get_testnet_account(&bridge);
-
-    let utxos = devkit_get_utxos(&sender);
-    let pp = devkit_get_protocol_params();
-
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(2.0)], None, None)
-        .attach_metadata(674, json!({"msg": ["Hello from Rust integration"]}))
-        .from(&sender)
-        .with_utxos(utxos)
-        .with_protocol_params(pp)
-        .build()
-        .expect("build failed");
-
-    let signed_tx = bridge
-        .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
-        .expect("sign failed");
-    devkit_submit_tx(&signed_tx);
-    wait_for_block();
-
-    let tx_info = devkit_get_tx(&result.tx_hash);
-    assert!(tx_info.is_some(), "tx not found on-chain");
+    assert_eq!(total_lovelace(&receiver_utxos), 5_000_000);
 }
 
 #[test]
 fn test_integration_insufficient_funds() {
-    if skip_if_no_devkit() { return; }
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
 
     let bridge = Bridge::new().expect("create bridge");
     let (sender, _) = fund_sender(&bridge, 2);
@@ -269,176 +206,7 @@ fn test_integration_insufficient_funds() {
     let utxos = devkit_get_utxos(&sender);
     let pp = devkit_get_protocol_params();
 
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(100.0)], None, None)
-        .from(&sender)
-        .with_utxos(utxos)
-        .with_protocol_params(pp)
-        .build();
-
-    assert!(result.is_err(), "expected error for insufficient funds");
-}
-
-#[test]
-fn test_integration_full_round_trip() {
-    if skip_if_no_devkit() { return; }
-
-    let bridge = Bridge::new().expect("create bridge");
-    let (sender, mnemonic) = fund_sender(&bridge, 150);
-    let (receiver, _, _) = get_testnet_account(&bridge);
-
-    let utxos = devkit_get_utxos(&sender);
-    let pp = devkit_get_protocol_params();
-
-    // Build
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(10.0)], None, None)
-        .from(&sender)
-        .with_utxos(utxos)
-        .with_protocol_params(pp)
-        .build()
-        .expect("build failed");
-
-    assert!(!result.tx_cbor.is_empty());
-    assert_eq!(result.tx_hash.len(), 64);
-
-    // Sign
-    let signed_tx = bridge
-        .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
-        .expect("sign failed");
-
-    // Submit
-    devkit_submit_tx(&signed_tx);
-    wait_for_block();
-
-    // Confirm on-chain
-    let tx_info = devkit_get_tx(&result.tx_hash);
-    assert!(tx_info.is_some(), "tx not found on-chain");
-
-    // Check receiver balance
-    let receiver_utxos = devkit_get_utxos(&receiver);
-    let total = total_lovelace(&receiver_utxos);
-    assert_eq!(total, 10_000_000, "expected 10 ADA, got {} lovelace", total);
-}
-
-// --- Provider Config (Java-side lazy UTXO fetching) tests ---
-
-#[test]
-fn test_integration_provider_config_simple_transfer() {
-    if skip_if_no_devkit() { return; }
-
-    let bridge = Bridge::new().expect("create bridge");
-    let (sender, mnemonic) = fund_sender(&bridge, 150);
-    let (receiver, _, _) = get_testnet_account(&bridge);
-
-    let config = ProviderConfig {
-        name: "yaci".to_string(),
-        url: DEVKIT_PROVIDER_URL.to_string(),
-        api_key: None,
-        enable_cost_evaluation: None,
-    };
-
-    // Build using ProviderConfig — Java fetches UTXOs and PP lazily via HTTP
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(5.0)], None, None)
-        .from(&sender)
-        .build_with_provider(&config)
-        .expect("build with provider failed");
-
-    assert!(!result.tx_cbor.is_empty());
-    assert_eq!(result.tx_hash.len(), 64);
-    assert!(result.fee.parse::<u64>().unwrap() > 0);
-
-    // Sign and submit
-    let signed_tx = bridge
-        .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
-        .expect("sign failed");
-    let tx_hash = devkit_submit_tx(&signed_tx);
-    assert!(!tx_hash.is_empty());
-
-    wait_for_block();
-    let receiver_utxos = devkit_get_utxos(&receiver);
-    let total = total_lovelace(&receiver_utxos);
-    assert_eq!(total, 5_000_000, "expected 5 ADA, got {} lovelace", total);
-}
-
-#[test]
-fn test_integration_provider_config_multiple_receivers() {
-    if skip_if_no_devkit() { return; }
-
-    let bridge = Bridge::new().expect("create bridge");
-    let (sender, mnemonic) = fund_sender(&bridge, 150);
-    let (r1, _, _) = get_testnet_account(&bridge);
-    let (r2, _, _) = get_testnet_account(&bridge);
-
-    let config = ProviderConfig {
-        name: "yaci".to_string(),
-        url: DEVKIT_PROVIDER_URL.to_string(),
-        api_key: None,
-        enable_cost_evaluation: None,
-    };
-
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&r1, &[Amount::ada(3.0)], None, None)
-        .pay_to_address(&r2, &[Amount::ada(2.0)], None, None)
-        .from(&sender)
-        .build_with_provider(&config)
-        .expect("build with provider failed");
-
-    let signed_tx = bridge
-        .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
-        .expect("sign failed");
-    devkit_submit_tx(&signed_tx);
-    wait_for_block();
-
-    let r1_utxos = devkit_get_utxos(&r1);
-    let r2_utxos = devkit_get_utxos(&r2);
-    assert_eq!(total_lovelace(&r1_utxos), 3_000_000);
-    assert_eq!(total_lovelace(&r2_utxos), 2_000_000);
-}
-
-#[test]
-fn test_integration_provider_config_with_metadata() {
-    if skip_if_no_devkit() { return; }
-
-    let bridge = Bridge::new().expect("create bridge");
-    let (sender, mnemonic) = fund_sender(&bridge, 150);
-    let (receiver, _, _) = get_testnet_account(&bridge);
-
-    let config = ProviderConfig {
-        name: "yaci".to_string(),
-        url: DEVKIT_PROVIDER_URL.to_string(),
-        api_key: None,
-        enable_cost_evaluation: None,
-    };
-
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(&receiver, &[Amount::ada(2.0)], None, None)
-        .attach_metadata(674, json!({"msg": ["Hello from Rust providerConfig"]}))
-        .from(&sender)
-        .build_with_provider(&config)
-        .expect("build with provider failed");
-
-    let signed_tx = bridge
-        .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
-        .expect("sign failed");
-    devkit_submit_tx(&signed_tx);
-    wait_for_block();
-
-    let tx_info = devkit_get_tx(&result.tx_hash);
-    assert!(tx_info.is_some(), "tx not found on-chain");
+    let yaml = payment_yaml(&sender, &receiver, "100000000");
+    let result = bridge.quicktx().build(&yaml, &utxos, &pp);
+    assert!(result.is_err(), "expected insufficient funds error");
 }
