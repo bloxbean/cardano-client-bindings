@@ -13,10 +13,27 @@ import org.graalvm.nativeimage.IsolateThread;
 import org.graalvm.nativeimage.c.function.CEntryPoint;
 import org.graalvm.nativeimage.c.type.CCharPointer;
 
+/**
+ * Cryptographic primitives: Blake2b hashing, BIP-39 mnemonics, and Ed25519 sign/verify.
+ *
+ * <p>Hashing and signing take/return <em>hex-encoded</em> bytes. See
+ * {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention. Every entry point here
+ * is a static GraalVM {@code @CEntryPoint}.
+ */
 public final class CryptoApi {
 
     private CryptoApi() {}
 
+    /**
+     * Computes a Blake2b-256 hash.
+     *
+     * <p>Exported as {@code ccl_crypto_blake2b_256}. Hex in, hex out; the result is a 32-byte digest
+     * (64 hex chars).
+     *
+     * @param thread     the current isolate thread
+     * @param dataHexPtr the input bytes as hex (UTF-8 C string)
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_CRYPTO}
+     */
     @CEntryPoint(name = "ccl_crypto_blake2b_256")
     public static int blake2b256(IsolateThread thread, CCharPointer dataHexPtr) {
         try {
@@ -36,6 +53,16 @@ public final class CryptoApi {
         }
     }
 
+    /**
+     * Computes a Blake2b-224 hash (the size used for Cardano credential/key hashes).
+     *
+     * <p>Exported as {@code ccl_crypto_blake2b_224}. Hex in, hex out; the result is a 28-byte digest
+     * (56 hex chars).
+     *
+     * @param thread     the current isolate thread
+     * @param dataHexPtr the input bytes as hex (UTF-8 C string)
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_CRYPTO}
+     */
     @CEntryPoint(name = "ccl_crypto_blake2b_224")
     public static int blake2b224(IsolateThread thread, CCharPointer dataHexPtr) {
         try {
@@ -55,6 +82,17 @@ public final class CryptoApi {
         }
     }
 
+    /**
+     * Generates a new BIP-39 mnemonic.
+     *
+     * <p>Exported as {@code ccl_crypto_generate_mnemonic}. On success the result is the
+     * space-separated mnemonic phrase.
+     *
+     * @param thread    the current isolate thread
+     * @param wordCount number of words: 12, 15, 18, 21, or 24
+     * @return {@link ErrorCodes#CCL_SUCCESS}, {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT}
+     *         (bad word count), or {@link ErrorCodes#CCL_ERROR_CRYPTO}
+     */
     @CEntryPoint(name = "ccl_crypto_generate_mnemonic")
     public static int generateMnemonic(IsolateThread thread, int wordCount) {
         try {
@@ -79,6 +117,16 @@ public final class CryptoApi {
         }
     }
 
+    /**
+     * Validates a BIP-39 mnemonic (word list and checksum).
+     *
+     * <p>Exported as {@code ccl_crypto_validate_mnemonic}. Reported via the status code only (no
+     * result string).
+     *
+     * @param thread      the current isolate thread
+     * @param mnemonicPtr the mnemonic phrase to validate (UTF-8 C string)
+     * @return {@link ErrorCodes#CCL_SUCCESS} (valid) or {@link ErrorCodes#CCL_ERROR_INVALID_MNEMONIC}
+     */
     @CEntryPoint(name = "ccl_crypto_validate_mnemonic")
     public static int validateMnemonic(IsolateThread thread, CCharPointer mnemonicPtr) {
         try {
@@ -96,6 +144,18 @@ public final class CryptoApi {
         }
     }
 
+    /**
+     * Produces an Ed25519 signature.
+     *
+     * <p>Exported as {@code ccl_crypto_sign}. On success the result is the hex-encoded 64-byte
+     * signature. {@code skHex} must be a raw 32-byte Ed25519 secret key (64 hex chars) — note an
+     * account's extended private key is 64 bytes, so use its first 32 bytes here.
+     *
+     * @param thread        the current isolate thread
+     * @param messageHexPtr the message bytes as hex (UTF-8 C string)
+     * @param skHexPtr      the 32-byte Ed25519 secret key as hex (UTF-8 C string)
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_CRYPTO}
+     */
     @CEntryPoint(name = "ccl_crypto_sign")
     public static int sign(IsolateThread thread, CCharPointer messageHexPtr, CCharPointer skHexPtr) {
         try {
@@ -122,6 +182,19 @@ public final class CryptoApi {
         }
     }
 
+    /**
+     * Verifies an Ed25519 signature.
+     *
+     * <p>Exported as {@code ccl_crypto_verify}. Reported via the status code only:
+     * {@link ErrorCodes#CCL_SUCCESS} if the signature is valid,
+     * {@link ErrorCodes#CCL_ERROR_CRYPTO} if it is not.
+     *
+     * @param thread          the current isolate thread
+     * @param signatureHexPtr the 64-byte signature as hex (UTF-8 C string)
+     * @param messageHexPtr   the message bytes as hex (UTF-8 C string)
+     * @param pkHexPtr        the 32-byte Ed25519 public key as hex (UTF-8 C string)
+     * @return {@link ErrorCodes#CCL_SUCCESS} (valid) or {@link ErrorCodes#CCL_ERROR_CRYPTO}
+     */
     @CEntryPoint(name = "ccl_crypto_verify")
     public static int verify(IsolateThread thread, CCharPointer signatureHexPtr,
                              CCharPointer messageHexPtr, CCharPointer pkHexPtr) {

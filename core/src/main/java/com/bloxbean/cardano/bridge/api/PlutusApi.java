@@ -10,10 +10,27 @@ import org.graalvm.nativeimage.IsolateThread;
 import org.graalvm.nativeimage.c.function.CEntryPoint;
 import org.graalvm.nativeimage.c.type.CCharPointer;
 
+/**
+ * Plutus data (datum/redeemer) entry points: hashing and CBOR&#8596;JSON conversion.
+ *
+ * <p>The JSON form is CCL's PlutusData JSON schema (constructor/fields/bytes/int/list/map). See
+ * {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention. Every entry point here
+ * is a static GraalVM {@code @CEntryPoint}.
+ */
 public final class PlutusApi {
 
     private PlutusApi() {}
 
+    /**
+     * Computes the datum hash of a PlutusData value.
+     *
+     * <p>Exported as {@code ccl_plutus_data_hash}. On success the result is the datum hash as hex
+     * (the value you place in a transaction output's datum-hash field).
+     *
+     * @param thread          the current isolate thread
+     * @param datumCborHexPtr the PlutusData as CBOR hex
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_SERIALIZATION}
+     */
     @CEntryPoint(name = "ccl_plutus_data_hash")
     public static int datumHash(IsolateThread thread, CCharPointer datumCborHexPtr) {
         try {
@@ -34,6 +51,15 @@ public final class PlutusApi {
         }
     }
 
+    /**
+     * Converts PlutusData CBOR to its JSON representation.
+     *
+     * <p>Exported as {@code ccl_plutus_data_to_json}. On success the result is the PlutusData as JSON.
+     *
+     * @param thread     the current isolate thread
+     * @param cborHexPtr the PlutusData as CBOR hex
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_SERIALIZATION}
+     */
     @CEntryPoint(name = "ccl_plutus_data_to_json")
     public static int toJson(IsolateThread thread, CCharPointer cborHexPtr) {
         try {
@@ -54,6 +80,16 @@ public final class PlutusApi {
         }
     }
 
+    /**
+     * Builds PlutusData CBOR from its JSON representation.
+     *
+     * <p>Exported as {@code ccl_plutus_data_from_json}. The inverse of
+     * {@code ccl_plutus_data_to_json}: on success the result is the PlutusData as CBOR hex.
+     *
+     * @param thread  the current isolate thread
+     * @param jsonPtr the PlutusData as JSON (UTF-8 C string)
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_SERIALIZATION}
+     */
     @CEntryPoint(name = "ccl_plutus_data_from_json")
     public static int fromJson(IsolateThread thread, CCharPointer jsonPtr) {
         try {

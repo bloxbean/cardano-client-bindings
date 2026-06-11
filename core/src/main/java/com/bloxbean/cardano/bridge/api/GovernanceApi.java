@@ -15,10 +15,32 @@ import org.graalvm.nativeimage.c.type.CCharPointer;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Governance key-derivation entry points (Conway era): DRep and constitutional-committee keys.
+ *
+ * <p>All keys are derived from a mnemonic via CIP-1852/CIP-105 paths. {@code networkId} uses
+ * {@code 0}=mainnet, {@code 1}=testnet, {@code 2}=preprod, {@code 3}=preview; address index is 0.
+ * See {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention. Every entry point
+ * here is a static GraalVM {@code @CEntryPoint}.
+ */
 public final class GovernanceApi {
 
     private GovernanceApi() {}
 
+    /**
+     * Derives the DRep key pair from a mnemonic.
+     *
+     * <p>Exported as {@code ccl_gov_drep_key_from_mnemonic}. On success the result is a JSON object:
+     * <pre>{@code {"drep_id","verification_key","verification_key_hash",
+     *  "bech32_verification_key","bech32_verification_key_hash"}}</pre>
+     *
+     * @param thread       the current isolate thread
+     * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
+     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param accountIndex HD account index
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
+     *         {@link ErrorCodes#CCL_ERROR_GENERAL}
+     */
     @CEntryPoint(name = "ccl_gov_drep_key_from_mnemonic")
     public static int drepKeyFromMnemonic(IsolateThread thread, CCharPointer mnemonicPtr,
                                           int networkId, int accountIndex) {
@@ -53,6 +75,21 @@ public final class GovernanceApi {
         }
     }
 
+    /**
+     * Derives the constitutional-committee <em>cold</em> key pair from a mnemonic.
+     *
+     * <p>Exported as {@code ccl_gov_committee_cold_key_from_mnemonic}. On success the result is a
+     * JSON object:
+     * <pre>{@code {"id","verification_key","verification_key_hash",
+     *  "bech32_verification_key","bech32_verification_key_hash"}}</pre>
+     *
+     * @param thread       the current isolate thread
+     * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
+     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param accountIndex HD account index
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
+     *         {@link ErrorCodes#CCL_ERROR_GENERAL}
+     */
     @CEntryPoint(name = "ccl_gov_committee_cold_key_from_mnemonic")
     public static int committeeColdKeyFromMnemonic(IsolateThread thread, CCharPointer mnemonicPtr,
                                                     int networkId, int accountIndex) {
@@ -87,6 +124,20 @@ public final class GovernanceApi {
         }
     }
 
+    /**
+     * Derives the constitutional-committee <em>hot</em> key pair from a mnemonic.
+     *
+     * <p>Exported as {@code ccl_gov_committee_hot_key_from_mnemonic}. On success the result is the
+     * same JSON shape as {@code ccl_gov_committee_cold_key_from_mnemonic}
+     * ({@code id}, {@code verification_key}, {@code verification_key_hash}, and the bech32 forms).
+     *
+     * @param thread       the current isolate thread
+     * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
+     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param accountIndex HD account index
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
+     *         {@link ErrorCodes#CCL_ERROR_GENERAL}
+     */
     @CEntryPoint(name = "ccl_gov_committee_hot_key_from_mnemonic")
     public static int committeeHotKeyFromMnemonic(IsolateThread thread, CCharPointer mnemonicPtr,
                                                    int networkId, int accountIndex) {

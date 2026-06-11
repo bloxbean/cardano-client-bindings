@@ -13,12 +13,31 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * HD wallet entry points: create/restore a wallet and derive its addresses.
+ *
+ * <p>Unlike {@link AccountApi} (a single account), a {@code Wallet} exposes a sequence of addresses.
+ * {@code networkId} uses {@code 0}=mainnet, {@code 1}=testnet, {@code 2}=preprod, {@code 3}=preview.
+ * See {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention. Every entry point
+ * here is a static GraalVM {@code @CEntryPoint}.
+ */
 public final class WalletApi {
 
     private static final int DEFAULT_ADDRESS_COUNT = 5;
 
     private WalletApi() {}
 
+    /**
+     * Creates a new HD wallet with a freshly generated mnemonic.
+     *
+     * <p>Exported as {@code ccl_wallet_create}. On success the result is a JSON object:
+     * <pre>{@code {"mnemonic","stake_address","addresses":[ ...first 5 base addresses... ]}}</pre>
+     *
+     * @param thread    the current isolate thread
+     * @param networkId 0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
+     *         {@link ErrorCodes#CCL_ERROR_GENERAL}
+     */
     @CEntryPoint(name = "ccl_wallet_create")
     public static int create(IsolateThread thread, int networkId) {
         try {
@@ -38,6 +57,18 @@ public final class WalletApi {
         }
     }
 
+    /**
+     * Restores an HD wallet from an existing mnemonic.
+     *
+     * <p>Exported as {@code ccl_wallet_from_mnemonic}. On success the result is the same JSON object
+     * as {@code ccl_wallet_create}.
+     *
+     * @param thread      the current isolate thread
+     * @param mnemonicPtr the BIP-39 mnemonic phrase (UTF-8 C string)
+     * @param networkId   0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
+     *         {@link ErrorCodes#CCL_ERROR_GENERAL}
+     */
     @CEntryPoint(name = "ccl_wallet_from_mnemonic")
     public static int fromMnemonic(IsolateThread thread, CCharPointer mnemonicPtr, int networkId) {
         try {
@@ -63,6 +94,19 @@ public final class WalletApi {
         }
     }
 
+    /**
+     * Derives a single base address at the given index from a wallet's mnemonic.
+     *
+     * <p>Exported as {@code ccl_wallet_get_address}. On success the result is the bech32 base address
+     * at {@code index}.
+     *
+     * @param thread      the current isolate thread
+     * @param mnemonicPtr the BIP-39 mnemonic phrase (UTF-8 C string)
+     * @param networkId   0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param index       the address index to derive
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
+     *         {@link ErrorCodes#CCL_ERROR_GENERAL}
+     */
     @CEntryPoint(name = "ccl_wallet_get_address")
     public static int getAddress(IsolateThread thread, CCharPointer mnemonicPtr,
                                  int networkId, int index) {
