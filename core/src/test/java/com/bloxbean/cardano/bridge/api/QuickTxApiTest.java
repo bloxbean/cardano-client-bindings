@@ -4,6 +4,8 @@ import com.bloxbean.cardano.bridge.api.quicktx.QuickTxService;
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer;
+import com.bloxbean.cardano.client.transaction.spec.Transaction;
+import com.bloxbean.cardano.client.util.HexUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -98,8 +100,31 @@ class QuickTxApiTest {
         assertBuilt(build(yaml));
     }
 
-    // TODO: metadata intent — verify the exact TxPlan metadata YAML shape (custom serializer) and
-    // re-add a paymentWithMetadata test.
+    @Test
+    void paymentWithMetadata() throws Exception {
+        // The metadata intent's value is a scalar string the deserializer auto-detects; JSON
+        // (starting with '{') is parsed via MetadataBuilder.metadataFromJson.
+        String yaml = """
+            version: 1.0
+            transaction:
+              - tx:
+                  from: %s
+                  intents:
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "2000000"
+                    - type: metadata
+                      metadata: '{"674": {"msg": "Hello from CCL Bridge"}}'
+            """.formatted(sender, receiver1);
+        JsonNode result = build(yaml);
+        assertBuilt(result);
+
+        // The metadata must actually be attached: the tx body carries an auxiliary data hash.
+        Transaction tx = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));
+        assertNotNull(tx.getBody().getAuxiliaryDataHash(), "metadata should set the auxiliary data hash");
+    }
 
     @Test
     void variableSubstitution() throws Exception {

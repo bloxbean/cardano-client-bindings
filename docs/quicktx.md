@@ -100,8 +100,8 @@ Each intent has a `type` discriminator. The full set supported by CCL's TxPlan:
 
 > The exact YAML fields for each intent come from CCL's TxPlan serialization. This bridge passes the
 > YAML through unchanged, so the authoritative field reference is the CCL `quicktx` module
-> (`intent/*Intent.java` and the `TxMetadataSerializationTest` / TxPlan tests at `v0.8.0-pre4`). The
-> verified `payment` shape is shown below.
+> (`intent/*Intent.java` and the `TxMetadataSerializationTest` / TxPlan tests at `v0.8.0-pre4`).
+> Verified `payment` and `metadata` shapes are shown below.
 
 > **Plutus script spend/mint is deferred.** Building a Plutus transaction needs offline
 > execution-unit evaluation, which `0.8.0-pre4` does not provide. Plans containing Plutus script
@@ -191,6 +191,26 @@ transaction:
           amounts:
             - unit: lovelace
               quantity: ${amount}
+```
+
+### 4. Payment with metadata
+
+The `metadata` intent's value is a **scalar string** that the deserializer auto-detects — pass it as
+a JSON string (it may also be CBOR hex). Labels are the top-level keys:
+
+```yaml
+version: 1.0
+transaction:
+  - tx:
+      from: addr_test1qp...
+      intents:
+        - type: payment
+          address: addr_test1qz...
+          amounts:
+            - unit: lovelace
+              quantity: "2000000"
+        - type: metadata
+          metadata: '{"674": {"msg": "Hello from CCL Bridge"}}'
 ```
 
 ---
