@@ -1,8 +1,8 @@
-// Build and sign a payment transaction fully offline (QuickTx).
+// Build and sign a payment transaction fully offline from a TxPlan (YAML).
 //
-// No node or Yaci DevKit needed: we supply the UTXOs and protocol parameters
-// ourselves, build an unsigned transaction, then sign it locally. (Submitting it
-// to a network is a separate, online step — out of scope for this offline example.)
+// The transaction is defined as a TxPlan YAML document; we supply the UTXOs and protocol
+// parameters ourselves (no node / no provider). The bridge builds the unsigned CBOR, which we
+// then sign locally. Submitting it is a separate, online step.
 //
 // Run from wrappers/go:
 //
@@ -13,11 +13,12 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/bloxbean/ccl-bridge/wrappers/go/ccl"
 )
 
-// Minimal protocol parameters (CCL test-resource values).
+// Minimal protocol parameters (CCL test-resource values), the CCL ProtocolParams model as a map.
 var protocolParams = map[string]interface{}{
 	"min_fee_a": 44, "min_fee_b": 155381, "max_tx_size": 16384,
 	"key_deposit": "2000000", "pool_deposit": "500000000",
@@ -39,24 +40,34 @@ func main() {
 
 	// A static UTXO the sender controls (100 ADA), instead of querying a node.
 	utxos := []map[string]interface{}{{
-		"tx_hash":      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"tx_hash":      strings.Repeat("a", 64),
 		"output_index": 0,
 		"address":      sender.BaseAddress,
 		"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "100000000"}},
 	}}
 
-	// Build an unsigned transaction: pay 5 ADA to the receiver.
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(receiver.BaseAddress, ccl.Ada(5)).
-		From(sender.BaseAddress).
-		WithUtxos(utxos).
-		WithProtocolParams(protocolParams).
-		Build()
+	// Define the transaction as a TxPlan YAML document: pay 5 ADA to the receiver.
+	yaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`, sender.BaseAddress, receiver.BaseAddress)
+
+	// Build the unsigned transaction offline.
+	result, err := bridge.QuickTx.Build(yaml, utxos, protocolParams)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Built unsigned transaction")
+	fmt.Println("Built unsigned transaction from TxPlan YAML")
 	fmt.Println("  tx hash:", result.TxHash)
+	fmt.Println("  fee    :", result.Fee)
 	fmt.Println("  cbor   :", result.TxCbor[:80], "...")
 
 	// Sign it with the sender's mnemonic.

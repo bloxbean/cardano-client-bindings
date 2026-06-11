@@ -77,7 +77,14 @@ public final class QuickTxApi {
                 ErrorState.set(msg);
                 return ErrorCodes.CCL_ERROR_INSUFFICIENT_FUNDS;
             }
-            ErrorState.set(msg != null ? msg : e.getClass().getName());
+            // Include the root cause — wrapped exceptions (e.g. YAML deserialization) otherwise
+            // hide the actual problem behind a generic message.
+            StringBuilder detail = new StringBuilder(msg != null ? msg : e.getClass().getName());
+            for (Throwable c = e.getCause(); c != null && c != c.getCause(); c = c.getCause()) {
+                detail.append(" | ").append(c.getClass().getSimpleName())
+                      .append(": ").append(c.getMessage());
+            }
+            ErrorState.set(detail.toString());
             return ErrorCodes.CCL_ERROR_TX_BUILD;
         }
     }
