@@ -193,7 +193,7 @@ class CclLib:
         lib.ccl_script_hash.restype = c_int
 
         # QuickTx API
-        lib.ccl_quicktx_build.argtypes = [c_void_p, c_char_p]
+        lib.ccl_quicktx_build.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p]
         lib.ccl_quicktx_build.restype = c_int
 
     def _get_result(self):

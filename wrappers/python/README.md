@@ -5,7 +5,7 @@ via the CCL Bridge native library. Pure `ctypes` — no JVM, no compiler, no C e
 
 > Part of the [CCL Bridge](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
-> [`docs/quicktx.md`](../../docs/quicktx.md) for the transaction-builder spec.
+> [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
 ## Requirements
 
@@ -85,8 +85,17 @@ A `CclLib` instance exposes these namespaces (all offline operations):
 | `lib.script` | `native_from_json`, `hash` |
 | `lib.gov` | `drep_key_from_mnemonic`, `committee_cold_key_from_mnemonic`, `committee_hot_key_from_mnemonic` |
 | `lib.wallet` | `create`, `from_mnemonic`, `get_address` |
-| `lib.quicktx` | `new_tx`, `new_script_tx`, `compose` — the JSON-driven transaction builder |
+| `lib.quicktx` | `build(yaml, utxos, protocol_params)` — build an unsigned tx from a TxPlan YAML document |
 
 Network IDs: `CclLib.MAINNET` (0), `CclLib.TESTNET` (1), `CclLib.PREPROD` (2), `CclLib.PREVIEW` (3).
 
 Errors raise `ccl.CclError`.
+
+Transactions are defined as a [TxPlan](https://github.com/bloxbean/cardano-client-lib)
+**YAML** document and built fully offline — you supply the UTXOs and protocol parameters:
+
+```python
+result = lib.quicktx.build(txplan_yaml, utxos, protocol_params)  # -> {"tx_cbor","tx_hash","fee"}
+```
+
+See [`examples/03_build_and_sign_tx.py`](examples/03_build_and_sign_tx.py).
