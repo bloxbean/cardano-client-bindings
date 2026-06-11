@@ -54,6 +54,31 @@ but there is no standalone "C wrapper" product.
 - [ ] `P2` **Runtime lib↔wrapper version check.** A native lib a version behind its wrapper fails confusingly; have each wrapper call `ccl_version` on init and error clearly on mismatch.
 - [ ] `P2` **Sign release artifacts** (cosign/sigstore) for supply-chain trust when pulling a prebuilt native lib. The release already emits `SHA256SUMS`; add signatures + verification docs.
 
+## 2b. Plutus script evaluation — pluggable evaluators
+
+The bridge builds Plutus script transactions offline by accepting the redeemers' **execution
+units** (mem + CPU steps) as a fourth caller-supplied input to `ccl_quicktx_build` — exactly like
+UTXOs and protocol parameters. Internally it wires CCL's `StaticTransactionEvaluator`, so the
+bridge never runs the script; the caller computes the units with whatever evaluator they prefer.
+This is shipped and tested (`QuickTxApiTest.plutusMint*`).
+
+- [ ] `P1` **Evaluator abstraction + examples (pick-and-choose).** Give users a clear, per-language
+  story for *obtaining* the exec units to pass in, with helper/service classes and runnable
+  examples for each supported evaluator:
+  - **HTTP / Blockfrost** `…/utils/txs/evaluate` (online)
+  - **Ogmios** `EvaluateTx` (online)
+  - **Aiken** UPLC evaluator (offline; e.g. `aiken-java-binding` server-side, or a wrapper-native
+    binding)
+  - **Scalus** UPLC evaluator (offline, JVM/Scala)
+  The bridge stays evaluator-agnostic (it only consumes `[{mem, steps}]`); these are thin,
+  swappable client-side helpers + docs showing the two-pass flow (build → evaluate → rebuild with
+  units). Cover Python, Go, Rust, JS.
+- [ ] `P2` **Self-contained offline evaluation spike — `aiken-java-binding` inside the GraalVM
+  native image.** If the Aiken Rust UPLC evaluator can be loaded via JNI from within `libccl`
+  (the blockers: the binding extracts its `.so` from the classpath jar at runtime — absent in a
+  native image — plus JNI config and per-platform Rust binaries), the bridge could run scripts
+  itself and callers would supply *nothing* extra. Prove feasibility before committing.
+
 ## 3. Testing
 
 - [ ] `P1` Add JS integration tests for the script/Plutus paths — these are implemented in `wrappers/js/src/index.js` but have **zero** test coverage: `ScriptTxBuilder` validators + redeemers, `collectFromScript`, `mintPlutusAssets`, `readFrom` (reference inputs), and compose-with-`ScriptTx`. Python's `tests/` are the reference for what to assert.

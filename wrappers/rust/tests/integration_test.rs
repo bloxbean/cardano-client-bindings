@@ -547,7 +547,7 @@ fn test_quicktx_simple_payment() {
     let yaml = payment_yaml(&sender, &receiver, "5000000");
     let result = bridge
         .quicktx()
-        .build(&yaml, &make_utxos(&sender, 100_000_000), &test_protocol_params())
+        .build(&yaml, &make_utxos(&sender, 100_000_000), &test_protocol_params(), None)
         .expect("Build failed");
     assert_tx_result(&result);
 }
@@ -575,7 +575,7 @@ fn test_quicktx_variable_substitution() {
     );
     let result = bridge
         .quicktx()
-        .build(&yaml, &make_utxos(&sender, 100_000_000), &test_protocol_params())
+        .build(&yaml, &make_utxos(&sender, 100_000_000), &test_protocol_params(), None)
         .expect("Build failed");
     assert_tx_result(&result);
 }
@@ -589,6 +589,6 @@ fn test_quicktx_insufficient_funds() {
     let yaml = payment_yaml(&sender, &receiver, "200000000");
     let result = bridge
         .quicktx()
-        .build(&yaml, &make_utxos(&sender, 1_000_000), &test_protocol_params());
+        .build(&yaml, &make_utxos(&sender, 1_000_000), &test_protocol_params(), None);
     assert!(result.is_err(), "expected insufficient funds error");
 }

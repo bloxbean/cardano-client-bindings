@@ -175,7 +175,7 @@ fn test_integration_simple_ada_transfer() {
     let pp = devkit_get_protocol_params();
 
     let yaml = payment_yaml(&sender, &receiver, "5000000");
-    let result = bridge.quicktx().build(&yaml, &utxos, &pp).expect("build failed");
+    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build failed");
     assert!(!result.tx_cbor.is_empty());
     assert_eq!(result.tx_hash.len(), 64);
 
@@ -207,6 +207,6 @@ fn test_integration_insufficient_funds() {
     let pp = devkit_get_protocol_params();
 
     let yaml = payment_yaml(&sender, &receiver, "100000000");
-    let result = bridge.quicktx().build(&yaml, &utxos, &pp);
+    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None);
     assert!(result.is_err(), "expected insufficient funds error");
 }

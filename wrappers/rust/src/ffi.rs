@@ -187,5 +187,6 @@ extern "C" {
         yaml: *const c_char,
         utxos_json: *const c_char,
         protocol_params_json: *const c_char,
+        exec_units_json: *const c_char,
     ) -> c_int;
 }

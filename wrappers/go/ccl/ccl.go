@@ -611,7 +611,11 @@ type QuickTxApi struct {
 // UTXOs and protocol parameters. utxos and protocolParams are marshalled to JSON (the standard
 // CCL Utxo / ProtocolParams models). The transaction is built offline and never submitted —
 // sign the returned TxCbor and submit it yourself.
-func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}) (*TxResult, error) {
+//
+// For Plutus script transactions, pass the redeemers' execution units as the optional execUnits
+// argument: a slice of {mem, steps} (one per redeemer, in transaction order). Compute them with any
+// evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run the script.
+func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}, execUnits ...interface{}) (*TxResult, error) {
 	utxosJSON, err := json.Marshal(utxos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal utxos: %w", err)
@@ -628,8 +632,19 @@ func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interf
 	ppCs := cstr(string(ppJSON))
 	defer C.free(unsafe.Pointer(ppCs))
 
+	// nil *C.char marshals to a NULL pointer (no execution units).
+	var execCs *C.char
+	if len(execUnits) > 0 && execUnits[0] != nil {
+		execJSON, err := json.Marshal(execUnits[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal exec units: %w", err)
+		}
+		execCs = cstr(string(execJSON))
+		defer C.free(unsafe.Pointer(execCs))
+	}
+
 	result, err := q.bridge.invoke(func() C.int {
-		return C.ccl_quicktx_build(q.bridge.thread, yamlCs, utxosCs, ppCs)
+		return C.ccl_quicktx_build(q.bridge.thread, yamlCs, utxosCs, ppCs, execCs)
 	})
 	if err != nil {
 		return nil, err

@@ -584,11 +584,17 @@ impl<'a> QuickTxApi<'a> {
     /// `utxos` and `protocol_params` are the caller-supplied chain data (the CCL `Utxo` /
     /// `ProtocolParams` JSON models). The transaction is built offline and never submitted —
     /// sign the returned `tx_cbor` and submit it yourself.
+    ///
+    /// For Plutus script transactions, pass the redeemers' execution units as `exec_units` — a JSON
+    /// array of `{mem, steps}` (one per redeemer, in transaction order). Compute them with any
+    /// evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run the script. Pass
+    /// `None` for non-script transactions.
     pub fn build(
         &self,
         yaml: &str,
         utxos: &Value,
         protocol_params: &Value,
+        exec_units: Option<&Value>,
     ) -> Result<TxResult> {
         let utxos_json = serde_json::to_string(utxos).map_err(|e| CclError {
             code: error_codes::CCL_ERROR_SERIALIZATION,
@@ -603,12 +609,26 @@ impl<'a> QuickTxApi<'a> {
         let utxos_cs = to_cstring(&utxos_json)?;
         let pp_cs = to_cstring(&pp_json)?;
 
+        // Optional execution units; null pointer when absent. The CString must outlive the call.
+        let exec_cs = match exec_units {
+            Some(eu) => {
+                let s = serde_json::to_string(eu).map_err(|e| CclError {
+                    code: error_codes::CCL_ERROR_SERIALIZATION,
+                    message: format!("Failed to serialize exec units: {}", e),
+                })?;
+                Some(to_cstring(&s)?)
+            }
+            None => None,
+        };
+        let exec_ptr = exec_cs.as_ref().map_or(ptr::null(), |c| c.as_ptr());
+
         let rc = unsafe {
             ffi::ccl_quicktx_build(
                 self.bridge.thread,
                 yaml_cs.as_ptr(),
                 utxos_cs.as_ptr(),
                 pp_cs.as_ptr(),
+                exec_ptr,
             )
         };
         // The build result is a YAML document.

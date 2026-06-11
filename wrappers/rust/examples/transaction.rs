@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Build the unsigned transaction offline.
-    let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params)?;
+    let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params, None)?;
     println!("Built unsigned transaction from TxPlan YAML");
     println!("  tx hash: {}", result.tx_hash);
     println!("  fee    : {}", result.fee);

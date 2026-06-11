@@ -9,7 +9,7 @@ The whole interface is YAML: **TxPlan YAML in → YAML result out**.
 
 ## Overview
 
-- **Single function**: `ccl_quicktx_build(thread, yaml, utxos_json, protocol_params_json)` → returns `0` on success.
+- **Single function**: `ccl_quicktx_build(thread, yaml, utxos_json, protocol_params_json, exec_units_json)` → returns `0` on success.
 - **Result**: a YAML document with `tx_cbor` (unsigned transaction), `tx_hash`, and `fee`.
 - **Fully offline**: the caller supplies UTXOs and protocol parameters — the native library makes no
   HTTP calls and never submits. (There is no provider mode; fetching chain data is the caller's job.)
@@ -23,7 +23,8 @@ int ccl_quicktx_build(
     graal_isolatethread_t* thread,
     const char* yaml,                  // TxPlan YAML
     const char* utxos_json,            // JSON array of UTXOs
-    const char* protocol_params_json   // JSON protocol parameters
+    const char* protocol_params_json,  // JSON protocol parameters
+    const char* exec_units_json        // JSON [{mem, steps}] per redeemer, or null (Plutus only)
 );
 ```
 
@@ -103,10 +104,12 @@ Each intent has a `type` discriminator. The full set supported by CCL's TxPlan:
 > (`intent/*Intent.java` and the `TxMetadataSerializationTest` / TxPlan tests at `v0.8.0-pre4`).
 > Verified `payment` and `metadata` shapes are shown below.
 
-> **Plutus script spend/mint is deferred.** Building a Plutus transaction needs offline
-> execution-unit evaluation, which `0.8.0-pre4` does not provide. Plans containing Plutus script
-> intents fail with `-10`. Non-Plutus surfaces (payments, native mint, staking, governance, pools,
-> metadata, treasury) build offline today.
+> **Plutus script transactions** build offline when you pass the redeemers' **execution units** in
+> `exec_units_json` — a JSON array of `[{mem, steps}]`, one per redeemer in transaction order. The
+> bridge wires CCL's `StaticTransactionEvaluator` to stamp them on; it never runs the script. You
+> compute the units with any UPLC evaluator (Ogmios, Blockfrost, Aiken, Scalus) and pass them in,
+> exactly as you pass UTXOs and protocol parameters. A script transaction built with no execution
+> units fails with `-10` (no offline evaluator runs the script).
 
 ---
 
@@ -212,6 +215,35 @@ transaction:
         - type: metadata
           metadata: '{"674": {"msg": "Hello from CCL Bridge"}}'
 ```
+
+### 5. Plutus mint (with caller-supplied execution units)
+
+A script intent goes under `scripts:` (the validator) with the operation in `intents:`. Pass the
+redeemer's execution units alongside — the bridge does not run the script.
+
+```yaml
+version: 1.0
+transaction:
+  - tx:
+      from: addr_test1qp...
+      intents:
+        - type: script_minting
+          policyId: 793f8c8cffba081b2a56462fc219cc8fe652d6a338b62c7b134876e7
+          assets:
+            - name: TestToken
+              value: 1
+          receiver: addr_test1qp...
+          redeemer:
+            int: 0
+      scripts:
+        - type: validator
+          role: mint
+          cbor_hex: 4e4d01000033222220051200120011
+          version: v2
+```
+
+…built with `exec_units_json = [{"mem": 2000000, "steps": 500000000}]` (one entry for the single
+mint redeemer).
 
 ---
 

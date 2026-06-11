@@ -37,13 +37,18 @@ public final class QuickTxApi {
      * where {@code tx_cbor} is the unsigned transaction; sign it with {@code ccl_account_sign_tx} /
      * {@code ccl_tx_sign_with_secret_key} and submit it yourself.
      *
-     * <p>Plutus script transactions are not yet supported (they require offline execution-unit
-     * evaluation) and fail with {@link ErrorCodes#CCL_ERROR_TX_BUILD}.
+     * <p>For Plutus script transactions, pass the redeemers' execution units in
+     * {@code exec_units_json} (a JSON array of {@code {"mem","steps"}}, one per redeemer in
+     * transaction order). The caller computes these with any UPLC evaluator (Ogmios, Blockfrost,
+     * Aiken, Scalus) and passes them in, just like UTXOs and protocol parameters. Pass {@code null}
+     * (or an empty array) for non-script transactions. A script transaction with no execution units
+     * fails with {@link ErrorCodes#CCL_ERROR_TX_BUILD}.
      *
      * @param thread                the current isolate thread
      * @param yamlPtr               the TxPlan YAML (UTF-8 C string)
      * @param utxosJsonPtr          JSON array of UTXOs (UTF-8 C string)
      * @param protocolParamsJsonPtr JSON protocol parameters (UTF-8 C string)
+     * @param execUnitsJsonPtr      JSON array of redeemer execution units, or null (UTF-8 C string)
      * @return {@link ErrorCodes#CCL_SUCCESS}; on failure
      *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT},
      *         {@link ErrorCodes#CCL_ERROR_INSUFFICIENT_FUNDS}, or
@@ -51,7 +56,8 @@ public final class QuickTxApi {
      */
     @CEntryPoint(name = "ccl_quicktx_build")
     public static int build(IsolateThread thread, CCharPointer yamlPtr,
-                            CCharPointer utxosJsonPtr, CCharPointer protocolParamsJsonPtr) {
+                            CCharPointer utxosJsonPtr, CCharPointer protocolParamsJsonPtr,
+                            CCharPointer execUnitsJsonPtr) {
         try {
             String yaml = NativeString.toJavaString(yamlPtr);
             if (yaml == null || yaml.isEmpty()) {
@@ -64,8 +70,9 @@ public final class QuickTxApi {
                 ErrorState.set("Protocol parameters JSON is required");
                 return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
             }
+            String execUnitsJson = NativeString.toJavaString(execUnitsJsonPtr);
 
-            String resultJson = service.buildTransaction(yaml, utxosJson, protocolParamsJson);
+            String resultJson = service.buildTransaction(yaml, utxosJson, protocolParamsJson, execUnitsJson);
             ResultState.set(resultJson);
             return ErrorCodes.CCL_SUCCESS;
         } catch (IllegalArgumentException e) {

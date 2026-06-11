@@ -104,3 +104,44 @@ def test_insufficient_funds(ccl):
     yaml_str = _payment_yaml(sender["base_address"], receiver["base_address"], "200000000")
     with pytest.raises(CclError):
         ccl.quicktx.build(yaml_str, _utxos(sender["base_address"], 1_000_000), PROTOCOL_PARAMS)
+
+
+# A Plutus mint TxPlan (always-succeeds V2 policy). The script is not executed offline; the
+# caller-supplied execution units are stamped onto the redeemer by the static evaluator.
+MINT_ADDR = ("addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8"
+             "ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp")
+MINT_YAML = f"""
+version: 1.0
+context:
+  fee_payer: {MINT_ADDR}
+transaction:
+- tx:
+    from: {MINT_ADDR}
+    intents:
+    - policyId: 793f8c8cffba081b2a56462fc219cc8fe652d6a338b62c7b134876e7
+      type: script_minting
+      assets:
+      - name: TestToken
+        value: 1
+      receiver: {MINT_ADDR}
+      redeemer:
+        int: 0
+    scripts:
+    - type: validator
+      role: mint
+      cbor_hex: 4e4d01000033222220051200120011
+      version: v2
+"""
+
+
+def test_plutus_mint_with_exec_units(ccl):
+    # One redeemer (the mint) -> one ExUnits, supplied by the caller.
+    result = ccl.quicktx.build(
+        MINT_YAML, _utxos(MINT_ADDR), PROTOCOL_PARAMS,
+        exec_units=[{"mem": 2000000, "steps": 500000000}])
+    _assert_built(result)
+
+
+def test_plutus_mint_without_exec_units_fails(ccl):
+    with pytest.raises(CclError):
+        ccl.quicktx.build(MINT_YAML, _utxos(MINT_ADDR), PROTOCOL_PARAMS)

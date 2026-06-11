@@ -92,8 +92,16 @@ export declare class QuickTxApi {
      * @param txplanYaml the TxPlan YAML document defining the transaction(s)
      * @param utxos UTXOs available to the sender (CCL Utxo model)
      * @param protocolParams protocol parameters (CCL ProtocolParams model)
+     * @param execUnits optional redeemer execution units (one per redeemer, in transaction order)
+     *   for Plutus script transactions; compute them with any evaluator (Ogmios, Blockfrost, Aiken,
+     *   Scalus) — the bridge does not run the script
      */
-    build(txplanYaml: string, utxos: object[], protocolParams: object): QuickTxResult;
+    build(
+        txplanYaml: string,
+        utxos: object[],
+        protocolParams: object,
+        execUnits?: Array<{ mem: number | string; steps: number | string }>,
+    ): QuickTxResult;
 }
 
 export declare const MAINNET: number;

@@ -113,7 +113,7 @@ export class CclBridge {
       ccl_wallet_get_address: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 
       // QuickTx
-      ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
+      ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
     });
 
     this._lib = lib.symbols;
@@ -359,14 +359,19 @@ class QuickTxApi {
    * @param {string} txplanYaml - the TxPlan YAML document defining the transaction(s).
    * @param {Array<object>} utxos - UTXOs (CCL Utxo model) available to the sender.
    * @param {object} protocolParams - protocol parameters (CCL ProtocolParams model).
+   * @param {Array<{mem: (number|string), steps: (number|string)}>} [execUnits] - optional redeemer
+   *   execution units (one per redeemer, in transaction order) for Plutus script transactions.
+   *   Compute these with any evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run
+   *   the script.
    * @returns {{tx_cbor: string, tx_hash: string, fee: string}}
    */
-  build(txplanYaml, utxos, protocolParams) {
+  build(txplanYaml, utxos, protocolParams, execUnits = null) {
     const rc = this._b._lib.ccl_quicktx_build(
       this._b._thread,
       cstr(txplanYaml),
       cstr(JSON.stringify(utxos)),
       cstr(JSON.stringify(protocolParams)),
+      execUnits != null ? cstr(JSON.stringify(execUnits)) : null,
     );
     // The build result is a YAML document.
     return parseYaml(this._b._check(rc));
