@@ -2,10 +2,10 @@ name: Integration Tests (DevKit)
 
 # Runs the wrappers' integration tests against a local Yaci DevKit Cardano devnet.
 # These exercise real build -> sign -> submit round trips. The devnet's admin API is
-# exposed on :10000. Heavier than the unit CI, so it runs on PRs to main and on demand.
+# exposed on :10000. Heavier than the unit CI, so it runs on PRs to main/develop and on demand.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 jobs:
