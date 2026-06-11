@@ -1,5 +1,12 @@
 # CCL Bridge — TODO
 
+WISHLIST (Satya):
+- YAML support for TX building (TxPlan)
+- UTxO capture on the client side, callback maybe an issue (e.g. BloxBean) - UTxO selection
+- UTxO selection on the client
+- Protocol Parameters should be fetched via provider (cost calculation)
+- Script Supplier?
+
 A living, categorized backlog of work for CCL Bridge. CCL Bridge compiles
 [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib) into a GraalVM
 native shared library and exposes it to **Python, Go, Rust, and JavaScript (Bun)**.
