@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"sync"
 	"unsafe"
+
+	goyaml "gopkg.in/yaml.v3"
 )
 
 // Network IDs
@@ -595,9 +597,9 @@ func (w *WalletApi) GetAddress(mnemonic string, networkID, index int) (string, e
 
 // TxResult is the result of building a transaction: the unsigned CBOR, its hash, and the fee.
 type TxResult struct {
-	TxCbor string `json:"tx_cbor"`
-	TxHash string `json:"tx_hash"`
-	Fee    string `json:"fee"`
+	TxCbor string `yaml:"tx_cbor"`
+	TxHash string `yaml:"tx_hash"`
+	Fee    string `yaml:"fee"`
 }
 
 // QuickTxApi builds unsigned transactions from a CCL TxPlan (YAML), fully offline.
@@ -633,8 +635,9 @@ func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interf
 		return nil, err
 	}
 
+	// The build result is a YAML document.
 	var txResult TxResult
-	if err := json.Unmarshal([]byte(result), &txResult); err != nil {
+	if err := goyaml.Unmarshal([]byte(result), &txResult); err != nil {
 		return nil, fmt.Errorf("failed to parse tx result: %w", err)
 	}
 	return &txResult, nil

@@ -3,8 +3,8 @@ package com.bloxbean.cardano.bridge.api;
 import com.bloxbean.cardano.bridge.api.quicktx.QuickTxService;
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +23,6 @@ class QuickTxApiTest {
             "test walk nut penalty hip pave soap entry language right filter choice";
     private static final String FAKE_TX_HASH = "a".repeat(64);
 
-    private final ObjectMapper mapper = new ObjectMapper();
     private final QuickTxService service = new QuickTxService();
 
     private String protocolParamsJson;
@@ -50,7 +49,8 @@ class QuickTxApiTest {
     }
 
     private JsonNode build(String yaml) throws Exception {
-        return mapper.readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson));
+        // The build result is YAML now; parse it with CCL's YAML mapper.
+        return YamlSerializer.getYamlMapper().readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson));
     }
 
     private static void assertBuilt(JsonNode result) {

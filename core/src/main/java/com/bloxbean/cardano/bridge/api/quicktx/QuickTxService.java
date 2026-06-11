@@ -9,6 +9,7 @@ import com.bloxbean.cardano.client.common.cbor.CborSerializationUtil;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.serialization.TxPlan;
+import com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer;
 import com.bloxbean.cardano.client.transaction.spec.Transaction;
 import com.bloxbean.cardano.client.util.HexUtil;
 
@@ -66,7 +67,7 @@ public class QuickTxService {
         result.put("tx_cbor", txCborHex);
         result.put("tx_hash", txHash);
         result.put("fee", fee);
-        return JsonHelper.toJson(result);
+        return YamlSerializer.serialize(result);
     }
 
     private static List<Utxo> parseUtxos(String utxosJson) throws Exception {
