@@ -28,6 +28,7 @@ but there is no standalone "C wrapper" product.
 - [ ] `P1` Designate Python as the documented "reference wrapper" and write a parity checklist so all four wrappers stay in lockstep as the API grows.
 - [ ] `P2` Split the monolithic Go `wrappers/go/ccl/ccl.go` (~2k LOC) and Rust `wrappers/rust/src/lib.rs` into focused modules for maintainability.
 - [ ] `P2` Cross-wrapper error-handling review for consistent `CclError` semantics (codes, messages, idiomatic types).
+- [ ] `P2` Give the Go wrapper a clear build-time message when `CGO_ENABLED=0` (a `//go:build cgo` guard + a stub that explains cgo is required), instead of a cryptic linker error.
 - [ ] `P2` Expose **stake-key signing** (CCL's `Account.signWithStakeKey`). `ccl_account_sign_tx` signs with the payment key only, so transactions whose certificates must be authorized by the stake key (e.g. vote-power delegation, stake delegation) fail to submit with `MissingVKeyWitnessesUTXOW`. Add an entrypoint / option to also sign with the stake key (and remember `signer_count(2)` for fee budgeting), wired through all four wrappers. The `delegate_voting_power` integration test is build-only until this lands.
 
 ## 2. Development — Build, CI & Distribution
@@ -36,11 +37,15 @@ but there is no standalone "C wrapper" product.
 - [x] `P0` ~~Add a **Windows** native build (`libccl.dll`) to CI and the release pipeline.~~ **Done** — CI has a `windows-latest` job that builds `libccl.dll` (`:core:nativeCompile`) and runs the JVM tests; `release.yml` produces a `windows-x86_64` artifact (DLL + `libccl.lib` import library + headers). Verified green on CI.
 - [ ] `P1` Add **Windows wrapper test coverage** to CI (Python/Rust/JS/Go). The Windows job currently only builds the DLL + runs JVM tests; the wrapper test tasks assume a bash/`python3` shell and Unix `*_LIBRARY_PATH` semantics, and Go cgo + the C `native-test` Makefile need a Windows C toolchain. Each needs Windows-specific wiring.
 - [ ] `P0` Bundle or auto-fetch the native lib per wrapper (wheel platform tags / Rust `build.rs` / npm `postinstall`) so users no longer hand-set `CCL_LIB_PATH` / `DYLD_LIBRARY_PATH` / `LD_LIBRARY_PATH`.
+- [ ] `P1` **Investigate static linking** — can `native-image` emit a static archive (`libccl.a`) instead of only a shared library? If so, the Go (cgo) and Rust wrappers could statically link it into a single self-contained binary: no runtime `.so`/`.dylib`, no `*_LIBRARY_PATH`, `scratch`/Alpine Docker images possible. This is the single biggest ergonomic win for Go and partly subsumes the bundling item above. A focused `native-image` spike answers feasibility (static lib output + musl for fully-static Linux).
 - [ ] `P1` Add **linux-arm64** and **macos-x86_64** to the build/release matrix (currently only `ubuntu-latest` x86_64 + `macos-14` ARM64).
+- [ ] `P1` Add **musl / Alpine Linux** native builds. The current glibc-linked `.so` fails on musl-based images (common in Go/Docker). Ship a musl variant (and document the glibc baseline for the standard build).
 - [ ] `P1` Publish wrappers to registries: PyPI (`ccl`), crates.io (`ccl`), npm (`@bloxbean/ccl`), and tag the Go module for the proxy.
 - [x] `P1` Pin CI to Oracle GraalVM `25.0.3` exactly (CI currently floats `java-version: '25'`) for reproducible builds.
 - [ ] `P2` Fill in wrapper manifest metadata (`[project.urls]`, `repository`, `homepage`, `documentation`) in `pyproject.toml` / `Cargo.toml` / `package.json` / `go.mod`.
 - [ ] `P2` Automate version bumping from a single source of truth (the version is duplicated across `gradle.properties` and each wrapper manifest).
+- [ ] `P2` **Runtime lib↔wrapper version check.** A native lib a version behind its wrapper fails confusingly; have each wrapper call `ccl_version` on init and error clearly on mismatch.
+- [ ] `P2` **Sign release artifacts** (cosign/sigstore) for supply-chain trust when pulling a prebuilt native lib. The release already emits `SHA256SUMS`; add signatures + verification docs.
 
 ## 3. Testing
 
@@ -58,6 +63,8 @@ but there is no standalone "C wrapper" product.
 - [ ] `P2` Generated API reference per language (Sphinx / rustdoc / godoc / JSDoc or TypeDoc).
 - [ ] `P2` Add project-meta docs: `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, and GitHub issue/PR templates.
 - [ ] `P2` Expand the 7-line `devkit.md` into a proper Yaci DevKit integration-testing guide.
+- [ ] `P2` Add an **end-to-end "build → sign → submit" example** per language. The bridge is offline-only, so users get stuck at broadcasting; show submitting the signed CBOR with the language's own HTTP client (e.g. Go `net/http`).
+- [ ] `P2` Add CI status + DevKit-integration badges to the README so the working round trips are visible at a glance.
 
 ## 5. Website
 
