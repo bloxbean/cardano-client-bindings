@@ -27,8 +27,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install pytest
-        run: python3 -m pip install --break-system-packages pytest
+      - name: Install Python test deps
+        run: python3 -m pip install --break-system-packages pytest pyyaml
 
       - name: Install Yaci DevKit
         run: npm install -g @bloxbean/yaci-devkit
