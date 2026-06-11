@@ -5,7 +5,7 @@ via the CCL Bridge native library, using Bun's built-in FFI.
 
 > Part of the [CCL Bridge](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
-> [`docs/quicktx.md`](../../docs/quicktx.md) for the transaction-builder spec.
+> [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
 ## Requirements
 
@@ -71,5 +71,13 @@ A `CclBridge` instance exposes these namespaces (all offline operations):
 `bridge.script`, `bridge.gov`, `bridge.wallet`, `bridge.quicktx`.
 
 Network IDs are exported constants: `MAINNET` (0), `TESTNET` (1), `PREPROD` (2),
-`PREVIEW` (3). Amount helpers: `Amount.ada(5)`, `Amount.lovelace(5_000_000)`,
-`Amount.asset(unit, qty)`. Errors throw `CclError`.
+`PREVIEW` (3). Errors throw `CclError`.
+
+Transactions are defined as a [TxPlan](https://github.com/bloxbean/cardano-client-lib)
+**YAML** document and built fully offline — you supply the UTXOs and protocol parameters:
+
+```js
+const result = bridge.quicktx.build(yaml, utxos, protocolParams); // { tx_cbor, tx_hash, fee }
+```
+
+See [`examples/transaction.js`](examples/transaction.js).
