@@ -1,7 +1,9 @@
 package ccl
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -135,5 +137,62 @@ func TestIntegrationNativeMint(t *testing.T) {
 func TestIntegrationPlutusMint(t *testing.T) {
 	skipIfNoDevKit(t)
 	buildSignSubmit(t, "plutus/script_minting.yaml",
+		[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}}, "payment")
+}
+
+// Plutus spend: lock a UTXO at the script address (with the datum hash), then spend it. The spend
+// fixture references a placeholder UTXO; we repoint it at the real on-chain locked UTXO.
+func TestIntegrationPlutusSpend(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	// Step 1: lock 10 ADA at the script address with the datum hash.
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "plutus/plutus_lock.yaml"), utxos, pp, nil, "payment")
+	waitForBlock()
+
+	// Step 2: find the locked UTXO at the script address.
+	scriptUtxos, err := devkitGetUtxos(scriptAddr)
+	if err != nil || len(scriptUtxos) == 0 {
+		t.Fatalf("no locked UTXO at script address: %v", err)
+	}
+	locked := scriptUtxos[0]
+	lockHash, _ := locked["tx_hash"].(string)
+	lockIdx := 0
+	if idx, ok := locked["output_index"].(float64); ok {
+		lockIdx = int(idx)
+	}
+
+	// Step 3: repoint the spend fixture's utxo_ref at the real locked UTXO.
+	spendYaml := readIntentFixture(t, "plutus/script_collect_from.yaml")
+	spendYaml = strings.ReplaceAll(spendYaml, scriptTxHash, lockHash)
+	if lockIdx != 0 {
+		spendYaml = strings.Replace(spendYaml, "output_index: 0", fmt.Sprintf("output_index: %d", lockIdx), 1)
+	}
+
+	// Step 4: spend it — supply the locked UTXO (with its datum hash) + a fee/collateral UTXO.
+	feeUtxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get fee utxos: %v", err)
+	}
+	spendUtxos := []map[string]interface{}{{
+		"tx_hash":      lockHash,
+		"output_index": lockIdx,
+		"address":      scriptAddr,
+		"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "10000000"}},
+		"data_hash":    scriptDatumHsh,
+	}}
+	spendUtxos = append(spendUtxos, feeUtxos...)
+
+	signSubmit(t, spendYaml, spendUtxos, pp,
 		[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}}, "payment")
 }

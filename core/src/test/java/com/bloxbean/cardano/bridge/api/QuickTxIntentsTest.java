@@ -323,6 +323,29 @@ class QuickTxIntentsTest {
     }
 
     @Test
+    void plutusLock() throws Exception {
+        // Pays a UTXO to the always-succeeds script address carrying the datum hash, so a later
+        // script spend has something to collect. The integration test submits this first.
+        PlutusScript script = PlutusV2Script.builder().cborHex(ALWAYS_SUCCEEDS_V2).build();
+        String scriptAddr = AddressProvider.getEntAddress(script, Networks.testnet()).toBech32();
+        PlutusData datum = BigIntPlutusData.of(42);
+
+        Tx tx = new Tx()
+                .payToContract(scriptAddr, Amount.ada(10), datum.getDatumHash())
+                .from(sender);
+
+        String yaml = TxPlan.from(tx).feePayer(sender).toYaml();
+        java.nio.file.Path dir = java.nio.file.Path.of("build/intent-yamls");
+        java.nio.file.Files.createDirectories(dir);
+        java.nio.file.Files.writeString(dir.resolve("plutus_lock.yaml"), yaml);
+
+        var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer.getYamlMapper()
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+        assertFalse(result.get("tx_cbor").asText().isEmpty());
+        assertEquals(64, result.get("tx_hash").asText().length());
+    }
+
+    @Test
     void scriptCollectFrom() throws Exception {
         PlutusScript script = PlutusV2Script.builder().cborHex(ALWAYS_SUCCEEDS_V2).build();
         String scriptAddr = AddressProvider.getEntAddress(script, Networks.testnet()).toBech32();
