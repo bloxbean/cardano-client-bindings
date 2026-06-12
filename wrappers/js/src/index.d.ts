@@ -45,6 +45,7 @@ export declare class CclBridge {
     accountGetPublicKey(mnemonic: string, networkId?: number, accountIndex?: number, addressIndex?: number): string;
     accountGetDrepId(mnemonic: string, networkId?: number, accountIndex?: number): string;
     accountSignTx(mnemonic: string, networkId: number, accountIndex: number, addressIndex: number, txCborHex: string): string;
+    accountSignTxWithKeys(mnemonic: string, networkId: number, accountIndex: number, addressIndex: number, txCborHex: string, keys: string[] | string): string;
 
     // Address
     addressInfo(bech32: string): AddressInfo;

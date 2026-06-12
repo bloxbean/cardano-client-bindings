@@ -282,6 +282,13 @@ calls `ccl_quicktx_build`, and parses the YAML result. The result is an object/d
 `tx_cbor`, `tx_hash`, and `fee`. `ccl_quicktx_build` returns an **unsigned** transaction — sign
 `tx_cbor` with the account sign API, then submit it yourself.
 
+> **Signing stake/governance transactions.** `sign_tx` adds only the **payment** key. Certificates
+> in stake registration/deregistration/delegation, reward withdrawal, and DRep/vote operations must
+> also be witnessed by the **stake** (or **DRep**) key, or the node rejects the tx with
+> `MissingVKeyWitnessesUTXOW`. Use `sign_tx_with_keys(..., keys)` (Go `SignTxWithKeys`, JS
+> `signTxWithKeys`) with the roles you need, e.g. `["payment", "stake"]` or `["payment", "drep"]`
+> (roles: `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`).
+
 ### Python
 
 ```python

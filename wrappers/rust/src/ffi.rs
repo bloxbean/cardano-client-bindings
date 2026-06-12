@@ -59,6 +59,15 @@ extern "C" {
         address_index: c_int,
         tx_cbor_hex: *const c_char,
     ) -> c_int;
+    pub fn ccl_account_sign_tx_multi(
+        thread: *mut graal_isolatethread_t,
+        mnemonic: *const c_char,
+        network_id: c_int,
+        account_index: c_int,
+        address_index: c_int,
+        tx_cbor_hex: *const c_char,
+        keys: *const c_char,
+    ) -> c_int;
     pub fn ccl_account_get_drep_id(
         thread: *mut graal_isolatethread_t,
         mnemonic: *const c_char,

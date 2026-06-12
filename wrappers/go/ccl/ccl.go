@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -310,6 +311,23 @@ func (a *AccountApi) SignTx(mnemonic string, networkID, accountIndex, addressInd
 
 	return a.bridge.invoke(func() C.int {
 		return C.ccl_account_sign_tx(a.bridge.thread, csMnemonic, C.int(networkID), C.int(accountIndex), C.int(addressIndex), csTx)
+	})
+}
+
+// SignTxWithKeys signs a transaction with one or more of the account's keys, selected by role
+// (any of: payment, stake, drep, committee_cold, committee_hot, applied in order). Use this for
+// transactions whose certificates also need the stake or DRep key — stake registration/delegation/
+// withdrawal and DRep/vote operations — which the payment key alone cannot witness.
+func (a *AccountApi) SignTxWithKeys(mnemonic string, networkID, accountIndex, addressIndex int, txCborHex string, keys ...string) (string, error) {
+	csMnemonic := cstr(mnemonic)
+	defer C.free(unsafe.Pointer(csMnemonic))
+	csTx := cstr(txCborHex)
+	defer C.free(unsafe.Pointer(csTx))
+	csKeys := cstr(strings.Join(keys, ","))
+	defer C.free(unsafe.Pointer(csKeys))
+
+	return a.bridge.invoke(func() C.int {
+		return C.ccl_account_sign_tx_multi(a.bridge.thread, csMnemonic, C.int(networkID), C.int(accountIndex), C.int(addressIndex), csTx, csKeys)
 	})
 }
 

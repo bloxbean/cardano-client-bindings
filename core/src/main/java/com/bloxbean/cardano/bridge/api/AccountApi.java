@@ -238,6 +238,74 @@ public final class AccountApi {
     }
 
     /**
+     * Signs a transaction with one or more of the account's keys, selected by role.
+     *
+     * <p>Exported as {@code ccl_account_sign_tx_multi}. {@code keys} is a comma-separated list of
+     * roles to add witnesses for, applied in order: {@code payment}, {@code stake}, {@code drep},
+     * {@code committee_cold}, {@code committee_hot} (empty/null defaults to {@code payment}). Use
+     * this when a transaction's certificates need more than the payment key — stake
+     * registration/deregistration/delegation, reward withdrawal, and DRep/vote operations must also
+     * be witnessed by the stake or DRep key, or the node rejects them with
+     * {@code MissingVKeyWitnessesUTXOW}.
+     *
+     * @param thread       the current isolate thread
+     * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
+     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param accountIndex HD account index
+     * @param addressIndex HD address index
+     * @param txCborHexPtr the unsigned (or partially signed) transaction as CBOR hex
+     * @param keysPtr      comma-separated signing roles (UTF-8 C string), e.g. {@code "payment,stake"}
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or an error code
+     */
+    @CEntryPoint(name = "ccl_account_sign_tx_multi")
+    public static int signTxMulti(IsolateThread thread, CCharPointer mnemonicPtr,
+                                  int networkId, int accountIndex, int addressIndex,
+                                  CCharPointer txCborHexPtr, CCharPointer keysPtr) {
+        try {
+            Network network = NetworkMapper.toNetwork(networkId);
+            if (network == null) {
+                ErrorState.set("Invalid network id: " + networkId);
+                return ErrorCodes.CCL_ERROR_INVALID_NETWORK;
+            }
+            String mnemonic = NativeString.toJavaString(mnemonicPtr);
+            if (mnemonic == null || mnemonic.isEmpty()) {
+                ErrorState.set("Mnemonic is required");
+                return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+            }
+            String txCborHex = NativeString.toJavaString(txCborHexPtr);
+            if (txCborHex == null || txCborHex.isEmpty()) {
+                ErrorState.set("Transaction CBOR hex is required");
+                return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+            }
+            String keys = NativeString.toJavaString(keysPtr);
+            if (keys == null || keys.isBlank()) {
+                keys = "payment";
+            }
+
+            Account account = Account.createFromMnemonic(network, mnemonic, accountIndex, addressIndex);
+            Transaction tx = Transaction.deserialize(HexUtil.decodeHexString(txCborHex));
+            for (String role : keys.split(",")) {
+                switch (role.trim().toLowerCase()) {
+                    case "payment":        tx = account.sign(tx); break;
+                    case "stake":          tx = account.signWithStakeKey(tx); break;
+                    case "drep":           tx = account.signWithDRepKey(tx); break;
+                    case "committee_cold": tx = account.signWithCommitteeColdKey(tx); break;
+                    case "committee_hot":  tx = account.signWithCommitteeHotKey(tx); break;
+                    case "":               break;
+                    default:
+                        ErrorState.set("Unknown signing key role: " + role);
+                        return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+                }
+            }
+            ResultState.set(tx.serializeToHex());
+            return ErrorCodes.CCL_SUCCESS;
+        } catch (Exception e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_TRANSACTION;
+        }
+    }
+
+    /**
      * Derives the account's governance DRep ID.
      *
      * <p>Exported as {@code ccl_account_get_drep_id}. On success the result is the bech32 DRep ID

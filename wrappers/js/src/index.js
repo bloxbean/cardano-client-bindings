@@ -71,6 +71,7 @@ export class CclBridge {
       ccl_account_get_public_key: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
       ccl_account_get_drep_id: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
       ccl_account_sign_tx: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.cstring], returns: FFIType.i32 },
+      ccl_account_sign_tx_multi: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
 
       // Address
       ccl_address_info: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
@@ -208,6 +209,15 @@ class AccountApi {
   signTx(mnemonic, networkId, accountIndex, addressIndex, txCborHex) {
     return this._b._check(
       this._b._lib.ccl_account_sign_tx(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex)));
+  }
+
+  // Sign with one or more of the account's keys, selected by role (any of: payment, stake, drep,
+  // committee_cold, committee_hot, applied in order). Use for transactions whose certificates also
+  // need the stake or DRep key — stake registration/delegation/withdrawal and DRep/vote operations.
+  signTxWithKeys(mnemonic, networkId, accountIndex, addressIndex, txCborHex, keys) {
+    const keysStr = Array.isArray(keys) ? keys.join(",") : keys;
+    return this._b._check(
+      this._b._lib.ccl_account_sign_tx_multi(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex), cstr(keysStr)));
   }
 }
 

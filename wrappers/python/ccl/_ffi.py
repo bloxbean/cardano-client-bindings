@@ -103,6 +103,8 @@ class CclLib:
 
         lib.ccl_account_sign_tx.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int, c_char_p]
         lib.ccl_account_sign_tx.restype = c_int
+        lib.ccl_account_sign_tx_multi.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int, c_char_p, c_char_p]
+        lib.ccl_account_sign_tx_multi.restype = c_int
 
         lib.ccl_account_get_drep_id.argtypes = [c_void_p, c_char_p, c_int, c_int]
         lib.ccl_account_get_drep_id.restype = c_int

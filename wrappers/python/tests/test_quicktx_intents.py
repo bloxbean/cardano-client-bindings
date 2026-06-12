@@ -58,6 +58,23 @@ def test_intent_builds(ccl, fixture):
     _assert_built(ccl.quicktx.build(yaml, _utxos(), PROTOCOL_PARAMS))
 
 
+# The mnemonic the fixtures are derived from (account 0/0 == SENDER).
+INTENT_MNEMONIC = "test walk nut penalty hip pave soap entry language right filter choice"
+
+
+def test_sign_with_stake_key(ccl):
+    # A stake registration must be witnessed by the stake key too; sign_tx_with_keys adds it.
+    yaml = (FIXTURES / "stake_registration.yaml").read_text()
+    utxos = [{"tx_hash": "a" * 64, "output_index": 0, "address": SENDER,
+              "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}]
+    built = ccl.quicktx.build(yaml, utxos, PROTOCOL_PARAMS)
+
+    signed_payment = ccl.account.sign_tx(INTENT_MNEMONIC, built["tx_cbor"], CclLib.TESTNET, 0, 0)
+    signed_stake = ccl.account.sign_tx_with_keys(
+        INTENT_MNEMONIC, built["tx_cbor"], ["payment", "stake"], CclLib.TESTNET, 0, 0)
+    assert len(signed_stake) > len(signed_payment)
+
+
 def test_plutus_mint(ccl):
     yaml = (FIXTURES / "plutus" / "script_minting.yaml").read_text()
     utxos = [{"tx_hash": "a" * 64, "output_index": 0, "address": SENDER,

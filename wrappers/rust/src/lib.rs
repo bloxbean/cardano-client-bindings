@@ -279,6 +279,36 @@ impl<'a> AccountApi<'a> {
         self.bridge.check(rc)
     }
 
+    /// Sign a transaction with one or more of the account's keys, selected by role (any of
+    /// `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`, applied in order). Use this
+    /// for transactions whose certificates also need the stake or DRep key — stake
+    /// registration/delegation/withdrawal and DRep/vote operations.
+    pub fn sign_tx_with_keys(
+        &self,
+        mnemonic: &str,
+        network_id: i32,
+        account_index: i32,
+        address_index: i32,
+        tx_cbor_hex: &str,
+        keys: &[&str],
+    ) -> Result<String> {
+        let cs_mnemonic = to_cstring(mnemonic)?;
+        let cs_tx = to_cstring(tx_cbor_hex)?;
+        let cs_keys = to_cstring(&keys.join(","))?;
+        let rc = unsafe {
+            ffi::ccl_account_sign_tx_multi(
+                self.bridge.thread,
+                cs_mnemonic.as_ptr(),
+                network_id,
+                account_index,
+                address_index,
+                cs_tx.as_ptr(),
+                cs_keys.as_ptr(),
+            )
+        };
+        self.bridge.check(rc)
+    }
+
     pub fn get_drep_id(
         &self,
         mnemonic: &str,
