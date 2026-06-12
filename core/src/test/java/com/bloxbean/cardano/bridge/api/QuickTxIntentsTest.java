@@ -177,8 +177,10 @@ class QuickTxIntentsTest {
 
     @Test
     void donation() throws Exception {
+        // currentTreasuryValue is 0 to match a freshly-reset devnet (the Conway donation cert
+        // asserts the stated treasury equals the chain's actual value at submit time).
         assertBuilds("donation", new Tx()
-                .donateToTreasury(BigInteger.valueOf(1_000_000_000L), BigInteger.valueOf(1_000_000L))
+                .donateToTreasury(BigInteger.ZERO, BigInteger.valueOf(1_000_000L))
                 .from(sender));
     }
 
