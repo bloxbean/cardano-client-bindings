@@ -14,6 +14,10 @@ import com.bloxbean.cardano.client.transaction.spec.governance.Voter;
 import com.bloxbean.cardano.client.transaction.spec.governance.VoterType;
 import com.bloxbean.cardano.client.transaction.spec.governance.actions.GovActionId;
 import com.bloxbean.cardano.client.transaction.spec.governance.actions.InfoAction;
+import com.bloxbean.cardano.client.spec.UnitInterval;
+import com.bloxbean.cardano.client.transaction.spec.cert.PoolRegistration;
+import com.bloxbean.cardano.client.transaction.spec.cert.SingleHostAddr;
+import com.bloxbean.cardano.client.util.HexUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +25,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -160,5 +166,35 @@ class QuickTxIntentsTest {
         assertBuilds("governance_proposal", new Tx()
                 .createProposal(new InfoAction(), stakeAddress, anchor())
                 .from(sender));
+    }
+
+    // --- Stake pools ---
+
+    private PoolRegistration samplePool() {
+        return PoolRegistration.builder()
+                .operator(HexUtil.decodeHexString("ed40b0a319f639a70b1e2a4de00f112c4f7b7d4849f0abd25c4336a4"))
+                .vrfKeyHash(HexUtil.decodeHexString("b95af7a0a58928fbd0e73b03ce81dedd42d4a776685b443cf2016c18438a3b9b"))
+                .pledge(BigInteger.valueOf(100_000_000L))
+                .cost(BigInteger.valueOf(340_000_000L))
+                .margin(new UnitInterval(BigInteger.valueOf(1), BigInteger.valueOf(100)))
+                .rewardAccount("e1f3c3d69b1d4eca197096cbfd67450f64123de4a5ed61b1f94a356134")
+                .poolOwners(Set.of("f3c3d69b1d4eca197096cbfd67450f64123de4a5ed61b1f94a356134"))
+                .relays(List.of(SingleHostAddr.builder().port(3001).build()))
+                .build();
+    }
+
+    @Test
+    void poolRegistration() throws Exception {
+        assertBuilds("pool_registration", new Tx().registerPool(samplePool()).from(sender));
+    }
+
+    @Test
+    void poolUpdate() throws Exception {
+        assertBuilds("pool_update", new Tx().updatePool(samplePool()).from(sender));
+    }
+
+    @Test
+    void poolRetirement() throws Exception {
+        assertBuilds("pool_retirement", new Tx().retirePool(POOL_ID, 500).from(sender));
     }
 }

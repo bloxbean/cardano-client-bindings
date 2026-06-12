@@ -802,5 +802,179 @@
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.util.serializers.ByteArrayToHexSerializer",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.util.serializers.HexToByteArrayDeserializer",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.util.serializers.InetAddressDeserializer",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.util.serializers.InetAddressSerializer",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.AuthCommitteeHotCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.CertificateType",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.GenesisKeyDelegation",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.MirPot",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.MoveInstataneous",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.PoolRetirement",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.RegCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.RegDRepCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.Relay",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.ResignCommitteeColdCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeCredType",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeCredential",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeDelegation",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeDeregistration",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakePoolId",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeRegDelegCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeRegistration",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeVoteDelegCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.StakeVoteRegDelegCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.UnregCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.UnregDRepCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.UpdateDRepCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.VoteDelegCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.transaction.spec.cert.VoteRegDelegCert",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.bloxbean.cardano.client.spec.UnitInterval",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
   }
 ]
