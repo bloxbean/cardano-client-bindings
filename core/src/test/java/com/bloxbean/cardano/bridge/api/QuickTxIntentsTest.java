@@ -254,9 +254,30 @@ class QuickTxIntentsTest {
                 .from(sender));
     }
 
-    // --- Plutus script spend (collect from a script address) ---
+    // --- Plutus scripts (mint + spend) ---
 
     private static final String ALWAYS_SUCCEEDS_V2 = "4e4d01000033222220051200120011";
+
+    @Test
+    void scriptMinting() throws Exception {
+        PlutusScript script = PlutusV2Script.builder().cborHex(ALWAYS_SUCCEEDS_V2).build();
+        PlutusData redeemer = BigIntPlutusData.of(0);
+        Tx tx = new Tx()
+                .mintAsset(script, new Asset("TestToken", BigInteger.ONE), redeemer, account.enterpriseAddress())
+                .from(sender);
+
+        String yaml = TxPlan.from(tx).feePayer(sender).toYaml();
+        java.nio.file.Path dir = java.nio.file.Path.of("build/intent-yamls");
+        java.nio.file.Files.createDirectories(dir);
+        java.nio.file.Files.writeString(dir.resolve("script_minting.yaml"), yaml);
+
+        String execUnits = "[{\"mem\": 2000000, \"steps\": 500000000}]";
+        var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer.getYamlMapper()
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, execUnits));
+        assertFalse(result.get("tx_cbor").asText().isEmpty());
+        assertEquals(64, result.get("tx_hash").asText().length());
+        assertTrue(Long.parseLong(result.get("fee").asText()) > 0);
+    }
 
     @Test
     void scriptCollectFrom() throws Exception {

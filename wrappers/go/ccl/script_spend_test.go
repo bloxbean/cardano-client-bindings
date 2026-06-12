@@ -56,3 +56,33 @@ func TestQuickTxScriptSpendE2E(t *testing.T) {
 		t.Error("expected script spend to fail without execution units")
 	}
 }
+
+// End-to-end Plutus script mint (script_minting). Only needs a fee/collateral UTXO at the sender
+// plus the redeemer's execution units.
+func TestQuickTxScriptMintE2E(t *testing.T) {
+	yamlBytes, err := os.ReadFile("testdata/script_minting.yaml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	yaml := string(yamlBytes)
+
+	utxos := []map[string]interface{}{{
+		"tx_hash":      strings.Repeat("a", 64),
+		"output_index": 0,
+		"address":      intentSender,
+		"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "2000000000"}},
+	}}
+	execUnits := []map[string]interface{}{{"mem": 2000000, "steps": 500000000}}
+
+	result, err := bridge.QuickTx.Build(yaml, utxos, testProtocolParams(), execUnits)
+	if err != nil {
+		t.Fatalf("script mint build failed: %v", err)
+	}
+	if len(result.TxCbor) == 0 || len(result.TxHash) != 64 {
+		t.Errorf("bad result: cbor=%d hash=%d", len(result.TxCbor), len(result.TxHash))
+	}
+
+	if _, err := bridge.QuickTx.Build(yaml, utxos, testProtocolParams()); err == nil {
+		t.Error("expected script mint to fail without execution units")
+	}
+}
