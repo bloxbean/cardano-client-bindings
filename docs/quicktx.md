@@ -245,6 +245,34 @@ transaction:
 …built with `exec_units_json = [{"mem": 2000000, "steps": 500000000}]` (one entry for the single
 mint redeemer).
 
+### 6. Compose (multiple senders into one transaction)
+
+The `transaction` list can hold more than one `tx`, each with its own `from`; they are composed into
+a single transaction. The `context.fee_payer` pays the fee. Supply UTXOs for every sender.
+
+```yaml
+version: 1.0
+context:
+  fee_payer: addr_test1_sender1...
+transaction:
+  - tx:
+      from: addr_test1_sender1...
+      intents:
+        - type: payment
+          address: addr_test1_receiver...
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+  - tx:
+      from: addr_test1_sender2...
+      intents:
+        - type: payment
+          address: addr_test1_receiver...
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+```
+
 ---
 
 ## Using it from the wrappers

@@ -14,6 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const SENDER: &str = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp";
+const SENDER2: &str = "addr_test1qz7svwszky8gcmhrfza7a89z9u0dfzd3l7h23sqlc5yml7ejcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwqcqrvr0";
 const SCRIPT_ADDR: &str = "addr_test1wpunlryvl7aqsxe22erzlsseej87v5kk5vutvtrmzdy8dect48z0w";
 const SCRIPT_DATUM_HASH: &str = "9e1199a988ba72ffd6e9c269cadb3b53b5f360ff99f112d9b2ee30c4d74ad88b";
 const SCRIPT_TX_HASH: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -39,7 +40,9 @@ fn utxos() -> Value {
         {"tx_hash": "a".repeat(64), "output_index": 0, "address": SENDER,
          "amount": [{"unit": "lovelace", "quantity": "2000000000"}]},
         {"tx_hash": "c".repeat(64), "output_index": 0, "address": SENDER,
-         "amount": [{"unit": "lovelace", "quantity": "5000000"}]}
+         "amount": [{"unit": "lovelace", "quantity": "5000000"}]},
+        {"tx_hash": "a".repeat(64), "output_index": 1, "address": SENDER2,
+         "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
     ])
 }
 

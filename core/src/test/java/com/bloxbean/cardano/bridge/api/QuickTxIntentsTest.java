@@ -10,6 +10,7 @@ import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.client.metadata.Metadata;
 import com.bloxbean.cardano.client.metadata.MetadataBuilder;
+import com.bloxbean.cardano.client.quicktx.AbstractTx;
 import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.PlutusData;
 import com.bloxbean.cardano.client.plutus.spec.PlutusScript;
@@ -61,6 +62,7 @@ class QuickTxIntentsTest {
     private String protocolParamsJson;
     private Account account;
     private String sender;
+    private String sender2;
     private String stakeAddress;
     private Credential drepCredential;
 
@@ -71,6 +73,7 @@ class QuickTxIntentsTest {
         }
         account = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
         sender = account.baseAddress();
+        sender2 = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 1).baseAddress();
         stakeAddress = account.stakeAddress();
         drepCredential = account.drepCredential();
     }
@@ -86,8 +89,10 @@ class QuickTxIntentsTest {
             [{"tx_hash":"%s","output_index":0,"address":"%s",
               "amount":[{"unit":"lovelace","quantity":"2000000000"}]},
              {"tx_hash":"%s","output_index":0,"address":"%s",
-              "amount":[{"unit":"lovelace","quantity":"5000000"}]}]
-            """.formatted(FAKE_TX_HASH, sender, REF_TX_HASH, sender);
+              "amount":[{"unit":"lovelace","quantity":"5000000"}]},
+             {"tx_hash":"%s","output_index":1,"address":"%s",
+              "amount":[{"unit":"lovelace","quantity":"2000000000"}]}]
+            """.formatted(FAKE_TX_HASH, sender, REF_TX_HASH, sender, FAKE_TX_HASH, sender2);
     }
 
     /**
@@ -146,6 +151,26 @@ class QuickTxIntentsTest {
                 .payToAddress(account.enterpriseAddress(), Amount.ada(2))
                 .attachMetadata(md)
                 .from(sender));
+    }
+
+    // --- Compose (multiple senders into one transaction) ---
+
+    @Test
+    void compose() throws Exception {
+        String receiver = account.enterpriseAddress();
+        Tx tx1 = new Tx().payToAddress(receiver, Amount.ada(5)).from(sender);
+        Tx tx2 = new Tx().payToAddress(receiver, Amount.ada(3)).from(sender2);
+        String yaml = TxPlan.from(List.<AbstractTx<?>>of(tx1, tx2)).feePayer(sender).toYaml();
+
+        java.nio.file.Path dir = java.nio.file.Path.of("build/intent-yamls");
+        java.nio.file.Files.createDirectories(dir);
+        java.nio.file.Files.writeString(dir.resolve("compose.yaml"), yaml);
+
+        var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer.getYamlMapper()
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+        assertFalse(result.get("tx_cbor").asText().isEmpty());
+        assertEquals(64, result.get("tx_hash").asText().length());
+        assertTrue(Long.parseLong(result.get("fee").asText()) > 0);
     }
 
     // --- Treasury ---

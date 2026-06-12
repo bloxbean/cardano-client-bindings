@@ -15,6 +15,9 @@ import (
 // native-image reflection config covers the governance/staking/DRep classes).
 const intentSender = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp"
 
+// Second sender used by the compose fixture (multiple senders into one transaction).
+const intentSender2 = "addr_test1qz7svwszky8gcmhrfza7a89z9u0dfzd3l7h23sqlc5yml7ejcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwqcqrvr0"
+
 func TestQuickTxIntentsE2E(t *testing.T) {
 	files, err := filepath.Glob("../../../test-fixtures/quicktx-intents/*.yaml")
 	if err != nil {
@@ -38,6 +41,12 @@ func TestQuickTxIntentsE2E(t *testing.T) {
 			"output_index": 0,
 			"address":      intentSender,
 			"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "5000000"}},
+		},
+		{
+			"tx_hash":      strings.Repeat("a", 64),
+			"output_index": 1,
+			"address":      intentSender2,
+			"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "2000000000"}},
 		},
 	}
 
