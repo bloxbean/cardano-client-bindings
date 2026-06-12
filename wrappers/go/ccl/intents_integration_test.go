@@ -41,14 +41,10 @@ func buildSignSubmit(t *testing.T, fixture string, execUnits []map[string]interf
 	if err != nil {
 		t.Fatalf("get protocol params: %v", err)
 	}
-	// DevKit's /epochs/parameters omits some Conway deposits; supply them so the build can compute
-	// the certificate deposits (the node validates them on submit).
-	if _, ok := pp["drep_deposit"]; !ok {
-		pp["drep_deposit"] = "500000000"
-	}
-	if _, ok := pp["gov_action_deposit"]; !ok {
-		pp["gov_action_deposit"] = "1000000000"
-	}
+	// DevKit's /epochs/parameters returns these Conway deposits as null, so the build can't compute
+	// the certificate deposits. Set them unconditionally (the node validates the values on submit).
+	pp["drep_deposit"] = "500000000"
+	pp["gov_action_deposit"] = "1000000000"
 
 	yaml := readIntentFixture(t, fixture)
 	var result *TxResult
