@@ -1,9 +1,7 @@
 package ccl
 
 import (
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -84,6 +82,46 @@ func signSubmit(t *testing.T, yaml string, utxos []map[string]interface{}, pp ma
 	return txHash
 }
 
+// mintReceiver is the address the mint fixtures pay the minted asset to (account.enterpriseAddress).
+const mintReceiver = "addr_test1vz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerspjrlsz"
+
+// assertMintedAssetAt confirms a mint actually landed on-chain: the receiver holds a non-lovelace
+// asset. ("Submit accepted" alone doesn't prove the intended effect; this does.)
+func assertMintedAssetAt(t *testing.T, address string) {
+	t.Helper()
+	waitForBlock()
+	utxos, err := devkitGetUtxos(address)
+	if err != nil {
+		t.Fatalf("get receiver utxos: %v", err)
+	}
+	for _, u := range utxos {
+		amounts, _ := u["amount"].([]interface{})
+		for _, a := range amounts {
+			if am, ok := a.(map[string]interface{}); ok {
+				if unit, _ := am["unit"].(string); unit != "" && unit != "lovelace" {
+					return // a minted asset is present
+				}
+			}
+		}
+	}
+	t.Fatalf("expected a minted asset at %s, found none", address)
+}
+
+// assertUtxoConsumed confirms the given UTXO is no longer present at an address (it was spent).
+func assertUtxoConsumed(t *testing.T, address, txHash string) {
+	t.Helper()
+	waitForBlock()
+	utxos, err := devkitGetUtxos(address)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	for _, u := range utxos {
+		if h, _ := u["tx_hash"].(string); h == txHash {
+			t.Fatalf("UTXO %s at %s was not consumed", txHash, address)
+		}
+	}
+}
+
 func TestIntegrationStakeRegistration(t *testing.T) {
 	skipIfNoDevKit(t)
 	buildSignSubmit(t, "stake_registration.yaml", nil, "payment", "stake")
@@ -92,6 +130,40 @@ func TestIntegrationStakeRegistration(t *testing.T) {
 func TestIntegrationDRepRegistration(t *testing.T) {
 	skipIfNoDevKit(t)
 	buildSignSubmit(t, "drep_registration.yaml", nil, "payment", "drep")
+}
+
+// Negative test: a DRep registration certificate must be witnessed by the DRep key, so signing with
+// the payment key alone must be rejected by the node (MissingVKeyWitnessesUTXOW). This proves the
+// extra witness sign_tx_with_keys adds is genuinely required — not cosmetic — and complements the
+// positive TestIntegrationDRepRegistration (payment+drep) above.
+func TestIntegrationDRepKeyRequired(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	built, err := bridge.QuickTx.Build(readIntentFixture(t, "drep_registration.yaml"), u, pp)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	// Sign with the payment key ONLY (ccl_account_sign_tx), omitting the DRep-key witness.
+	signedPaymentOnly, err := bridge.Account.SignTx(intentMnemonic, Testnet, 0, 0, built.TxCbor)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if _, err := devkitSubmitTx(signedPaymentOnly); err == nil {
+		t.Fatal("the node accepted a DRep registration signed with the payment key only; " +
+			"expected rejection (MissingVKeyWitnessesUTXOW)")
+	}
 }
 
 func TestIntegrationDonation(t *testing.T) {
@@ -135,12 +207,14 @@ func TestIntegrationNativeMint(t *testing.T) {
 	// The fixture mints under an empty-ScriptAll policy that needs no signature, so the fee payer
 	// alone can submit it.
 	buildSignSubmit(t, "minting.yaml", nil, "payment")
+	assertMintedAssetAt(t, mintReceiver)
 }
 
 func TestIntegrationPlutusMint(t *testing.T) {
 	skipIfNoDevKit(t)
 	buildSignSubmit(t, "plutus/script_minting.yaml",
 		[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}}, "payment")
+	assertMintedAssetAt(t, mintReceiver)
 }
 
 // setupThenSubmit resets+funds the devnet, submits a prerequisite fixture (e.g. registering a stake
@@ -194,10 +268,35 @@ func TestIntegrationDRepDeregistration(t *testing.T) {
 
 func TestIntegrationStakeWithdrawal(t *testing.T) {
 	skipIfNoDevKit(t)
-	// Withdraw the (zero) reward balance from a freshly registered stake address.
-	setupThenSubmit(t,
-		"stake_registration.yaml", []string{"payment", "stake"},
-		"stake_withdrawal.yaml", []string{"payment", "stake"})
+	// Conway requires a stake address to be vote-delegated to a DRep before it can withdraw, so the
+	// sequence is: register stake -> delegate voting power -> withdraw the (zero) reward balance.
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "stake_registration.yaml"), u, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "voting_delegation.yaml"), u2, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u3, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-vote-delegation): %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "stake_withdrawal.yaml"), u3, pp, nil, "payment", "stake")
 }
 
 // govActionPlaceholder is the gov_action_tx_hash baked into voting.yaml; the voting test repoints it
@@ -250,34 +349,17 @@ func TestIntegrationVoting(t *testing.T) {
 }
 
 // poolPlaceholder is the pool id baked into stake_delegation.yaml; the delegation test repoints it
-// at a real pool on the devnet.
-const poolPlaceholder = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
-
-// devkitFirstPool returns a pool id that exists on the devnet (the genesis block-producer pool).
-func devkitFirstPool(t *testing.T) string {
-	t.Helper()
-	resp, err := http.Get(devkitURL + "/pools")
-	if err != nil {
-		t.Fatalf("list pools: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Fatalf("list pools failed (%d)", resp.StatusCode)
-	}
-	// Blockfrost-style /pools returns a JSON array of pool-id strings.
-	var pools []string
-	if err := json.NewDecoder(resp.Body).Decode(&pools); err != nil {
-		t.Fatalf("decode pools: %v", err)
-	}
-	if len(pools) == 0 {
-		t.Fatal("no pools on the devnet")
-	}
-	return pools[0]
-}
+// at the pool it registers. accountPoolID is that pool's id — the one keyed to the account's stake
+// key in pool_registration.yaml (captured from QuickTxIntentsTest).
+const (
+	poolPlaceholder = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy"
+	accountPoolID   = "pool1xtrj35uxrctye2egew8sqezgzwwg796ql7uw02572gedcpgmwck"
+)
 
 func TestIntegrationStakeDelegation(t *testing.T) {
 	skipIfNoDevKit(t)
-	// The fixture registers the stake address and delegates in one tx; repoint it at a real pool.
+	// Register the stake address, register a pool keyed to the account, then delegate to that pool.
+	// (DevKit exposes no pool-list endpoint, so we delegate to a pool we create rather than discover.)
 	devkitReset()
 	waitForBlock()
 	if err := devkitTopup(intentSender, 6000); err != nil {
@@ -286,13 +368,26 @@ func TestIntegrationStakeDelegation(t *testing.T) {
 	waitForBlock()
 	pp := devnetPP(t)
 
-	poolID := devkitFirstPool(t)
 	u, err := devkitGetUtxos(intentSender)
 	if err != nil {
 		t.Fatalf("get utxos: %v", err)
 	}
-	delegYaml := strings.ReplaceAll(readIntentFixture(t, "stake_delegation.yaml"), poolPlaceholder, poolID)
-	signSubmit(t, delegYaml, u, pp, nil, "payment", "stake")
+	signSubmit(t, readIntentFixture(t, "stake_registration.yaml"), u, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "pool_registration.yaml"), u2, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u3, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-pool-registration): %v", err)
+	}
+	delegYaml := strings.ReplaceAll(readIntentFixture(t, "stake_delegation.yaml"), poolPlaceholder, accountPoolID)
+	signSubmit(t, delegYaml, u3, pp, nil, "payment", "stake")
 }
 
 func TestIntegrationPoolRegistration(t *testing.T) {
@@ -360,4 +455,7 @@ func TestIntegrationPlutusSpend(t *testing.T) {
 
 	signSubmit(t, spendYaml, spendUtxos, pp,
 		[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}}, "payment")
+
+	// Confirm the spend actually consumed the locked script UTXO.
+	assertUtxoConsumed(t, scriptAddr, lockHash)
 }

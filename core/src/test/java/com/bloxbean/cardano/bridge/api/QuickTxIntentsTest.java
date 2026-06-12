@@ -130,7 +130,9 @@ class QuickTxIntentsTest {
 
     @Test
     void stakeDelegation() throws Exception {
-        assertBuilds("stake_delegation", new Tx().registerStakeAddress(stakeAddress).delegateTo(stakeAddress, POOL_ID).from(sender));
+        // Delegation only (no registration): the integration test registers the stake address and a
+        // pool first, then delegates to that pool.
+        assertBuilds("stake_delegation", new Tx().delegateTo(stakeAddress, POOL_ID).from(sender));
     }
 
     @Test
