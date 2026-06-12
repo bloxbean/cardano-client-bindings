@@ -105,17 +105,17 @@ This is shipped and tested (`QuickTxApiTest.plutusMint*`).
 
 ## 6. Upstream CCL — New Modules to Evaluate
 
-Surfaced by scanning upstream CCL. Bucketed by whether they are available in the
-bridge's current target (**0.7.2**) or only in the unreleased **0.8.0** line.
+Surfaced by scanning upstream CCL. The bridge now targets **0.8.0-pre4**, so all of these are
+available as a current dependency — no further upgrade needed.
 
-### Available now in CCL 0.7.2 (already a bridge dependency — no upgrade needed)
+### CIP modules (already a bridge dependency)
 
 - [ ] `P2` **CIP-30 data signing** — wrap `DataSignature` / `CIP30DataSigner` (COSE_Sign1 `signData` create + verify). Offline. Complements existing CIP-8 message signing with the wallet/dApp data-signature format.
 - [ ] `P2` **CIP-27 royalty metadata** — wrap royalty metadata construction/parsing for NFTs. Offline; complements the bridge's existing CIP-25 support.
 
-### Requires upgrading the bridge to CCL 0.8.0 (currently preview — see umbrella item)
+### Now available on CCL 0.8.0-pre4
 
-- [ ] `P1` **Evaluate upgrading CCL 0.7.2 → 0.8.0 once it is stable** (currently `0.8.0-previewN`). This is the gate for every item below. Note the 0.8.0 QuickTx change unifying `Tx` + `ScriptTx` and adding `DepositMode` resolvers — verify the QuickTx wrapper still maps cleanly.
+- [x] `P1` ~~**Upgrade CCL 0.7.2 → 0.8.0**~~ **Done** — the bridge is on `0.8.0-pre4` (the TxPlan refactor). The QuickTx wrapper was rewritten to TxPlan YAML; the 0.8.0 unified `Tx`/`ScriptTx` + `DepositMode` are exercised by the intent E2E suite. Re-pin to the stable `0.8.0` when it releases.
 - [ ] `P2` **`plutus-aiken` blueprint handling** — expose runtime CIP-57 blueprint parsing and apply-params-to-script (parameterized validators). Offline. (The compile-time `@MetadataType` annotation processor is build-time Java codegen and is **not** FFI-able, so it is out of scope for the wrappers.)
 - [ ] `P2` **`txflow` multi-step orchestration** — evaluate exposing the offline flow-composition parts. Caveat: confirmation tracking is online/stateful and fits the bridge's stateless-FFI model awkwardly; wrap only the pure-composition surface, if any.
 - [ ] `P2` **CIP-102 royalty datum (v2)** — inline royalty datum on UTXOs; extends CIP-27. Offline datum (de)serialization.
