@@ -37,37 +37,44 @@ func buildSignSubmit(t *testing.T, fixture string, execUnits []map[string]interf
 	if err != nil {
 		t.Fatalf("get utxos: %v", err)
 	}
+	return signSubmit(t, readIntentFixture(t, fixture), utxos, devnetPP(t), execUnits, keys...)
+}
+
+// devnetPP fetches the devnet protocol parameters and fills in the Conway deposits DevKit returns as
+// null (the node validates the actual values on submit).
+func devnetPP(t *testing.T) map[string]interface{} {
+	t.Helper()
 	pp, err := devkitGetProtocolParams()
 	if err != nil {
 		t.Fatalf("get protocol params: %v", err)
 	}
-	// DevKit's /epochs/parameters returns these Conway deposits as null, so the build can't compute
-	// the certificate deposits. Set them unconditionally (the node validates the values on submit).
 	pp["drep_deposit"] = "500000000"
 	pp["gov_action_deposit"] = "1000000000"
+	return pp
+}
 
-	yaml := readIntentFixture(t, fixture)
+// signSubmit builds the YAML with the given UTXOs + params, signs with the key roles, and submits.
+// The devnet's /tx/submit returns 200/202 only after the node has validated and accepted the tx (a
+// rejected tx gets a 400 with the ledger error) — that acceptance is the proof.
+func signSubmit(t *testing.T, yaml string, utxos []map[string]interface{}, pp map[string]interface{}, execUnits []map[string]interface{}, keys ...string) string {
+	t.Helper()
 	var result *TxResult
+	var err error
 	if execUnits != nil {
 		result, err = bridge.QuickTx.Build(yaml, utxos, pp, execUnits)
 	} else {
 		result, err = bridge.QuickTx.Build(yaml, utxos, pp)
 	}
 	if err != nil {
-		t.Fatalf("build %s: %v", fixture, err)
+		t.Fatalf("build: %v", err)
 	}
-
 	signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, keys...)
 	if err != nil {
-		t.Fatalf("sign %s: %v", fixture, err)
+		t.Fatalf("sign: %v", err)
 	}
-
-	// The devnet's /tx/submit returns 200/202 only after the node has validated and accepted the
-	// transaction (a rejected tx gets a 400 with the ledger error). That acceptance is the proof
-	// that the bridge produced a node-acceptable transaction.
 	txHash, err := devkitSubmitTx(signed)
 	if err != nil {
-		t.Fatalf("submit %s: %v", fixture, err)
+		t.Fatalf("submit: %v", err)
 	}
 	return txHash
 }
@@ -89,7 +96,28 @@ func TestIntegrationDonation(t *testing.T) {
 
 func TestIntegrationInfoProposal(t *testing.T) {
 	skipIfNoDevKit(t)
-	buildSignSubmit(t, "governance_proposal.yaml", nil, "payment")
+	// A Conway proposal's deposit-return account must be a registered stake address, so register it
+	// first, then submit the proposal in the next block.
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "stake_registration.yaml"), utxos, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	utxos2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "governance_proposal.yaml"), utxos2, pp, nil, "payment")
 }
 
 func TestIntegrationMetadata(t *testing.T) {
