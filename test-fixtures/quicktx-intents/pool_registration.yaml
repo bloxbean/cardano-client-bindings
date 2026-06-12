@@ -10,16 +10,16 @@ transaction:
       update: false
       pool_registration:
         type: POOL_REGISTRATION
-        operator: ed40b0a319f639a70b1e2a4de00f112c4f7b7d4849f0abd25c4336a4
+        operator: 32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc
         vrfKeyHash: b95af7a0a58928fbd0e73b03ce81dedd42d4a776685b443cf2016c18438a3b9b
         pledge: 100000000
         cost: 340000000
         margin:
           numerator: 1
           denominator: 100
-        rewardAccount: e1f3c3d69b1d4eca197096cbfd67450f64123de4a5ed61b1f94a356134
+        rewardAccount: e032c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc
         poolOwners:
-        - f3c3d69b1d4eca197096cbfd67450f64123de4a5ed61b1f94a356134
+        - 32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc
         relays:
         - relay_type: single_host_addr
           port: 3001

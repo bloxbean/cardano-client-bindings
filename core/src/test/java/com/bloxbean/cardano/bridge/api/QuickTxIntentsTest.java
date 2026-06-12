@@ -229,14 +229,20 @@ class QuickTxIntentsTest {
     // --- Stake pools ---
 
     private PoolRegistration samplePool() {
+        // Key the pool to the account's stake key (operator + owner + reward account) so the pool
+        // registration can be witnessed by signing with the account's stake key — no separate pool
+        // cold key is needed. The reward account must be a registered stake address (the integration
+        // test registers it first).
+        byte[] stakeAddrBytes = new Address(account.stakeAddress()).getBytes();
+        byte[] stakeKeyHash = java.util.Arrays.copyOfRange(stakeAddrBytes, 1, stakeAddrBytes.length);
         return PoolRegistration.builder()
-                .operator(HexUtil.decodeHexString("ed40b0a319f639a70b1e2a4de00f112c4f7b7d4849f0abd25c4336a4"))
+                .operator(stakeKeyHash)
                 .vrfKeyHash(HexUtil.decodeHexString("b95af7a0a58928fbd0e73b03ce81dedd42d4a776685b443cf2016c18438a3b9b"))
                 .pledge(BigInteger.valueOf(100_000_000L))
                 .cost(BigInteger.valueOf(340_000_000L))
                 .margin(new UnitInterval(BigInteger.valueOf(1), BigInteger.valueOf(100)))
-                .rewardAccount("e1f3c3d69b1d4eca197096cbfd67450f64123de4a5ed61b1f94a356134")
-                .poolOwners(Set.of("f3c3d69b1d4eca197096cbfd67450f64123de4a5ed61b1f94a356134"))
+                .rewardAccount(HexUtil.encodeHexString(stakeAddrBytes))
+                .poolOwners(Set.of(HexUtil.encodeHexString(stakeKeyHash)))
                 .relays(List.of(SingleHostAddr.builder().port(3001).build()))
                 .build();
     }
