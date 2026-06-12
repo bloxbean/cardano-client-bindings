@@ -1,8 +1,8 @@
-"""Build and sign a payment transaction fully offline (QuickTx).
+"""Build and sign a payment transaction fully offline from a TxPlan (YAML).
 
-No node or Yaci DevKit needed: we supply the UTXOs and protocol parameters
-ourselves, build an unsigned transaction, then sign it locally. (Submitting it
-to a network is a separate, online step — out of scope for this offline example.)
+The transaction is defined as a TxPlan YAML document; we supply the UTXOs and protocol
+parameters ourselves (no node / no provider), build the unsigned transaction, then sign it
+locally. Submitting it to a network is a separate, online step.
 
 Run from the repo root:
 
@@ -12,9 +12,8 @@ Run from the repo root:
       python3 wrappers/python/examples/03_build_and_sign_tx.py
 """
 from ccl._ffi import CclLib
-from ccl.quicktx import Amount
 
-# Minimal protocol parameters (CCL test-resource values).
+# Minimal protocol parameters (CCL ProtocolParams model).
 PROTOCOL_PARAMS = {
     "min_fee_a": 44, "min_fee_b": 155381, "max_tx_size": 16384,
     "key_deposit": "2000000", "pool_deposit": "500000000",
@@ -39,20 +38,26 @@ def main():
             "amount": [{"unit": "lovelace", "quantity": "100000000"}],
         }]
 
-        # Build an unsigned transaction: pay 5 ADA to the receiver.
-        result = (
-            lib.quicktx.new_tx()
-            .pay_to_address(receiver["base_address"], Amount.ada(5))
-            .from_address(sender["base_address"])
-            .with_utxos(utxos)
-            .with_protocol_params(PROTOCOL_PARAMS)
-            .build()
-        )
-        print("Built unsigned transaction")
+        # Define the transaction as a TxPlan YAML document: pay 5 ADA to the receiver.
+        txplan_yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {sender['base_address']}
+      intents:
+        - type: payment
+          address: {receiver['base_address']}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+"""
+
+        result = lib.quicktx.build(txplan_yaml, utxos, PROTOCOL_PARAMS)
+        print("Built unsigned transaction from TxPlan YAML")
         print("  tx hash:", result["tx_hash"])
+        print("  fee    :", result["fee"])
         print("  cbor   :", result["tx_cbor"][:80], "...")
 
-        # Sign it with the sender's mnemonic.
         signed = lib.account.sign_tx(
             sender["mnemonic"], result["tx_cbor"], CclLib.TESTNET, 0, 0)
         print("Signed transaction cbor:", signed[:80], "...")

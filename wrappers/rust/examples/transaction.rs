@@ -1,8 +1,8 @@
-//! Build and sign a payment transaction fully offline (QuickTx).
+//! Build and sign a payment transaction fully offline from a TxPlan (YAML).
 //!
-//! No node or Yaci DevKit needed: we supply the UTXOs and protocol parameters
-//! ourselves, build an unsigned transaction, then sign it locally. (Submitting it
-//! to a network is a separate, online step — out of scope for this offline example.)
+//! The transaction is defined as a TxPlan YAML document; we supply the UTXOs and protocol
+//! parameters ourselves (no node / no provider), build the unsigned CBOR, then sign it locally.
+//! Submitting it is a separate, online step.
 //!
 //! Run from wrappers/rust:
 //!
@@ -11,7 +11,7 @@
 //! CCL_LIB_PATH=$LIB_DIR DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
 //!   cargo run --example transaction
 //! ```
-use ccl::{network, Amount, Bridge};
+use ccl::{network, Bridge};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,17 +42,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "amount": [{"unit": "lovelace", "quantity": "100000000"}]
     }]);
 
-    // Build an unsigned transaction: pay 5 ADA to the receiver.
-    let result = bridge
-        .quicktx()
-        .new_tx()
-        .pay_to_address(receiver_addr, &[Amount::ada(5.0)], None, None)
-        .from(sender_addr)
-        .with_utxos(utxos)
-        .with_protocol_params(protocol_params)
-        .build()?;
-    println!("Built unsigned transaction");
+    // Define the transaction as a TxPlan YAML document: pay 5 ADA to the receiver.
+    let yaml = format!(
+        "version: 1.0\n\
+         transaction:\n\
+         \x20 - tx:\n\
+         \x20     from: {sender_addr}\n\
+         \x20     intents:\n\
+         \x20       - type: payment\n\
+         \x20         address: {receiver_addr}\n\
+         \x20         amounts:\n\
+         \x20           - unit: lovelace\n\
+         \x20             quantity: \"5000000\"\n"
+    );
+
+    // Build the unsigned transaction offline.
+    let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params, None)?;
+    println!("Built unsigned transaction from TxPlan YAML");
     println!("  tx hash: {}", result.tx_hash);
+    println!("  fee    : {}", result.fee);
     println!("  cbor   : {}...", &result.tx_cbor[..80]);
 
     // Sign it with the sender's mnemonic.

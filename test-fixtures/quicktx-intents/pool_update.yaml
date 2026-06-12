@@ -1,0 +1,26 @@
+version: 1.0
+context:
+  fee_payer: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+transaction:
+- tx:
+    from: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    change_address: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    intents:
+    - type: pool_update
+      update: true
+      pool_registration:
+        type: POOL_REGISTRATION
+        operator: 32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc
+        vrfKeyHash: b95af7a0a58928fbd0e73b03ce81dedd42d4a776685b443cf2016c18438a3b9b
+        pledge: 100000000
+        cost: 340000000
+        margin:
+          numerator: 1
+          denominator: 100
+        rewardAccount: e032c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc
+        poolOwners:
+        - 32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc
+        relays:
+        - relay_type: single_host_addr
+          port: 3001
+      is_update: true

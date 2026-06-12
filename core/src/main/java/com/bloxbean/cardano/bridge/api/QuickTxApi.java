@@ -10,12 +10,12 @@ import org.graalvm.nativeimage.c.function.CEntryPoint;
 import org.graalvm.nativeimage.c.type.CCharPointer;
 
 /**
- * QuickTx entry point: build an unsigned transaction from a declarative JSON spec.
+ * QuickTx entry point: build an unsigned transaction from a CCL TxPlan (YAML), fully offline.
  *
- * <p>This is the bridge's transaction-construction engine. A single entry point takes a JSON
- * <em>spec</em> (the recipe) and returns the built transaction as CBOR. The fluent transaction
- * builders in the language wrappers are sugar that assemble this JSON spec; the spec is the real
- * API contract — see {@code docs/quicktx.md} for its full schema.
+ * <p>The transaction is defined by a <a href="https://cardano-client.dev">TxPlan</a> YAML document
+ * (CCL's native transaction format). The caller also supplies the chain data the build needs —
+ * available UTXOs and protocol parameters — as JSON. Nothing is fetched and nothing is submitted;
+ * the result is the unsigned transaction CBOR.
  *
  * <p>See {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention. The single entry
  * point here is a static GraalVM {@code @CEntryPoint}.
@@ -27,38 +27,52 @@ public final class QuickTxApi {
     private QuickTxApi() {}
 
     /**
-     * Builds an unsigned transaction from a QuickTx JSON spec.
+     * Builds an unsigned transaction from a TxPlan YAML document and caller-supplied chain data.
      *
-     * <p>Exported as {@code ccl_quicktx_build}. The spec is a JSON object describing the transaction:
-     * an {@code operations} array (e.g. {@code pay_to_address}, {@code mint_assets},
-     * {@code register_stake_address}, {@code create_proposal}, Plutus {@code collect_from} with a
-     * redeemer, …), plus {@code from}, and either inline {@code utxos} + {@code protocol_params}
-     * (offline) or a {@code provider} URL (the bridge fetches them). Optional fields include
-     * {@code change_address}, {@code fee_payer}, {@code validity}, {@code merge_outputs}, and
-     * {@code signer_count} (for fee budgeting). See {@code docs/quicktx.md} for the full schema.
-     *
-     * <p>On success the result is a JSON object:
+     * <p>Exported as {@code ccl_quicktx_build}. {@code yaml} is the TxPlan transaction definition;
+     * {@code utxos_json} is a JSON array of the sender's UTXOs and {@code protocol_params_json} a
+     * JSON protocol-parameters object (both standard CCL data models). On success the result is a
+     * JSON object:
      * <pre>{@code {"tx_cbor","tx_hash","fee"}}</pre>
-     * where {@code tx_cbor} is the unsigned transaction in CBOR (sign it with
-     * {@code ccl_account_sign_tx} / {@code ccl_tx_sign_with_secret_key}, then submit it yourself).
+     * where {@code tx_cbor} is the unsigned transaction; sign it with {@code ccl_account_sign_tx} /
+     * {@code ccl_tx_sign_with_secret_key} and submit it yourself.
      *
-     * @param thread      the current isolate thread
-     * @param specJsonPtr the QuickTx spec as JSON (UTF-8 C string)
+     * <p>For Plutus script transactions, pass the redeemers' execution units in
+     * {@code exec_units_json} (a JSON array of {@code {"mem","steps"}}, one per redeemer in
+     * transaction order). The caller computes these with any UPLC evaluator (Ogmios, Blockfrost,
+     * Aiken, Scalus) and passes them in, just like UTXOs and protocol parameters. Pass {@code null}
+     * (or an empty array) for non-script transactions. A script transaction with no execution units
+     * fails with {@link ErrorCodes#CCL_ERROR_TX_BUILD}.
+     *
+     * @param thread                the current isolate thread
+     * @param yamlPtr               the TxPlan YAML (UTF-8 C string)
+     * @param utxosJsonPtr          JSON array of UTXOs (UTF-8 C string)
+     * @param protocolParamsJsonPtr JSON protocol parameters (UTF-8 C string)
+     * @param execUnitsJsonPtr      JSON array of redeemer execution units, or null (UTF-8 C string)
      * @return {@link ErrorCodes#CCL_SUCCESS}; on failure
-     *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT} (bad spec),
+     *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT},
      *         {@link ErrorCodes#CCL_ERROR_INSUFFICIENT_FUNDS}, or
      *         {@link ErrorCodes#CCL_ERROR_TX_BUILD}
      */
     @CEntryPoint(name = "ccl_quicktx_build")
-    public static int build(IsolateThread thread, CCharPointer specJsonPtr) {
+    public static int build(IsolateThread thread, CCharPointer yamlPtr,
+                            CCharPointer utxosJsonPtr, CCharPointer protocolParamsJsonPtr,
+                            CCharPointer execUnitsJsonPtr) {
         try {
-            String specJson = NativeString.toJavaString(specJsonPtr);
-            if (specJson == null || specJson.isEmpty()) {
-                ErrorState.set("Transaction spec JSON is required");
+            String yaml = NativeString.toJavaString(yamlPtr);
+            if (yaml == null || yaml.isEmpty()) {
+                ErrorState.set("TxPlan YAML is required");
                 return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
             }
+            String utxosJson = NativeString.toJavaString(utxosJsonPtr);
+            String protocolParamsJson = NativeString.toJavaString(protocolParamsJsonPtr);
+            if (protocolParamsJson == null || protocolParamsJson.isEmpty()) {
+                ErrorState.set("Protocol parameters JSON is required");
+                return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+            }
+            String execUnitsJson = NativeString.toJavaString(execUnitsJsonPtr);
 
-            String resultJson = service.buildTransaction(specJson);
+            String resultJson = service.buildTransaction(yaml, utxosJson, protocolParamsJson, execUnitsJson);
             ResultState.set(resultJson);
             return ErrorCodes.CCL_SUCCESS;
         } catch (IllegalArgumentException e) {
@@ -70,7 +84,14 @@ public final class QuickTxApi {
                 ErrorState.set(msg);
                 return ErrorCodes.CCL_ERROR_INSUFFICIENT_FUNDS;
             }
-            ErrorState.set(msg != null ? msg : e.getClass().getName());
+            // Include the root cause — wrapped exceptions (e.g. YAML deserialization) otherwise
+            // hide the actual problem behind a generic message.
+            StringBuilder detail = new StringBuilder(msg != null ? msg : e.getClass().getName());
+            for (Throwable c = e.getCause(); c != null && c != c.getCause(); c = c.getCause()) {
+                detail.append(" | ").append(c.getClass().getSimpleName())
+                      .append(": ").append(c.getMessage());
+            }
+            ErrorState.set(detail.toString());
             return ErrorCodes.CCL_ERROR_TX_BUILD;
         }
     }

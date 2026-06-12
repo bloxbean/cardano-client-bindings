@@ -1,15 +1,15 @@
-// Build and sign a payment transaction fully offline (QuickTx).
+// Build and sign a payment transaction fully offline from a TxPlan (YAML).
 //
-// No node or Yaci DevKit needed: we supply the UTXOs and protocol parameters
-// ourselves, build an unsigned transaction, then sign it locally. (Submitting it
-// to a network is a separate, online step — out of scope for this offline example.)
+// The transaction is defined as a TxPlan YAML document; we supply the UTXOs and protocol
+// parameters ourselves (no node / no provider), build the unsigned CBOR, then sign it locally.
+// Submitting it is a separate, online step.
 //
 // Run from wrappers/js:
 //
 //   LIB_DIR=../../core/build/native/nativeCompile
 //   CCL_LIB_PATH=$LIB_DIR DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
 //     bun examples/transaction.js
-import { CclBridge, TESTNET, Amount } from '../src/index.js';
+import { CclBridge, TESTNET } from '../src/index.js';
 
 // Minimal protocol parameters (CCL test-resource values).
 const protocolParams = {
@@ -34,15 +34,25 @@ try {
     amount: [{ unit: 'lovelace', quantity: '100000000' }],
   }];
 
-  // Build an unsigned transaction: pay 5 ADA to the receiver.
-  const result = bridge.quicktx.newTx()
-    .payToAddress(receiver.base_address, Amount.ada(5))
-    .from(sender.base_address)
-    .withUtxos(utxos)
-    .withProtocolParams(protocolParams)
-    .build();
-  console.log('Built unsigned transaction');
+  // Define the transaction as a TxPlan YAML document: pay 5 ADA to the receiver.
+  const yaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender.base_address}
+      intents:
+        - type: payment
+          address: ${receiver.base_address}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`;
+
+  // Build the unsigned transaction offline.
+  const result = bridge.quicktx.build(yaml, utxos, protocolParams);
+  console.log('Built unsigned transaction from TxPlan YAML');
   console.log('  tx hash:', result.tx_hash);
+  console.log('  fee    :', result.fee);
   console.log('  cbor   :', result.tx_cbor.slice(0, 80), '...');
 
   // Sign it with the sender's mnemonic.

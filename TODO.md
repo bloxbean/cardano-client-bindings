@@ -36,7 +36,7 @@ but there is no standalone "C wrapper" product.
 - [ ] `P2` Split the monolithic Go `wrappers/go/ccl/ccl.go` (~2k LOC) and Rust `wrappers/rust/src/lib.rs` into focused modules for maintainability.
 - [ ] `P2` Cross-wrapper error-handling review for consistent `CclError` semantics (codes, messages, idiomatic types).
 - [ ] `P2` Give the Go wrapper a clear build-time message when `CGO_ENABLED=0` (a `//go:build cgo` guard + a stub that explains cgo is required), instead of a cryptic linker error.
-- [ ] `P2` Expose **stake-key signing** (CCL's `Account.signWithStakeKey`). `ccl_account_sign_tx` signs with the payment key only, so transactions whose certificates must be authorized by the stake key (e.g. vote-power delegation, stake delegation) fail to submit with `MissingVKeyWitnessesUTXOW`. Add an entrypoint / option to also sign with the stake key (and remember `signer_count(2)` for fee budgeting), wired through all four wrappers. The `delegate_voting_power` integration test is build-only until this lands.
+- [x] `P2` ~~Expose **stake-key signing**~~ **Done** — added `ccl_account_sign_tx_multi(…, keys)`, which signs with any subset of `payment` / `stake` / `drep` / `committee_cold` / `committee_hot` (CCL's `Account.signWith*Key`), wired through all four wrappers (`sign_tx_with_keys` / `SignTxWithKeys` / `signTxWithKeys`). Fixes the `MissingVKeyWitnessesUTXOW` rejection for stake/vote/DRep certs; the original `ccl_account_sign_tx` (payment only) is unchanged.
 
 ## 2. Development — Build, CI & Distribution
 
@@ -53,6 +53,31 @@ but there is no standalone "C wrapper" product.
 - [ ] `P2` Automate version bumping from a single source of truth (the version is duplicated across `gradle.properties` and each wrapper manifest).
 - [ ] `P2` **Runtime lib↔wrapper version check.** A native lib a version behind its wrapper fails confusingly; have each wrapper call `ccl_version` on init and error clearly on mismatch.
 - [ ] `P2` **Sign release artifacts** (cosign/sigstore) for supply-chain trust when pulling a prebuilt native lib. The release already emits `SHA256SUMS`; add signatures + verification docs.
+
+## 2b. Plutus script evaluation — pluggable evaluators
+
+The bridge builds Plutus script transactions offline by accepting the redeemers' **execution
+units** (mem + CPU steps) as a fourth caller-supplied input to `ccl_quicktx_build` — exactly like
+UTXOs and protocol parameters. Internally it wires CCL's `StaticTransactionEvaluator`, so the
+bridge never runs the script; the caller computes the units with whatever evaluator they prefer.
+This is shipped and tested (`QuickTxApiTest.plutusMint*`).
+
+- [ ] `P1` **Evaluator abstraction + examples (pick-and-choose).** Give users a clear, per-language
+  story for *obtaining* the exec units to pass in, with helper/service classes and runnable
+  examples for each supported evaluator:
+  - **HTTP / Blockfrost** `…/utils/txs/evaluate` (online)
+  - **Ogmios** `EvaluateTx` (online)
+  - **Aiken** UPLC evaluator (offline; e.g. `aiken-java-binding` server-side, or a wrapper-native
+    binding)
+  - **Scalus** UPLC evaluator (offline, JVM/Scala)
+  The bridge stays evaluator-agnostic (it only consumes `[{mem, steps}]`); these are thin,
+  swappable client-side helpers + docs showing the two-pass flow (build → evaluate → rebuild with
+  units). Cover Python, Go, Rust, JS.
+- [ ] `P2` **Self-contained offline evaluation spike — `aiken-java-binding` inside the GraalVM
+  native image.** If the Aiken Rust UPLC evaluator can be loaded via JNI from within `libccl`
+  (the blockers: the binding extracts its `.so` from the classpath jar at runtime — absent in a
+  native image — plus JNI config and per-platform Rust binaries), the bridge could run scripts
+  itself and callers would supply *nothing* extra. Prove feasibility before committing.
 
 ## 3. Testing
 
@@ -80,17 +105,17 @@ but there is no standalone "C wrapper" product.
 
 ## 6. Upstream CCL — New Modules to Evaluate
 
-Surfaced by scanning upstream CCL. Bucketed by whether they are available in the
-bridge's current target (**0.7.2**) or only in the unreleased **0.8.0** line.
+Surfaced by scanning upstream CCL. The bridge now targets **0.8.0-pre4**, so all of these are
+available as a current dependency — no further upgrade needed.
 
-### Available now in CCL 0.7.2 (already a bridge dependency — no upgrade needed)
+### CIP modules (already a bridge dependency)
 
 - [ ] `P2` **CIP-30 data signing** — wrap `DataSignature` / `CIP30DataSigner` (COSE_Sign1 `signData` create + verify). Offline. Complements existing CIP-8 message signing with the wallet/dApp data-signature format.
 - [ ] `P2` **CIP-27 royalty metadata** — wrap royalty metadata construction/parsing for NFTs. Offline; complements the bridge's existing CIP-25 support.
 
-### Requires upgrading the bridge to CCL 0.8.0 (currently preview — see umbrella item)
+### Now available on CCL 0.8.0-pre4
 
-- [ ] `P1` **Evaluate upgrading CCL 0.7.2 → 0.8.0 once it is stable** (currently `0.8.0-previewN`). This is the gate for every item below. Note the 0.8.0 QuickTx change unifying `Tx` + `ScriptTx` and adding `DepositMode` resolvers — verify the QuickTx wrapper still maps cleanly.
+- [x] `P1` ~~**Upgrade CCL 0.7.2 → 0.8.0**~~ **Done** — the bridge is on `0.8.0-pre4` (the TxPlan refactor). The QuickTx wrapper was rewritten to TxPlan YAML; the 0.8.0 unified `Tx`/`ScriptTx` + `DepositMode` are exercised by the intent E2E suite. Re-pin to the stable `0.8.0` when it releases.
 - [ ] `P2` **`plutus-aiken` blueprint handling** — expose runtime CIP-57 blueprint parsing and apply-params-to-script (parameterized validators). Offline. (The compile-time `@MetadataType` annotation processor is build-time Java codegen and is **not** FFI-able, so it is out of scope for the wrappers.)
 - [ ] `P2` **`txflow` multi-step orchestration** — evaluate exposing the offline flow-composition parts. Caveat: confirmation tracking is online/stateful and fits the bridge's stateless-FFI model awkwardly; wrap only the pure-composition surface, if any.
 - [ ] `P2` **CIP-102 royalty datum (v2)** — inline royalty datum on UTXOs; extends CIP-27. Offline datum (de)serialization.

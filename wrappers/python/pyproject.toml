@@ -3,6 +3,7 @@ name = "ccl"
 version = "0.1.0"
 description = "Python bindings for Cardano Client Lib (CCL) via GraalVM native library"
 requires-python = ">=3.8"
+dependencies = ["pyyaml>=6.0"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
