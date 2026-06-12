@@ -3,8 +3,15 @@ package com.bloxbean.cardano.bridge.api;
 import com.bloxbean.cardano.bridge.api.quicktx.QuickTxService;
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.address.Address;
+import com.bloxbean.cardano.client.address.AddressProvider;
 import com.bloxbean.cardano.client.address.Credential;
+import com.bloxbean.cardano.client.api.model.Amount;
+import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
+import com.bloxbean.cardano.client.plutus.spec.PlutusData;
+import com.bloxbean.cardano.client.plutus.spec.PlutusScript;
+import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script;
 import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.serialization.TxPlan;
 import com.bloxbean.cardano.client.transaction.spec.governance.Anchor;
@@ -196,5 +203,52 @@ class QuickTxIntentsTest {
     @Test
     void poolRetirement() throws Exception {
         assertBuilds("pool_retirement", new Tx().retirePool(POOL_ID, 500).from(sender));
+    }
+
+    // --- Plutus script spend (collect from a script address) ---
+
+    private static final String ALWAYS_SUCCEEDS_V2 = "4e4d01000033222220051200120011";
+
+    @Test
+    void scriptCollectFrom() throws Exception {
+        PlutusScript script = PlutusV2Script.builder().cborHex(ALWAYS_SUCCEEDS_V2).build();
+        String scriptAddr = AddressProvider.getEntAddress(script, Networks.testnet()).toBech32();
+        PlutusData datum = BigIntPlutusData.of(42);
+        PlutusData redeemer = BigIntPlutusData.of(0);
+        String scriptTxHash = "b".repeat(64);
+
+        Utxo scriptUtxo = Utxo.builder()
+                .txHash(scriptTxHash).outputIndex(0).address(scriptAddr)
+                .amount(List.of(Amount.ada(10)))
+                .dataHash(datum.getDatumHash())
+                .build();
+
+        Tx tx = new Tx()
+                .collectFrom(scriptUtxo, redeemer, datum)
+                .payToAddress(account.enterpriseAddress(), Amount.ada(5))
+                .attachSpendingValidator(script)
+                .from(sender);
+
+        String yaml = TxPlan.from(tx).feePayer(sender).toYaml();
+        java.nio.file.Path dir = java.nio.file.Path.of("build/intent-yamls");
+        java.nio.file.Files.createDirectories(dir);
+        java.nio.file.Files.writeString(dir.resolve("script_collect_from.yaml"), yaml);
+
+        // The script UTXO (to spend) + a sender UTXO (fees + collateral). Plutus spends need
+        // caller-supplied execution units (one redeemer here).
+        String utxosJson = """
+            [{"tx_hash":"%s","output_index":0,"address":"%s",
+              "amount":[{"unit":"lovelace","quantity":"10000000"}],"data_hash":"%s"},
+             {"tx_hash":"%s","output_index":0,"address":"%s",
+              "amount":[{"unit":"lovelace","quantity":"2000000000"}]}]
+            """.formatted(scriptTxHash, scriptAddr, datum.getDatumHash(), FAKE_TX_HASH, sender);
+        String execUnits = "[{\"mem\": 2000000, \"steps\": 500000000}]";
+
+        String resultYaml = service.buildTransaction(yaml, utxosJson, protocolParamsJson, execUnits);
+        var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer
+                .getYamlMapper().readTree(resultYaml);
+        assertFalse(result.get("tx_cbor").asText().isEmpty());
+        assertEquals(64, result.get("tx_hash").asText().length());
+        assertTrue(Long.parseLong(result.get("fee").asText()) > 0);
     }
 }
