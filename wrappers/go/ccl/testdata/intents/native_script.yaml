@@ -1,0 +1,16 @@
+version: 1.0
+context:
+  fee_payer: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+transaction:
+- tx:
+    from: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    change_address: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    intents:
+    - type: payment
+      address: addr_test1vz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerspjrlsz
+      amounts:
+      - unit: lovelace
+        quantity: 5000000
+    scripts:
+    - type: native_script
+      script_hex: 8201818200581c69645a82d6574914c184d55111e13507a43099bab3499fe53e402b09

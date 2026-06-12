@@ -24,13 +24,22 @@ func TestQuickTxIntentsE2E(t *testing.T) {
 		t.Fatal("no intent fixtures found in testdata/intents/")
 	}
 
-	// A 2000-ADA UTXO at the sender — enough to cover the largest deposit (gov action = 1000 ADA).
-	utxos := []map[string]interface{}{{
-		"tx_hash":      strings.Repeat("a", 64),
-		"output_index": 0,
-		"address":      intentSender,
-		"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "2000000000"}},
-	}}
+	// A 2000-ADA UTXO at the sender (covers the largest deposit — gov action = 1000 ADA) plus a
+	// small one that the reference-input fixture reads.
+	utxos := []map[string]interface{}{
+		{
+			"tx_hash":      strings.Repeat("a", 64),
+			"output_index": 0,
+			"address":      intentSender,
+			"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "2000000000"}},
+		},
+		{
+			"tx_hash":      strings.Repeat("c", 64),
+			"output_index": 0,
+			"address":      intentSender,
+			"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "5000000"}},
+		},
+	}
 
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".yaml")

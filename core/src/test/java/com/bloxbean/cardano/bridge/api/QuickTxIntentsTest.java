@@ -22,9 +22,12 @@ import com.bloxbean.cardano.client.transaction.spec.governance.VoterType;
 import com.bloxbean.cardano.client.transaction.spec.governance.actions.GovActionId;
 import com.bloxbean.cardano.client.transaction.spec.governance.actions.InfoAction;
 import com.bloxbean.cardano.client.spec.UnitInterval;
+import com.bloxbean.cardano.client.transaction.spec.Asset;
+import com.bloxbean.cardano.client.transaction.spec.Policy;
 import com.bloxbean.cardano.client.transaction.spec.cert.PoolRegistration;
 import com.bloxbean.cardano.client.transaction.spec.cert.SingleHostAddr;
 import com.bloxbean.cardano.client.util.HexUtil;
+import com.bloxbean.cardano.client.util.PolicyUtil;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -70,12 +73,19 @@ class QuickTxIntentsTest {
         drepCredential = account.drepCredential();
     }
 
-    /** A single 2000-ADA UTXO at {@code sender} — enough to cover deposits (gov action = 1000 ADA). */
+    private static final String REF_TX_HASH = "c".repeat(64);
+
+    /**
+     * UTXOs at {@code sender}: a 2000-ADA one (covers deposits — gov action = 1000 ADA) plus a small
+     * one that the reference-input test can read.
+     */
     private String utxos() {
         return """
             [{"tx_hash":"%s","output_index":0,"address":"%s",
-              "amount":[{"unit":"lovelace","quantity":"2000000000"}]}]
-            """.formatted(FAKE_TX_HASH, sender);
+              "amount":[{"unit":"lovelace","quantity":"2000000000"}]},
+             {"tx_hash":"%s","output_index":0,"address":"%s",
+              "amount":[{"unit":"lovelace","quantity":"5000000"}]}]
+            """.formatted(FAKE_TX_HASH, sender, REF_TX_HASH, sender);
     }
 
     /**
@@ -203,6 +213,45 @@ class QuickTxIntentsTest {
     @Test
     void poolRetirement() throws Exception {
         assertBuilds("pool_retirement", new Tx().retirePool(POOL_ID, 500).from(sender));
+    }
+
+    // --- Native scripts, explicit & reference inputs ---
+
+    @Test
+    void nativeMinting() throws Exception {
+        Policy policy = PolicyUtil.createMultiSigScriptAllPolicy("test-policy", 1);
+        assertBuilds("minting", new Tx()
+                .mintAssets(policy.getPolicyScript(), new Asset("TestNFT", BigInteger.ONE), account.enterpriseAddress())
+                .from(sender));
+    }
+
+    @Test
+    void nativeScriptAttachment() throws Exception {
+        Policy policy = PolicyUtil.createMultiSigScriptAllPolicy("test-policy", 1);
+        assertBuilds("native_script", new Tx()
+                .attachNativeScript(policy.getPolicyScript())
+                .payToAddress(account.enterpriseAddress(), Amount.ada(5))
+                .from(sender));
+    }
+
+    @Test
+    void collectFromRegular() throws Exception {
+        Utxo senderUtxo = Utxo.builder()
+                .txHash(FAKE_TX_HASH).outputIndex(0).address(sender)
+                .amount(List.of(Amount.ada(2000)))
+                .build();
+        assertBuilds("collect_from", new Tx()
+                .collectFrom(List.of(senderUtxo))
+                .payToAddress(account.enterpriseAddress(), Amount.ada(5))
+                .from(sender));
+    }
+
+    @Test
+    void referenceInput() throws Exception {
+        assertBuilds("reference_input", new Tx()
+                .readFrom(REF_TX_HASH, 0)
+                .payToAddress(account.enterpriseAddress(), Amount.ada(5))
+                .from(sender));
     }
 
     // --- Plutus script spend (collect from a script address) ---
