@@ -8,6 +8,8 @@ import com.bloxbean.cardano.client.address.Credential;
 import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.client.metadata.Metadata;
+import com.bloxbean.cardano.client.metadata.MetadataBuilder;
 import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.PlutusData;
 import com.bloxbean.cardano.client.plutus.spec.PlutusScript;
@@ -133,6 +135,17 @@ class QuickTxIntentsTest {
     @Test
     void stakeWithdrawal() throws Exception {
         assertBuilds("stake_withdrawal", new Tx().withdraw(stakeAddress, BigInteger.ZERO).from(sender));
+    }
+
+    // --- Metadata ---
+
+    @Test
+    void metadata() throws Exception {
+        Metadata md = MetadataBuilder.metadataFromJson("{\"674\":{\"msg\":\"Hello from CCL Bridge\"}}");
+        assertBuilds("metadata", new Tx()
+                .payToAddress(account.enterpriseAddress(), Amount.ada(2))
+                .attachMetadata(md)
+                .from(sender));
     }
 
     // --- Treasury ---
