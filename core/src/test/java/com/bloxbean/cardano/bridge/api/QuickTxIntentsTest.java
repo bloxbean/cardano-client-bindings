@@ -29,6 +29,7 @@ import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.transaction.spec.Policy;
 import com.bloxbean.cardano.client.transaction.spec.cert.PoolRegistration;
 import com.bloxbean.cardano.client.transaction.spec.cert.SingleHostAddr;
+import com.bloxbean.cardano.client.transaction.spec.script.ScriptAll;
 import com.bloxbean.cardano.client.util.HexUtil;
 import com.bloxbean.cardano.client.util.PolicyUtil;
 import org.junit.jupiter.api.BeforeEach;
@@ -259,9 +260,11 @@ class QuickTxIntentsTest {
 
     @Test
     void nativeMinting() throws Exception {
-        Policy policy = PolicyUtil.createMultiSigScriptAllPolicy("test-policy", 1);
+        // An empty ScriptAll requires no signatures (vacuously true), so the minted policy needs no
+        // policy-key witness — the fee payer alone can submit it.
+        ScriptAll noKeyPolicy = new ScriptAll();
         assertBuilds("minting", new Tx()
-                .mintAssets(policy.getPolicyScript(), new Asset("TestNFT", BigInteger.ONE), account.enterpriseAddress())
+                .mintAssets(noKeyPolicy, new Asset("TestNFT", BigInteger.ONE), account.enterpriseAddress())
                 .from(sender));
     }
 

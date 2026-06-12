@@ -11,5 +11,5 @@ transaction:
       - name: TestNFT
         value: 1
       receiver: addr_test1vz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerspjrlsz
-      script_hex: 8201818200581c780844bd4ed4f0bcf745cab9cbd86bcc50fa28bb75a8713591849f90
+      script_hex: 820180
       script_type: 0

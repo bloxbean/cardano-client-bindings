@@ -125,6 +125,13 @@ func TestIntegrationMetadata(t *testing.T) {
 	buildSignSubmit(t, "metadata.yaml", nil, "payment")
 }
 
+func TestIntegrationNativeMint(t *testing.T) {
+	skipIfNoDevKit(t)
+	// The fixture mints under an empty-ScriptAll policy that needs no signature, so the fee payer
+	// alone can submit it.
+	buildSignSubmit(t, "minting.yaml", nil, "payment")
+}
+
 func TestIntegrationPlutusMint(t *testing.T) {
 	skipIfNoDevKit(t)
 	buildSignSubmit(t, "plutus/script_minting.yaml",
