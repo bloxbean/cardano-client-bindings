@@ -13,4 +13,4 @@ transaction:
         quantity: 5000000
     scripts:
     - type: native_script
-      script_hex: 8201818200581c69645a82d6574914c184d55111e13507a43099bab3499fe53e402b09
+      script_hex: 8201818200581ca1010fafd65c325fe38e57d249485080f34c33f9ba8a118cc961eab5

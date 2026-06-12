@@ -18,7 +18,7 @@ const (
 )
 
 func TestQuickTxScriptSpendE2E(t *testing.T) {
-	yamlBytes, err := os.ReadFile("testdata/script_collect_from.yaml")
+	yamlBytes, err := os.ReadFile("../../../test-fixtures/quicktx-intents/plutus/script_collect_from.yaml")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestQuickTxScriptSpendE2E(t *testing.T) {
 // End-to-end Plutus script mint (script_minting). Only needs a fee/collateral UTXO at the sender
 // plus the redeemer's execution units.
 func TestQuickTxScriptMintE2E(t *testing.T) {
-	yamlBytes, err := os.ReadFile("testdata/script_minting.yaml")
+	yamlBytes, err := os.ReadFile("../../../test-fixtures/quicktx-intents/plutus/script_minting.yaml")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
