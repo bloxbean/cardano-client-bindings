@@ -138,9 +138,31 @@ newer symbols, so the old-glibc builder simply caps the ceiling; we land at 2.17
 covers RHEL/CentOS **7+**, Amazon Linux **2**, Ubuntu **18.04+**, Debian **9+**, and every modern
 distro. (The current `ubuntu-latest` build demands ~`GLIBC_2.39` and fails on all of those.)
 
-**Open follow-up:** *building* on the old baseline is proven; *running* on an old distro is the real
-proof. Add a smoke step that `dlopen`s the artifact (or runs one wrapper `build()`) inside an old
-container (e.g. `centos:7` / `ubuntu:18.04`) to confirm it loads and executes, before/at rollout.
+### Run-proof (CI run 28175779442 — GREEN)
+
+A minimal harness (`docs/spikes/smoke.c`: create isolate → `ccl_version` → derive a testnet account)
+was compiled in the manylinux builder and then **executed inside `centos:7` (glibc 2.17)** with no
+package installs:
+
+```
+ldd (GNU libc) 2.17
+libccl.so => libz, libdl, libpthread, librt, libc   (all resolve on /lib64)
+libccl version: 0.1.0
+account ok (testnet address derived)
+SMOKE OK
+```
+
+So on a glibc-2.17 distro the lib doesn't just load — the GraalVM isolate initializes and a real
+crypto/key-derivation call runs. **Build-on-old-glibc and run-on-old-glibc are both proven.**
+
+## Rollout
+
+- Permanent CI guard: `.github/workflows/portable-linux-lib.yml` (PRs + `develop`/`main`) — builds in
+  `manylinux_2_28`, asserts the glibc floor via `objdump`, and re-runs the `centos:7` smoke as a
+  strict run-on-2.17 regression check.
+- Release: `release.yml`'s Linux artifact is built in the same container, so every shipped
+  `libccl.so` is glibc-≥2.17 portable. macOS/Windows artifacts unchanged.
+- Supported-glibc floor noted in `README.md`.
 
 ## Sources
 - GraalVM — Build a Static or Mostly-Static Native Executable:
