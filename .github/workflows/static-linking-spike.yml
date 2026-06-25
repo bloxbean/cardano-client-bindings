@@ -69,7 +69,50 @@ jobs:
           fi
           echo "PASS: libccl.so runs on any system with glibc >= $MAX"
 
+      - name: Compile the smoke harness against libccl.so
+        run: |
+          set -eux
+          ND=core/build/native/nativeCompile
+          # $ORIGIN rpath so the binary finds libccl.so sitting next to it at runtime.
+          gcc docs/spikes/smoke.c -I"$ND" -L"$ND" -lccl -Wl,-rpath,'$ORIGIN' -o "$ND/spike_smoke"
+          file "$ND/spike_smoke"
+
+      - name: Stage runnable artifact (lib + harness together)
+        run: |
+          set -eux
+          mkdir -p dist
+          cp core/build/native/nativeCompile/libccl.so dist/
+          cp core/build/native/nativeCompile/spike_smoke dist/
+
       - uses: actions/upload-artifact@v4
         with:
-          name: libccl-glibc-baseline-so
-          path: core/build/native/nativeCompile/libccl.so
+          name: libccl-glibc-baseline
+          path: dist/
+
+  run-on-old-distro:
+    name: Run libccl.so on glibc 2.17 (centos:7)
+    needs: glibc-baseline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: libccl-glibc-baseline
+          path: dist
+
+      # Run the prebuilt binary inside centos:7 (glibc 2.17) WITHOUT installing anything — the
+      # harness + lib were compiled in the manylinux builder, so the old distro only has to load
+      # and run them. This is the real proof: builds-on-old-glibc was shown; runs-on-old-glibc is
+      # confirmed here. (We don't use a `container:` for this job because GitHub's node-based
+      # actions can't run inside glibc-2.17; `docker run` keeps the actions on the modern runner.)
+      - name: Load + run on centos:7
+        run: |
+          set -eux
+          chmod +x dist/spike_smoke
+          docker run --rm -v "$PWD/dist:/work" -w /work centos:7 bash -c '
+            set -eux
+            ldd --version | head -1
+            echo "---- libccl.so shared-lib deps on this host ----"
+            ldd ./libccl.so
+            echo "---- running harness ----"
+            ./spike_smoke
+          '
