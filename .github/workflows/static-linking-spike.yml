@@ -1,0 +1,75 @@
+name: Static-linking spike (glibc baseline)
+
+# Isolated experiment for feature/static-linking-spike. Builds libccl.so inside an old-glibc
+# container (manylinux_2_28 -> glibc 2.28) so the shipped .so demands only an old glibc baseline
+# and therefore runs on RHEL/Alma/Rocky 8+, Ubuntu 20.04+, Debian 10+, Amazon Linux 2023, etc.
+# Goal of the experiment: prove native-image builds cleanly there AND that the resulting .so's
+# max required GLIBC symbol is <= 2.28. Does not touch ci.yml / release.yml until proven.
+
+on:
+  push:
+    branches: [feature/static-linking-spike]
+  workflow_dispatch:
+
+jobs:
+  glibc-baseline:
+    name: libccl.so on glibc 2.28 baseline (manylinux_2_28)
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/pypa/manylinux_2_28_x86_64
+    env:
+      GRAALVM_URL: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
+      BASELINE: "2.28"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show build-container glibc
+        run: ldd --version | head -1
+
+      - name: Ensure build prerequisites (gcc toolset, zlib headers)
+        run: |
+          set -eux
+          gcc --version | head -1 || dnf install -y gcc
+          dnf install -y zlib-devel || true
+
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz "$GRAALVM_URL"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+
+      - name: Toolchain versions
+        run: |
+          set -eux
+          "$JAVA_HOME/bin/java" -version
+          "$JAVA_HOME/bin/native-image" --version
+
+      - name: Build native library
+        run: ./gradlew :core:nativeCompile --no-daemon --stacktrace
+
+      - name: Measure glibc requirement of libccl.so
+        run: |
+          set -eux
+          SO=core/build/native/nativeCompile/libccl.so
+          test -f "$SO"
+          # All non-private GLIBC symbol versions the .so references, sorted.
+          objdump -T "$SO" | grep -oE 'GLIBC_[0-9]+\.[0-9]+(\.[0-9]+)?' | sort -uV > /tmp/syms.txt
+          echo "---- GLIBC symbol versions required ----"
+          cat /tmp/syms.txt
+          MAX=$(sed 's/GLIBC_//' /tmp/syms.txt | sort -V | tail -1)
+          echo "---- Max required: GLIBC_$MAX (baseline target: $BASELINE) ----"
+          # MAX <= BASELINE  <=>  the larger of {MAX, BASELINE} is BASELINE.
+          HIGHER=$(printf '%s\n%s\n' "$MAX" "$BASELINE" | sort -V | tail -1)
+          if [ "$HIGHER" != "$BASELINE" ]; then
+            echo "FAIL: libccl.so requires GLIBC_$MAX, newer than baseline GLIBC_$BASELINE"
+            exit 1
+          fi
+          echo "PASS: libccl.so runs on any system with glibc >= $MAX"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libccl-glibc-baseline-so
+          path: core/build/native/nativeCompile/libccl.so
