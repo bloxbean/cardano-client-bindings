@@ -3,7 +3,9 @@
 **Branch:** `feature/static-linking-spike`
 **Goal:** ship `libccl` so consumers don't depend on a particular Linux distro / glibc version —
 ideally via **static linking, no dynamic linking** (explicit ask).
-**Status:** research done; **decision made → Option A (glibc baseline, keep FFI)**; first CI experiment authored.
+**Status:** research done; **decision → Option A (glibc baseline, keep FFI)**; **experiment GREEN —
+`libccl.so` builds in manylinux_2_28 and requires only `GLIBC_2.17`** (runs on glibc ≥ 2.17, i.e.
+RHEL/CentOS 7+, Amazon Linux 2, Ubuntu 18.04+, Debian 9+). Ready to roll into `ci.yml`/`release.yml`.
 
 ---
 
@@ -121,6 +123,24 @@ resulting `libccl.so` and **fails if any required `GLIBC_x.y` symbol exceeds 2.2
 **If green → rollout:** move the Linux `nativeCompile` in `ci.yml` and `release.yml` into the same
 container, keep the objdump guard as a regression check, and note the supported-glibc floor in the
 release notes / per-wrapper READMEs. macOS and Windows are unaffected (stable ABIs, no glibc problem).
+
+### Result (CI run 28175185458 — GREEN)
+
+Built in `manylinux_2_28` with Oracle GraalVM 25.0.3; `objdump -T libccl.so` max symbol:
+
+```
+GLIBC_2.2.5 GLIBC_2.3 GLIBC_2.3.2 GLIBC_2.3.3 GLIBC_2.3.4 GLIBC_2.4 GLIBC_2.6
+GLIBC_2.7 GLIBC_2.9 GLIBC_2.12 GLIBC_2.14 GLIBC_2.17   <- max
+```
+
+**Outcome: requires only `GLIBC_2.17` — better than the 2.28 target.** native-image doesn't emit
+newer symbols, so the old-glibc builder simply caps the ceiling; we land at 2.17 for free. That
+covers RHEL/CentOS **7+**, Amazon Linux **2**, Ubuntu **18.04+**, Debian **9+**, and every modern
+distro. (The current `ubuntu-latest` build demands ~`GLIBC_2.39` and fails on all of those.)
+
+**Open follow-up:** *building* on the old baseline is proven; *running* on an old distro is the real
+proof. Add a smoke step that `dlopen`s the artifact (or runs one wrapper `build()`) inside an old
+container (e.g. `centos:7` / `ubuntu:18.04`) to confirm it loads and executes, before/at rollout.
 
 ## Sources
 - GraalVM — Build a Static or Mostly-Static Native Executable:
