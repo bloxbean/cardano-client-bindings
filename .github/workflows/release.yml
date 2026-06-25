@@ -42,7 +42,7 @@ jobs:
   # Linux: built in an OLD-glibc container (manylinux_2_28) so the shipped libccl.so runs on
   # glibc >= 2.17 (RHEL/CentOS 7+, Amazon Linux 2, Ubuntu 18.04+, Debian 9+) instead of only the
   # very newest distros. Portability is verified continuously by portable-linux-lib.yml; here we
-  # re-assert the floor before shipping. See docs/spikes/static-linking.md.
+  # re-assert the floor before shipping. See docs/adr/0008-linux-glibc-baseline-portability.md.
   build-linux:
     name: build (linux-x86_64, glibc 2.17 baseline)
     runs-on: ubuntu-latest
