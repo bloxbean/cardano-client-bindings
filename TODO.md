@@ -79,6 +79,41 @@ This is shipped and tested (`QuickTxApiTest.plutusMint*`).
   native image — plus JNI config and per-platform Rust binaries), the bridge could run scripts
   itself and callers would supply *nothing* extra. Prove feasibility before committing.
 
+## 2c. Chain-data provider helpers — make the API easy in all 4 languages
+
+`ccl_quicktx_build` is offline by design: the caller supplies **UTXOs**, **protocol parameters**,
+and (for Plutus) **execution units**. Today every wrapper is a pure pass-through — it marshals
+those three inputs and calls the native lib, but does **nothing** to obtain them. The user has to
+make their own HTTP calls to a backend first. That is the single biggest friction point for a
+first-time user, in every language.
+
+The fix keeps the **native lib provider-free** (offline stays offline) and adds the convenience
+*entirely in wrapper code*, using each language's own HTTP client — so the offline contract is
+untouched and the helpers are optional and swappable. This is the sibling of §2b: §2b obtains the
+*exec units*; this obtains the *UTXOs + protocol parameters*. Together they cover all three inputs.
+
+- [ ] `P1` **Optional per-wrapper chain-data provider helpers (UTXOs + protocol params).** A thin,
+  optional helper in Python/Go/Rust/JS that fetches the data `build()` needs and returns it in the
+  exact shape the wrapper already accepts, e.g.:
+  ```
+  provider = BlockfrostProvider(project_id)        # or Koios / Ogmios / Yaci DevKit
+  utxos    = provider.utxos(sender_addr)           # all UTXOs at the address
+  pp       = provider.protocol_params()
+  result   = quicktx.build(yaml, utxos, pp)        # unchanged offline core call
+  ```
+  Notes:
+  - **No UTXO *selection* needed** — the bridge already selects internally (it hands all sender
+    UTXOs to `QuickTxBuilder`/`StaticUtxoSupplier`). The helper only needs "UTXOs at address X".
+  - Define a small provider interface per language (`utxos(addr)`, `protocol_params()`), ship at
+    least one concrete impl (Blockfrost-style + Yaci DevKit, which the integration tests already
+    hit), and document a `buildWithProvider(yaml, provider, sender)` convenience that composes
+    fetch → build.
+  - Compose cleanly with §2b's exec-unit evaluators so a Plutus build is `fetch → evaluate → build`.
+- [ ] `P2` **Reconcile the WISHLIST vs Non-Goals tension.** Satya's wishlist wants provider-fetched
+  protocol params + client-side UTXO capture; Non-Goals excludes "HTTP provider modules". The
+  resolution is the split above: *optional wrapper-side helpers are in scope; baking a provider
+  into the native `libccl` is not.* The Non-Goals note now says this explicitly.
+
 ## 3. Testing
 
 - [ ] `P1` Add JS integration tests for the script/Plutus paths — these are implemented in `wrappers/js/src/index.js` but have **zero** test coverage: `ScriptTxBuilder` validators + redeemers, `collectFromScript`, `mintPlutusAssets`, `readFrom` (reference inputs), and compose-with-`ScriptTx`. Python's `tests/` are the reference for what to assert.
@@ -140,6 +175,9 @@ available as a current dependency — no further upgrade needed.
   with the GraalVM native-image library due to stack-boundary detection issues on macOS
   ARM64. Bun (built-in FFI) is the supported JS runtime. Tracked as a `P2` investigation
   item, not a committed deliverable.
-- **Backend / HTTP provider modules** (Blockfrost, Koios, Ogmios) — deliberately excluded;
-  CCL Bridge focuses on offline operations, and every language already has good HTTP
-  clients. Re-evaluate only if there is clear demand.
+- **Backend / HTTP provider modules *in the native `libccl`*** (Blockfrost, Koios, Ogmios) —
+  deliberately excluded; the native lib stays offline and side-effect-free. **This does not
+  exclude optional, wrapper-side provider helpers** that fetch UTXOs / protocol params / exec
+  units using each language's own HTTP client and feed them into the offline `build()` — those
+  are explicitly in scope and tracked in §2b (exec units) and §2c (UTXOs + protocol params).
+  The line is: convenience in wrapper code = yes; a provider baked into `libccl` = no.
