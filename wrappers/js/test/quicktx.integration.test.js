@@ -158,6 +158,11 @@ transaction:
   it("should build, sign, and submit a Plutus mint", async () => {
     if (skip) return;
 
+    // Mirror the Go suite's buildSignSubmit: reset to an isolated devnet first, then fund the
+    // fixture's fee payer and build from its real UTXOs. (The fixture bakes in the fixed account,
+    // so it must run against clean state rather than the devnet the earlier payment tests mutated.)
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
     await devkit.topup(INTENT_SENDER, 6000);
     await devkit.waitForBlock(3000);
 
@@ -169,8 +174,10 @@ transaction:
     expect(result.tx_hash.length).toBe(64);
 
     const signedTx = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor, ["payment"]);
-    const txHash = await devkit.submitTx(signedTx);
-    expect(txHash).toBeTruthy();
+    // A successful submit returns the 64-char tx hash; a rejected one returns an error body. Assert
+    // the hash so a failed Plutus validation surfaces here, not as a missing asset further down.
+    const submitResult = await devkit.submitTx(signedTx);
+    expect(submitResult).toMatch(/^[0-9a-f]{64}$/);
 
     await devkit.waitForBlock(3000);
     const receiverUtxos = await devkit.getUtxos(MINT_RECEIVER);
