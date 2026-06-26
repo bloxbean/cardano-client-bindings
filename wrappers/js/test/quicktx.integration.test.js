@@ -11,8 +11,21 @@
 import { describe, it, expect, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
 import { CclBridge, TESTNET } from "../src/index.js";
 import { DevKitHelper } from "./devkit-helper.js";
+import { readFileSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 setDefaultTimeout(60_000);
+
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../../test-fixtures/quicktx-intents");
+
+// The fixed test account the quicktx-intents fixtures are derived from (account 0/0). A Plutus
+// fixture bakes this address in as the fee payer, so submitting it means funding and signing with
+// this exact account rather than a freshly-created one.
+const INTENT_MNEMONIC = "test walk nut penalty hip pave soap entry language right filter choice";
+const INTENT_SENDER = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp";
+// The enterprise address the mint fixtures pay the freshly minted asset to.
+const MINT_RECEIVER = "addr_test1vz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerspjrlsz";
 
 function paymentYaml(from, to, quantity) {
   return `
@@ -136,5 +149,51 @@ transaction:
 
     const yaml = paymentYaml(sender.base_address, receiver.base_address, "100000000");
     expect(() => bridge.quicktx.build(yaml, utxos, pp)).toThrow();
+  });
+
+  // Plutus round-trip: build the script_minting fixture with caller-supplied exec units, sign with
+  // the fee payer's payment key, submit, and assert the minted asset landed on-chain. The Go suite
+  // does this successfully; the JS path was rejected with PPViewHashesDontMatch (the script-data /
+  // cost-model hash in the built tx didn't match the node). This run instruments the cost-model
+  // shape and tries dropping the fetched cost models so the lib uses its built-in standard Conway
+  // ones (which should match the devnet node).
+  it("should build, sign, and submit a Plutus mint", async () => {
+    if (skip) return;
+
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
+    await devkit.topup(INTENT_SENDER, 6000);
+    await devkit.waitForBlock(3000);
+
+    const utxos = await devkit.getUtxos(INTENT_SENDER);
+    const pp = await devkit.getProtocolParams();
+    const yaml = readFileSync(join(FIXTURES, "plutus", "script_minting.yaml"), "utf8");
+    const execUnits = [{ mem: 2000000, steps: 500000000 }];
+
+    // DIAGNOSTIC: what cost-model shape does /epochs/parameters return, and under which key?
+    console.log("DIAG pp keys:", Object.keys(pp).sort().join(","));
+    for (const k of ["cost_models", "costModels", "cost_mdls", "costMdls", "plutus_v2", "plutusV2"]) {
+      if (pp[k] !== undefined) console.log(`DIAG ${k} =`, JSON.stringify(pp[k]).slice(0, 1800));
+    }
+
+    // CANDIDATE FIX: drop the fetched cost models so the native lib falls back to its built-in
+    // (standard Conway) cost models, sidestepping any params round-trip that corrupts the script
+    // integrity hash. If the devnet uses standard cost models, the node will accept this.
+    const ppNoCm = { ...pp };
+    for (const k of ["cost_models", "costModels", "cost_mdls", "costMdls"]) delete ppNoCm[k];
+
+    const built = bridge.quicktx.build(yaml, utxos, ppNoCm, execUnits);
+    expect(built.tx_hash.length).toBe(64);
+
+    const signedTx = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, built.tx_cbor, ["payment"]);
+    const submitResult = await devkit.submitTx(signedTx);
+    console.log("DIAG no-cost-models submit:", String(submitResult).slice(0, 320));
+    // A successful submit returns the 64-char tx hash; a rejection returns an error body.
+    expect(submitResult).toMatch(/^[0-9a-f]{64}$/);
+
+    await devkit.waitForBlock(3000);
+    const receiverUtxos = await devkit.getUtxos(MINT_RECEIVER);
+    const hasMintedAsset = receiverUtxos.some((u) => u.amount.some((a) => a.unit !== "lovelace"));
+    expect(hasMintedAsset).toBe(true);
   });
 });
