@@ -152,11 +152,19 @@ transaction:
   });
 
   // Plutus round-trip: build the script_minting fixture with caller-supplied exec units, sign with
-  // the fee payer's payment key, submit, and assert the minted asset landed on-chain. The Go suite
-  // does this successfully; the JS path was rejected with PPViewHashesDontMatch (the script-data /
-  // cost-model hash in the built tx didn't match the node). This run instruments the cost-model
-  // shape and tries dropping the fetched cost models so the lib uses its built-in standard Conway
-  // ones (which should match the devnet node).
+  // the fee payer's payment key, submit, and assert the minted asset landed on-chain. "Submit
+  // accepted" alone doesn't prove the script ran and minted — the receiver holding a non-lovelace
+  // asset does. Mirrors the Go TestIntegrationPlutusMint.
+  //
+  // We build WITHOUT the devnet's fetched cost models, so the native lib uses its built-in standard
+  // Conway cost models (which the devnet runs). Passing DevKit's fetched cost models instead is
+  // rejected with PPViewHashesDontMatch: /epochs/parameters returns them as a map keyed by
+  // zero-padded indices ("000".."165"), and JS's JSON parse reorders the non-padded integer-like
+  // keys ("100".."165") ahead of the padded ones, scrambling the cost-model order vs the ledger's
+  // canonical order and corrupting the script-integrity hash. Go's lexicographic map marshalling
+  // preserves the order, which is why its equivalent test passes with the fetched params. Threading
+  // fetched cost models through to Plutus builds needs an order-preserving fix in the wrapper —
+  // tracked as a follow-up in TODO.md §3.
   it("should build, sign, and submit a Plutus mint", async () => {
     if (skip) return;
 
@@ -168,27 +176,17 @@ transaction:
     const utxos = await devkit.getUtxos(INTENT_SENDER);
     const pp = await devkit.getProtocolParams();
     const yaml = readFileSync(join(FIXTURES, "plutus", "script_minting.yaml"), "utf8");
-    const execUnits = [{ mem: 2000000, steps: 500000000 }];
 
-    // DIAGNOSTIC: what cost-model shape does /epochs/parameters return, and under which key?
-    console.log("DIAG pp keys:", Object.keys(pp).sort().join(","));
-    for (const k of ["cost_models", "costModels", "cost_mdls", "costMdls", "plutus_v2", "plutusV2"]) {
-      if (pp[k] !== undefined) console.log(`DIAG ${k} =`, JSON.stringify(pp[k]).slice(0, 1800));
-    }
+    const ppForBuild = { ...pp };
+    for (const k of ["cost_models", "costModels", "cost_mdls", "costMdls"]) delete ppForBuild[k];
 
-    // CANDIDATE FIX: drop the fetched cost models so the native lib falls back to its built-in
-    // (standard Conway) cost models, sidestepping any params round-trip that corrupts the script
-    // integrity hash. If the devnet uses standard cost models, the node will accept this.
-    const ppNoCm = { ...pp };
-    for (const k of ["cost_models", "costModels", "cost_mdls", "costMdls"]) delete ppNoCm[k];
+    const result = bridge.quicktx.build(yaml, utxos, ppForBuild, [{ mem: 2000000, steps: 500000000 }]);
+    expect(result.tx_hash.length).toBe(64);
 
-    const built = bridge.quicktx.build(yaml, utxos, ppNoCm, execUnits);
-    expect(built.tx_hash.length).toBe(64);
-
-    const signedTx = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, built.tx_cbor, ["payment"]);
+    const signedTx = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor, ["payment"]);
+    // A successful submit returns the 64-char tx hash; a rejection returns an error body. Assert the
+    // hash so a failed Plutus validation surfaces here, not as a missing asset further down.
     const submitResult = await devkit.submitTx(signedTx);
-    console.log("DIAG no-cost-models submit:", String(submitResult).slice(0, 320));
-    // A successful submit returns the 64-char tx hash; a rejection returns an error body.
     expect(submitResult).toMatch(/^[0-9a-f]{64}$/);
 
     await devkit.waitForBlock(3000);
