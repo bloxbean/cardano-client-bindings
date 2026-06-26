@@ -116,7 +116,7 @@ untouched and the helpers are optional and swappable. This is the sibling of §2
 
 ## 3. Testing
 
-- [ ] `P1` Add JS integration tests for the script/Plutus paths — these are implemented in `wrappers/js/src/index.js` but have **zero** test coverage: `ScriptTxBuilder` validators + redeemers, `collectFromScript`, `mintPlutusAssets`, `readFrom` (reference inputs), and compose-with-`ScriptTx`. Python's `tests/` are the reference for what to assert.
+- [x] `P1` ~~Add JS integration tests for the script/Plutus paths.~~ **Done (and the item's premise was superseded by the TxPlan refactor):** the old fluent `ScriptTxBuilder` / `collectFromScript` / `mintPlutusAssets` / `readFrom` API was deleted — script/Plutus paths are now TxPlan YAML fixtures. Offline (`test/intents.e2e.test.js`): all 20 top-level intents (incl. `reference_input`, `compose`, `native_script`) plus the three `plutus/` fixtures — **mint**, **spend**, and **lock** — each asserting non-empty CBOR + 64-char hash + positive fee, that mint/spend **require** caller-supplied exec units (build throws without them), and that `plutus.dataHash` reproduces the lock fixture's datum hash. Integration (`test/quicktx.integration.test.js`, DevKit): a Plutus-mint **build → sign → submit → assert the minted asset landed on-chain** round-trip, mirroring the Go suite.
 - [ ] `P1` Raise Go and Rust test breadth toward Python's (~100 cases vs ~61); port Python's per-module unit tests.
 - [ ] `P1` Add a cross-wrapper parity test matrix asserting every `@CEntryPoint` is exercised in every language.
 - [ ] `P2` Run the Yaci DevKit integration tests in CI (containerized DevKit) instead of skip-if-not-running.
