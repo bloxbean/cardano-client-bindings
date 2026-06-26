@@ -4,7 +4,7 @@ name: Portable Linux lib (glibc baseline)
 # (oracle/graal#3053), so portability is achieved by building the .so against an OLD glibc baseline:
 # inside manylinux_2_28 the resulting lib references no symbol newer than GLIBC_2.17, so it runs on
 # RHEL/CentOS 7+, Amazon Linux 2, Ubuntu 18.04+, Debian 9+ and every newer distro. See
-# docs/spikes/static-linking.md. This workflow builds it, asserts the glibc floor, and proves it
+# docs/adr/0008-linux-glibc-baseline-portability.md. This builds it, asserts the glibc floor, proves it
 # actually runs on glibc 2.17 (centos:7) — catching any regression that pulls in a newer symbol.
 
 on:
@@ -74,7 +74,7 @@ jobs:
         run: |
           set -eux
           ND=core/build/native/nativeCompile
-          gcc docs/spikes/smoke.c -I"$ND" -L"$ND" -lccl -Wl,-rpath,'$ORIGIN' -o "$ND/smoke"
+          gcc native-test/src/smoke.c -I"$ND" -L"$ND" -lccl -Wl,-rpath,'$ORIGIN' -o "$ND/smoke"
 
       - name: Stage runnable artifact (lib + harness together)
         run: |
