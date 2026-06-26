@@ -138,6 +138,11 @@ curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-brid
 curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-bridge-v0.1.0-linux-x86_64.tar.gz | tar xz -C /usr/local/lib/
 ```
 
+> The Linux `libccl.so` is built against an old **glibc 2.17** baseline (in a `manylinux_2_28`
+> container), so it runs on any glibc ≥ 2.17 — RHEL/CentOS 7+, Amazon Linux 2, Ubuntu 18.04+,
+> Debian 9+, and all newer distros. (It does **not** run on musl-only systems such as Alpine; a
+> musl variant is a possible future addition.) See `docs/spikes/static-linking.md` for the why.
+
 Then set the library path:
 
 ```bash
