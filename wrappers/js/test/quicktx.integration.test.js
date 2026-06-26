@@ -156,15 +156,10 @@ transaction:
   // accepted" alone doesn't prove the script ran and minted — the receiver holding a non-lovelace
   // asset does. Mirrors the Go TestIntegrationPlutusMint.
   //
-  // We build WITHOUT the devnet's fetched cost models, so the native lib uses its built-in standard
-  // Conway cost models (which the devnet runs). Passing DevKit's fetched cost models instead is
-  // rejected with PPViewHashesDontMatch: /epochs/parameters returns them as a map keyed by
-  // zero-padded indices ("000".."165"), and JS's JSON parse reorders the non-padded integer-like
-  // keys ("100".."165") ahead of the padded ones, scrambling the cost-model order vs the ledger's
-  // canonical order and corrupting the script-integrity hash. Go's lexicographic map marshalling
-  // preserves the order, which is why its equivalent test passes with the fetched params. Threading
-  // fetched cost models through to Plutus builds needs an order-preserving fix in the wrapper —
-  // tracked as a follow-up in TODO.md §3.
+  // This passes the devnet's fetched protocol parameters *including* its cost models, exercising the
+  // wrapper's cost-model ordering fix (normalizeCostModels): the devnet returns cost models keyed by
+  // numeric indices, and without the fix JS reorders those keys and the node rejects the tx with
+  // PPViewHashesDontMatch (a script-integrity hash mismatch).
   it("should build, sign, and submit a Plutus mint", async () => {
     if (skip) return;
 
@@ -177,10 +172,7 @@ transaction:
     const pp = await devkit.getProtocolParams();
     const yaml = readFileSync(join(FIXTURES, "plutus", "script_minting.yaml"), "utf8");
 
-    const ppForBuild = { ...pp };
-    for (const k of ["cost_models", "costModels", "cost_mdls", "costMdls"]) delete ppForBuild[k];
-
-    const result = bridge.quicktx.build(yaml, utxos, ppForBuild, [{ mem: 2000000, steps: 500000000 }]);
+    const result = bridge.quicktx.build(yaml, utxos, pp, [{ mem: 2000000, steps: 500000000 }]);
     expect(result.tx_hash.length).toBe(64);
 
     const signedTx = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor, ["payment"]);

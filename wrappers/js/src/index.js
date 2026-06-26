@@ -34,6 +34,44 @@ function cstr(str) {
   return Buffer.from(str + '\0', 'utf-8');
 }
 
+// Protocol-params providers (e.g. Yaci DevKit / Blockfrost-style backends) return Plutus cost models
+// as a map keyed by numeric indices, e.g. {"PlutusV2": {"0": 100788, ..., "165": 10}}. JavaScript
+// object semantics iterate canonical integer-string keys ("100") in ascending order *before*
+// zero-padded ones ("000"), so JSON.stringify emits them out of order. CCL reads the cost-model
+// entries in document order to rebuild the per-language cost array, so this scrambled order yields a
+// wrong script-integrity hash and the node rejects the tx with PPViewHashesDontMatch. (Go/Python are
+// unaffected: Go's json.Marshal sorts keys, and Python preserves the provider's order.)
+//
+// Fix: convert any numerically-keyed language into CCL's ordered `cost_models_raw` array form (a
+// List<Long> CCL consumes directly, in order), which JSON serializes order-stably. Languages with
+// named-operation keys (which JS does not reorder) are left as a cost_models map untouched.
+export function normalizeCostModels(protocolParams) {
+  if (!protocolParams || typeof protocolParams !== 'object') return protocolParams;
+  const costModels = protocolParams.cost_models ?? protocolParams.costModels;
+  if (!costModels || typeof costModels !== 'object') return protocolParams;
+
+  const raw = {};
+  const named = {};
+  let converted = false;
+  for (const [lang, model] of Object.entries(costModels)) {
+    const keys = model && typeof model === 'object' && !Array.isArray(model) ? Object.keys(model) : null;
+    if (keys && keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+      raw[lang] = keys.sort((a, b) => Number(a) - Number(b)).map((k) => model[k]);
+      converted = true;
+    } else {
+      named[lang] = model;
+    }
+  }
+  if (!converted) return protocolParams;
+
+  const out = { ...protocolParams };
+  delete out.cost_models;
+  delete out.costModels;
+  if (Object.keys(named).length > 0) out.cost_models = named;
+  out.cost_models_raw = { ...(protocolParams.cost_models_raw ?? {}), ...raw };
+  return out;
+}
+
 export class CclBridge {
   constructor(libPath) {
     if (!libPath) {
@@ -380,7 +418,7 @@ class QuickTxApi {
       this._b._thread,
       cstr(txplanYaml),
       cstr(JSON.stringify(utxos)),
-      cstr(JSON.stringify(protocolParams)),
+      cstr(JSON.stringify(normalizeCostModels(protocolParams))),
       execUnits != null ? cstr(JSON.stringify(execUnits)) : null,
     );
     // The build result is a YAML document.

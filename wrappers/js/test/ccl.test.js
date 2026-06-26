@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
-import { CclBridge, CclError, MAINNET, TESTNET } from '../src/index.js';
+import { CclBridge, CclError, MAINNET, TESTNET, normalizeCostModels } from '../src/index.js';
 
 // A known valid transaction CBOR hex (built from Java tests)
 const SAMPLE_TX_CBOR = '84a300d901028182582073198b7ad003862b9798106b88fbccfca464b1a38afb34958275c4a7d7d8d002010181825839009493315cd92eb5d8c4304e67b7e16ae36d61d34502694657811a2c8e32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc1a001e8480021a00029810a0f5f6';
@@ -433,5 +433,43 @@ transaction:
 
     it('should reject invalid mnemonic validation', () => {
         expect(bridge.crypto.validateMnemonic('zzz xxx yyy www vvv uuu ttt sss rrr qqq ppp ooo')).toBe(false);
+    });
+});
+
+// normalizeCostModels: numerically-keyed cost models (Yaci DevKit / Blockfrost-style providers) must
+// be converted to the ordered cost_models_raw array form, because JS object iteration reorders the
+// canonical integer-string keys ahead of the zero-padded ones, which would corrupt the Plutus
+// script-integrity hash. See the comment on normalizeCostModels in src/index.js.
+describe('normalizeCostModels', () => {
+    it('converts numeric-keyed cost models to ordered cost_models_raw arrays', () => {
+        // 0..120 inclusive: spans zero-padded keys ("000".."099") and canonical-integer keys
+        // ("100".."120"), which is exactly the pair JS would otherwise reorder.
+        const model = {};
+        for (let i = 0; i <= 120; i++) model[String(i).padStart(3, '0')] = 1000 + i;
+
+        const out = normalizeCostModels({ min_fee_a: 44, cost_models: { PlutusV2: model } });
+
+        // Array is in ascending numeric-key order regardless of the source object's iteration order.
+        expect(out.cost_models_raw.PlutusV2).toHaveLength(121);
+        expect(out.cost_models_raw.PlutusV2[0]).toBe(1000);
+        expect(out.cost_models_raw.PlutusV2[100]).toBe(1100);
+        expect(out.cost_models_raw.PlutusV2[120]).toBe(1120);
+        expect(out.cost_models_raw.PlutusV2).toEqual(
+            Array.from({ length: 121 }, (_, i) => 1000 + i));
+        // The numeric-keyed cost_models map is removed once converted; other params are preserved.
+        expect(out.cost_models).toBeUndefined();
+        expect(out.min_fee_a).toBe(44);
+    });
+
+    it('leaves named-operation cost models (which JS does not reorder) as a cost_models map', () => {
+        const named = { 'addInteger-cpu-arguments-intercept': 205665, 'addInteger-cpu-arguments-slope': 812 };
+        const out = normalizeCostModels({ cost_models: { PlutusV2: named } });
+        expect(out.cost_models.PlutusV2).toEqual(named);
+        expect(out.cost_models_raw).toBeUndefined();
+    });
+
+    it('passes through params with no cost models unchanged', () => {
+        const pp = { min_fee_a: 44, min_fee_b: 155381 };
+        expect(normalizeCostModels(pp)).toEqual(pp);
     });
 });
