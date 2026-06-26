@@ -11,6 +11,10 @@ hand-written mappers (~1,500 LOC) into CCL `Tx`/`ScriptTx`, plus large per-langu
 (~10k LOC) whose only job was to emit that JSON. CCL `0.8.0-pre4` ships **TxPlan** — a first-class YAML
 transaction format that deserializes into CCL's own `AbstractTx` objects and builds offline to CBOR.
 
+The bridge is new and pre-1.0 with, as far as we know, **no production consumers yet**, so we were free
+to replace the transaction format outright rather than evolve it — and doing so now, before adoption, is
+the point at which it costs nothing.
+
 ## Decision
 
 Adopt CCL **TxPlan (YAML)** as the transaction-building input. `ccl_quicktx_build` takes a TxPlan YAML
@@ -25,7 +29,8 @@ path, and all per-language fluent builders; wrappers become thin pass-throughs
 - Wrappers reduce to `build(yaml, utxos, protocolParams, execUnits?)`.
 - Couples us to CCL's TxPlan schema and to a **preview** release (`0.8.0-pre4`) — re-pin when `0.8.0`
   is stable.
-- **Breaking change** for any consumer of the old JSON API (documented in the release PR).
+- The input/output format changed completely, but with no known consumers this was a clean swap, not a
+  migration — and adopting TxPlan pre-1.0 is what spares us a genuinely breaking change later.
 
 ## Alternatives considered
 
