@@ -6,10 +6,12 @@
 
 ## Context
 
-Cardano Client Lib (CCL) is a mature JVM library for Cardano transaction building, crypto, and
-serialization. The non-JVM ecosystems (Python, Go, Rust, JavaScript) had no equivalent. Re-implementing
-CCL in each language would be enormous and impossible to keep correct and in lockstep. We wanted to
-reuse CCL's exact behavior from other languages, with native startup and no JVM at runtime.
+Cardano Client Lib (CCL) is a mature, actively-maintained JVM library for Cardano transaction building,
+crypto, and serialization. Other ecosystems (Python, Go, Rust, JavaScript) rely on their own native
+implementations, which vary in completeness and — as has happened in the Cardano ecosystem — can stop
+being maintained abruptly, leaving downstream users stranded. We wanted a **maintained alternative**
+that reuses CCL's exact, well-tested behavior from other languages, with native startup and no JVM at
+runtime — without having to build and keep four independent reimplementations in lockstep ourselves.
 
 ## Decision
 
@@ -28,7 +30,10 @@ FFI. No JVM is shipped or required at runtime. Data crosses the boundary as C st
 
 ## Alternatives considered
 
-- **Per-language reimplementation** — unmaintainable; correctness drift across four languages.
+- **Rely solely on existing per-language native libraries** — they exist and work, but carry the risk
+  of being abruptly abandoned; CCL Bridge is the maintained fallback. (Building and maintaining our
+  *own* four independent reimplementations would also be a large, duplicated effort with correctness
+  drift across languages.)
 - **JNI / embedded JVM** — ships and runs a JVM; heavy footprint and startup.
 - **REST sidecar service** — network hop, stateful, operational burden; contradicts an offline,
   in-process model ([ADR-0002](0002-offline-stateless-no-provider.md)).
