@@ -17,7 +17,7 @@ task test(type: Exec) {
     environment 'DYLD_LIBRARY_PATH', nativeDir
     environment 'LD_LIBRARY_PATH', nativeDir
 
-    commandLine 'bash', '-c', 'bun install && bun test test/ccl.test.js test/intents.e2e.test.js'
+    commandLine 'bash', '-c', 'bun install && bun test test/ccl.test.js test/intents.e2e.test.js test/providers.test.js'
 }
 
 // Full suite including the DevKit integration tests. Requires a running Yaci DevKit

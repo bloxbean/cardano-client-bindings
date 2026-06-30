@@ -103,6 +103,40 @@ export declare class QuickTxApi {
         protocolParams: object,
         execUnits?: Array<{ mem: number | string; steps: number | string }>,
     ): QuickTxResult;
+
+    /**
+     * Convenience: fetch chain data from a provider and build, in one call. Composes
+     * `provider.utxos(sender)` + `provider.protocolParams()` with {@link build}. The bridge stays
+     * offline — this only moves the optional HTTP fetch into wrapper code.
+     */
+    buildWithProvider(
+        txplanYaml: string,
+        provider: ChainDataProvider,
+        sender: string,
+        execUnits?: Array<{ mem: number | string; steps: number | string }>,
+    ): Promise<QuickTxResult>;
+}
+
+/** Fetches the chain data {@link QuickTxApi.build} needs. Implement to plug in any backend. */
+export interface ChainDataProvider {
+    /** All UTXOs at `address` (no selection — the bridge selects internally). */
+    utxos(address: string): Promise<object[]>;
+    /** Current protocol parameters (CCL ProtocolParams shape). */
+    protocolParams(): Promise<object>;
+}
+
+/** Chain-data provider backed by Yaci DevKit / yaci-store (Blockfrost-style REST). */
+export declare class YaciProvider implements ChainDataProvider {
+    constructor(baseUrl?: string);
+    utxos(address: string): Promise<object[]>;
+    protocolParams(): Promise<object>;
+}
+
+/** Chain-data provider backed by the Blockfrost API. */
+export declare class BlockfrostProvider implements ChainDataProvider {
+    constructor(projectId: string, opts?: { network?: 'mainnet' | 'preprod' | 'preview'; baseUrl?: string });
+    utxos(address: string): Promise<object[]>;
+    protocolParams(): Promise<object>;
 }
 
 export declare const MAINNET: number;

@@ -39,3 +39,24 @@ class QuickTx:
             self._bridge._encode(exec_units_json),
         )
         return yaml.safe_load(self._bridge._check(rc))
+
+    def build_with_provider(self, txplan_yaml, provider, sender, exec_units=None):
+        """Convenience: fetch chain data from ``provider`` and build, in one call.
+
+        Composes ``provider.utxos(sender)`` + ``provider.protocol_params()`` with :meth:`build`.
+        The bridge stays offline — this only moves the optional HTTP fetch into wrapper code. See
+        :mod:`ccl.providers` for available providers (Yaci DevKit, Blockfrost) or implement your own.
+
+        Args:
+            txplan_yaml: the TxPlan YAML string defining the transaction(s).
+            provider: a :class:`ccl.providers.ChainDataProvider` (anything with ``utxos(address)``
+                and ``protocol_params()``).
+            sender: the address whose UTXOs fund the transaction.
+            exec_units: optional Plutus execution units, as for :meth:`build`.
+
+        Returns:
+            dict with ``tx_cbor``, ``tx_hash`` and ``fee``.
+        """
+        utxos = provider.utxos(sender)
+        protocol_params = provider.protocol_params()
+        return self.build(txplan_yaml, utxos, protocol_params, exec_units)

@@ -99,3 +99,20 @@ result = lib.quicktx.build(txplan_yaml, utxos, protocol_params)  # -> {"tx_cbor"
 ```
 
 See [`examples/03_build_and_sign_tx.py`](examples/03_build_and_sign_tx.py).
+
+## Chain-data providers (optional)
+
+`build()` is offline — you supply the UTXOs and protocol parameters. The optional providers fetch
+those for you over HTTP (stdlib `urllib`), so the native library stays offline and provider-free:
+
+```python
+from ccl import CclLib, YaciProvider, BlockfrostProvider
+
+lib = CclLib()
+provider = BlockfrostProvider(project_id, network="preprod")  # or YaciProvider()
+result = lib.quicktx.build_with_provider(txplan_yaml, provider, sender_address)
+```
+
+Plug in any backend (Koios, Ogmios, …) by supplying an object with `utxos(address)` and
+`protocol_params()`. UTXO *selection* is handled inside the bridge — a provider only returns all
+UTXOs at the address.

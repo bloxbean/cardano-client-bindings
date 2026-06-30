@@ -8,6 +8,14 @@ description = "Rust bindings for Cardano Client Lib (CCL) via GraalVM native lib
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+# Only pulled in by the optional `providers` feature (chain-data provider helpers); the core
+# offline build does not require an HTTP client.
+ureq = { version = "2", features = ["json"], optional = true }
+
+[features]
+default = []
+# Optional HTTP chain-data provider helpers (Yaci DevKit, Blockfrost).
+providers = ["dep:ureq"]
 
 [dev-dependencies]
 ureq = { version = "2", features = ["json"] }

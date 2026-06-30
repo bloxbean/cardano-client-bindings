@@ -8,6 +8,8 @@ from ccl.script import Script
 from ccl.governance import Governance
 from ccl.wallet import Wallet
 from ccl.quicktx import QuickTx
+from ccl.providers import ChainDataProvider, YaciProvider, BlockfrostProvider
 
 __all__ = ['CclLib', 'CclError', 'Account', 'Address', 'Crypto', 'Transaction',
-           'Plutus', 'Script', 'Governance', 'Wallet', 'QuickTx']
+           'Plutus', 'Script', 'Governance', 'Wallet', 'QuickTx',
+           'ChainDataProvider', 'YaciProvider', 'BlockfrostProvider']

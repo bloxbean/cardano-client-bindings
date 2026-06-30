@@ -129,3 +129,18 @@ def test_insufficient_funds(ccl_lib, devkit):
     yaml_str = _payment_yaml(sender["base_address"], receiver["base_address"], "100000000")
     with pytest.raises(CclError):
         ccl_lib.quicktx.build(yaml_str, utxos, pp)
+
+
+def test_build_with_yaci_provider(ccl_lib, devkit, funded_sender):
+    """The shipped YaciProvider fetches the devnet's real chain data and feeds build()."""
+    from ccl.providers import YaciProvider
+
+    receiver = ccl_lib.account.create(CclLib.TESTNET)
+    provider = YaciProvider()  # defaults to the local DevKit cluster
+    yaml_str = _payment_yaml(funded_sender["base_address"], receiver["base_address"], "5000000")
+
+    result = ccl_lib.quicktx.build_with_provider(yaml_str, provider, funded_sender["base_address"])
+
+    assert len(result["tx_cbor"]) > 0
+    assert len(result["tx_hash"]) == 64
+    assert int(result["fee"]) > 0

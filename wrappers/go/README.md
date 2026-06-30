@@ -93,3 +93,17 @@ Transactions are built from a [TxPlan](https://github.com/bloxbean/cardano-clien
 **YAML** document via `bridge.QuickTx.Build(yaml, utxos, protocolParams)`, fully offline —
 you supply the UTXOs and protocol parameters. See
 [`examples/transaction`](examples/transaction/main.go).
+
+## Chain-data providers (optional)
+
+`Build` is offline — you supply the UTXOs and protocol parameters. The optional providers fetch those
+for you over HTTP (stdlib `net/http`), so the native library stays offline and provider-free:
+
+```go
+provider, _ := ccl.NewBlockfrostProvider(projectID, "preprod") // or ccl.NewYaciProvider("")
+result, err := bridge.QuickTx.BuildWithProvider(yaml, provider, senderAddress)
+```
+
+Plug in any backend (Koios, Ogmios, …) by implementing the `ccl.ChainDataProvider` interface
+(`Utxos(address)`, `ProtocolParams()`). UTXO *selection* is handled inside the bridge — a provider
+only returns all UTXOs at the address.

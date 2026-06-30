@@ -9,7 +9,7 @@
 //     DYLD_LIBRARY_PATH=../../core/build/native/nativeCompile bun test test/quicktx.integration.test.js
 
 import { describe, it, expect, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
-import { CclBridge, TESTNET } from "../src/index.js";
+import { CclBridge, TESTNET, YaciProvider } from "../src/index.js";
 import { DevKitHelper } from "./devkit-helper.js";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
@@ -136,6 +136,22 @@ transaction:
     await devkit.waitForBlock(3000);
     const r1Utxos = await devkit.getUtxos(r1.base_address);
     expect(totalLovelace(r1Utxos)).toBe(3_000_000);
+  });
+
+  it("builds via a YaciProvider (buildWithProvider) against the live devnet", async () => {
+    if (skip) return;
+
+    const sender = await fundSender();
+    const receiver = bridge.account.create(TESTNET);
+
+    // The shipped provider fetches the devnet's real UTXOs + protocol params and feeds build().
+    const provider = new YaciProvider();
+    const yaml = paymentYaml(sender.base_address, receiver.base_address, "5000000");
+    const result = await bridge.quicktx.buildWithProvider(yaml, provider, sender.base_address);
+
+    expect(result.tx_cbor.length).toBeGreaterThan(0);
+    expect(result.tx_hash.length).toBe(64);
+    expect(Number(result.fee)).toBeGreaterThan(0);
   });
 
   it("should throw on insufficient funds", async () => {
