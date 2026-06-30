@@ -32,3 +32,4 @@ undo them.
 | [0007](0007-caller-supplied-plutus-exec-units.md) | Plutus execution units are caller-supplied; evaluator-agnostic | Accepted | 2026-06-11 |
 | [0008](0008-linux-glibc-baseline-portability.md) | Linux portability — glibc-baseline build + `-march=compatibility` (not static) | Accepted | 2026-06-25 |
 | [0010](0010-go-isolate-thread-affinity.md) | Go wrapper isolate thread-affinity — all FFI on one dedicated OS thread | Accepted | 2026-06-10 |
+| [0011](0011-wrapper-side-chain-data-providers.md) | Wrapper-side chain-data provider helpers (UTxOs + protocol params) | Accepted | 2026-06-30 |
