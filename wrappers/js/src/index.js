@@ -45,6 +45,12 @@ function cstr(str) {
 // Fix: convert any numerically-keyed language into CCL's ordered `cost_models_raw` array form (a
 // List<Long> CCL consumes directly, in order), which JSON serializes order-stably. Languages with
 // named-operation keys (which JS does not reorder) are left as a cost_models map untouched.
+//
+// Root cause is upstream: CCL's CostModelUtil.getCostModelFromProtocolParams only numeric-sorts
+// cost_models when the unpadded keys "0"/"1" are present, so zero-padded keys ("000"..) fall back to
+// document order. Tracked in bloxbean/cardano-client-lib#633 — once that lands and we upgrade CCL,
+// this workaround can be removed (the Plutus-mint DevKit test, which passes the real fetched cost
+// models, guards that removal).
 export function normalizeCostModels(protocolParams) {
   if (!protocolParams || typeof protocolParams !== 'object') return protocolParams;
   const costModels = protocolParams.cost_models ?? protocolParams.costModels;
