@@ -215,9 +215,19 @@ transaction:
 
     const utxos = await devkit.getUtxos(INTENT_SENDER);
     const pp = await devkit.getProtocolParams();
-    // DIAG: does this DevKit version emit the preferred cost_models_raw form?
-    console.log("DIAG has cost_models_raw:", !!pp.cost_models_raw,
+    // DIAG: does the DevKit :10000 proxy emit the preferred cost_models_raw form?
+    console.log("DIAG proxy(:10000) has cost_models_raw:", !!pp.cost_models_raw,
       pp.cost_models_raw ? Object.keys(pp.cost_models_raw).join("+") : "");
+    // DIAG: does yaci-store's own API (:8080) emit cost_models_raw?
+    try {
+      const s = await fetch("http://localhost:8080/api/v1/epochs/latest/parameters");
+      const sp = await s.json();
+      console.log("DIAG store(:8080) status:", s.status,
+        "cost keys:", Object.keys(sp).filter((k) => k.toLowerCase().includes("cost")).join(","),
+        "has cost_models_raw:", !!sp.cost_models_raw);
+    } catch (e) {
+      console.log("DIAG store(:8080) fetch error:", e.message);
+    }
     const yaml = readFileSync(join(FIXTURES, "plutus", "script_minting.yaml"), "utf8");
 
     const result = bridge.quicktx.build(yaml, utxos, pp, [{ mem: 2000000, steps: 500000000 }]);
