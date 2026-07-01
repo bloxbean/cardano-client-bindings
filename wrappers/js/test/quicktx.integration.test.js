@@ -170,6 +170,10 @@ transaction:
 
     const utxos = await devkit.getUtxos(INTENT_SENDER);
     const pp = await devkit.getProtocolParams();
+    // DIAG: does this DevKit version emit the preferred cost_models_raw form?
+    console.log("DIAG cost keys:", Object.keys(pp).filter((k) => k.toLowerCase().includes("cost")).join(","));
+    console.log("DIAG has cost_models_raw:", !!pp.cost_models_raw,
+      pp.cost_models_raw ? Object.keys(pp.cost_models_raw).join("+") : "");
     const yaml = readFileSync(join(FIXTURES, "plutus", "script_minting.yaml"), "utf8");
 
     const result = bridge.quicktx.build(yaml, utxos, pp, [{ mem: 2000000, steps: 500000000 }]);

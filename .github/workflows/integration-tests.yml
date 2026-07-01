@@ -31,7 +31,10 @@ jobs:
         run: python3 -m pip install --break-system-packages pytest pyyaml
 
       - name: Install Yaci DevKit
-        run: npm install -g @bloxbean/yaci-devkit
+        # Pinned for reproducible integration runs. 0.12.x is the current pre-release line whose
+        # yaci-store emits cost_models_raw (the preferred, ordered cost-model form); the long-stale
+        # 0.10.6 `latest` tag does not.
+        run: npm install -g @bloxbean/yaci-devkit@0.12.0-beta5
 
       # Start the devnet in the background; it warms up while the native lib builds.
       - name: Start Yaci DevKit
