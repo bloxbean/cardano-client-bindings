@@ -1,0 +1,139 @@
+name: Publish Python wheels
+
+# Builds one platform wheel per supported target (each bundling that platform's libccl.*), attaches
+# them to the GitHub release, and — when enabled by an admin — publishes them to PyPI via Trusted
+# Publishing. See docs/adr/0012-native-lib-bundled-in-wrapper-packages.md.
+#
+# Triggers:
+#   - a version tag (v*)   -> build + attach to the release + (gated) publish to PyPI
+#   - workflow_dispatch    -> build the wheels as artifacts only (validation; never publishes)
+#
+# Enabling PyPI (admin, one-time):
+#   1. Create the `ccl` project on PyPI and register this repo+workflow as a Trusted Publisher
+#      (https://docs.pypi.org/trusted-publishers/).
+#   2. Set repository variable `PYPI_PUBLISH=true` (Settings -> Secrets and variables -> Actions -> Variables).
+#   Until then the publish step is skipped; wheels are still produced + attached to releases.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  # macOS (arm64 + Intel) and Windows: wheels tag correctly from the build platform, no retag needed.
+  wheels-native:
+    name: wheel (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-aarch64
+          - os: macos-13
+            platform: macos-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25.0.3'
+          distribution: 'graalvm'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install build tooling
+        shell: bash
+        run: python -m pip install --upgrade build wheel
+      - name: Build the wheel (bundles the native lib)
+        shell: bash
+        run: ./gradlew :wrappers:python:wheel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: wrappers/python/dist/*.whl
+
+  # Linux: build in an OLD-glibc container (manylinux_2_28) so the bundled .so keeps its glibc-2.17
+  # baseline (ADR-0008), then relabel the wheel's platform tag from linux_* to manylinux_2_28_* — the
+  # lib is manylinux-compliant by construction (its glibc floor is continuously proven by
+  # portable-linux-lib.yml), so this is a valid retag, not a claim.
+  wheels-linux:
+    name: wheel (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+            image: quay.io/pypa/manylinux_2_28_x86_64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
+            manylinux_tag: manylinux_2_28_x86_64
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-aarch64_bin.tar.gz
+            manylinux_tag: manylinux_2_28_aarch64
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure build prerequisites
+        run: dnf install -y zlib-devel || true
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz "${{ matrix.graalvm_url }}"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+      - name: Set up Python (manylinux) + build tooling
+        run: |
+          set -eux
+          echo "/opt/python/cp311-cp311/bin" >> "$GITHUB_PATH"
+          /opt/python/cp311-cp311/bin/python -m pip install --upgrade build wheel
+          ln -sf /opt/python/cp311-cp311/bin/python3 /usr/local/bin/python3
+      - name: Build the wheel (bundles the native lib)
+        run: ./gradlew :wrappers:python:wheel --no-daemon --stacktrace
+      - name: Relabel wheel -> manylinux
+        run: |
+          set -eux
+          cd wrappers/python/dist
+          python -m wheel tags --platform-tag ${{ matrix.manylinux_tag }} --remove ./*.whl
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: wrappers/python/dist/*.whl
+
+  publish:
+    needs: [wheels-native, wheels-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach wheels to the GitHub release
+      id-token: write    # PyPI Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: List collected wheels
+        run: ls -la dist
+
+      # On a tag, attach the wheels to the GitHub release so `pip install <url>` works with no PyPI.
+      - name: Attach wheels to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl
+
+      # Publish to PyPI — only on a tag AND when an admin has enabled it (see header). Trusted
+      # Publishing means no stored token; the `id-token: write` permission above authenticates via OIDC.
+      - name: Publish to PyPI (Trusted Publishing)
+        if: startsWith(github.ref, 'refs/tags/') && vars.PYPI_PUBLISH == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
