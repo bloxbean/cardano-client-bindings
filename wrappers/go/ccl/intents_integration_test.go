@@ -170,12 +170,53 @@ func TestIntegrationDonation(t *testing.T) {
 	skipIfNoDevKit(t)
 	// Conway requires a treasury-donation tx to declare the node's *current* treasury value, which
 	// the ledger validates exactly (ConwayTreasuryValueMismatch otherwise). The donation.yaml fixture
-	// hardcodes current_treasury_value: 0 — correct on the old empty-treasury devnet, but Yaci DevKit
-	// 0.12's node carries a non-zero, dynamic treasury a static fixture can't match. The offline
-	// donation *build* is still covered by the intents build tests; re-enable this submit once the
-	// suite can fetch the live treasury value and inject it. See TODO §3.
-	t.Skip("donation submit needs the live Conway treasury value (DevKit 0.12 has non-zero treasury)")
-	buildSignSubmit(t, "donation.yaml", nil, "payment")
+	// hardcodes current_treasury_value: 0 — fine on an empty-treasury devnet, but DevKit 0.12's node
+	// carries a non-zero treasury. Fetch the live value and inject it. The treasury only moves at
+	// epoch boundaries, so retry across one in case it advances between build and submit.
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	pp := devnetPP(t)
+	baseYaml := readIntentFixture(t, "donation.yaml")
+
+	var lastErr error
+	for attempt := 1; attempt <= 4; attempt++ {
+		treasury, err := devkitGetTreasury()
+		if err != nil {
+			t.Fatalf("get treasury: %v", err)
+		}
+		yaml := strings.Replace(baseYaml, "current_treasury_value: 0",
+			fmt.Sprintf("current_treasury_value: %d", treasury), 1)
+
+		result, err := bridge.QuickTx.Build(yaml, utxos, pp)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, "payment")
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		if txHash, err := devkitSubmitTx(signed); err == nil {
+			if len(txHash) == 0 {
+				t.Fatal("empty tx hash from submit")
+			}
+			return // accepted
+		} else {
+			lastErr = err
+			if !strings.Contains(err.Error(), "TreasuryValueMismatch") {
+				t.Fatalf("submit: %v", err) // an unrelated failure
+			}
+			waitForBlock() // treasury may have advanced an epoch; refetch and retry
+		}
+	}
+	t.Fatalf("donation submit failed after retries: %v", lastErr)
 }
 
 func TestIntegrationInfoProposal(t *testing.T) {
