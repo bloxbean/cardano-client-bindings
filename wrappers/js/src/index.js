@@ -39,16 +39,22 @@ function cstr(str) {
 // Per upstream guidance (bloxbean/cardano-client-lib#633), `cost_models_raw` — a per-language ordered
 // list of costs that CCL consumes directly — is the preferred way to carry cost models. The map form
 // `cost_models` is deprecated: after recent cost-model changes its entries are no longer ordered, so
-// relying on their order is unsafe. Chain-data providers (Yaci DevKit, Blockfrost, ...) increasingly
-// return `cost_models_raw`, so when it is present we pass the params straight through.
+// relying on their order is unsafe. Providers that already return `cost_models_raw` (e.g. real
+// Blockfrost, and yaci-store's own API) pass straight through here untouched.
 //
-// Only when a provider returns *just* the deprecated `cost_models` (as a map keyed by numeric
-// indices) do we convert it here: JavaScript object semantics iterate canonical integer-string keys
-// ("100") ahead of zero-padded ones ("000"), so JSON.stringify would emit the map out of order and
-// the node would reject Plutus txs with PPViewHashesDontMatch. We sort by numeric key and emit
+// Only when a provider returns *just* the deprecated `cost_models` (a map keyed by numeric indices)
+// do we convert it here: JavaScript object semantics iterate canonical integer-string keys ("100")
+// ahead of zero-padded ones ("000"), so JSON.stringify would emit the map out of order and the node
+// would reject Plutus txs with PPViewHashesDontMatch. We sort by numeric key and emit
 // `cost_models_raw`, which serializes order-stably. (Go/Python are unaffected: Go's json.Marshal
 // sorts keys, Python preserves the provider's order.) Languages with named-operation keys (which JS
 // does not reorder) are left as a `cost_models` map untouched.
+//
+// This conversion is still load-bearing because the endpoint our tests/provider-helpers use — the
+// Yaci DevKit :10000 local-cluster proxy — returns numeric `cost_models` only (empirically verified:
+// no `cost_models_raw`), even though the DevKit's own yaci-store serves the ordered form on :8080.
+// Remove this whole function once every endpoint we fetch params from returns `cost_models_raw` —
+// tracked in bloxbean/ccl-bridge#11.
 export function normalizeCostModels(protocolParams) {
   if (!protocolParams || typeof protocolParams !== 'object') return protocolParams;
 
