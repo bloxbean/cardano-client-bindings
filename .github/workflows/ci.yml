@@ -27,7 +27,7 @@ jobs:
           go-version: 'stable'
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Python test deps
-        run: python3 -m pip install --break-system-packages pytest pyyaml
+        run: python3 -m pip install --break-system-packages pytest pyyaml build
       - name: Build native library
         run: ./gradlew :core:nativeCompile
       - name: Run JVM tests
@@ -36,6 +36,16 @@ jobs:
         run: ./gradlew :native-test:test
       - name: Run Python tests
         run: ./gradlew :wrappers:python:test
+      # Prove the bundled wheel actually works: build it (lib staged into ccl/_libs/), install it
+      # into a clean venv, and load the native lib with NO CCL_LIB_PATH / library-path env vars.
+      - name: Build & verify the bundled Python wheel
+        run: |
+          set -eux
+          ./gradlew :wrappers:python:wheel
+          python3 -m venv "$RUNNER_TEMP/wheelvenv"
+          "$RUNNER_TEMP/wheelvenv/bin/pip" install --quiet wrappers/python/dist/ccl-*.whl
+          cd "$RUNNER_TEMP" && env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+            "$RUNNER_TEMP/wheelvenv/bin/python" -c "import ccl; assert ccl.CclLib().version(); ccl.CclLib().account.create(ccl.CclLib.TESTNET); print('bundled wheel OK, no CCL_LIB_PATH')"
       - name: Run Go tests
         run: ./gradlew :wrappers:go:test
       - name: Run Rust tests
