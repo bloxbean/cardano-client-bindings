@@ -92,7 +92,16 @@ The fix keeps the **native lib provider-free** (offline stays offline) and adds 
 untouched and the helpers are optional and swappable. This is the sibling of §2b: §2b obtains the
 *exec units*; this obtains the *UTXOs + protocol parameters*. Together they cover all three inputs.
 
-- [ ] `P1` **Optional per-wrapper chain-data provider helpers (UTXOs + protocol params).** A thin,
+- [x] `P1` ~~**Optional per-wrapper chain-data provider helpers (UTXOs + protocol params).**~~ **Done
+  (all four wrappers).** Each ships a `ChainDataProvider` interface (`utxos(address)` /
+  `protocol_params()`) plus `YaciProvider` (DevKit/yaci-store, CI-tested live) and `BlockfrostProvider`
+  (project-id header, pagination, address injection; unit-tested against mock servers — not live in
+  CI), and a `build_with_provider(yaml, provider, sender, exec_units?)` convenience on the QuickTx
+  API. The native lib stays offline/provider-free: helpers are pure wrapper code using each
+  language's own HTTP client (urllib / net/http / Bun fetch / ureq). Rust gates it behind a
+  `providers` feature so the core crate needs no HTTP client. Cost models from these providers flow
+  through the JS cost-model normalization (see §3). Original spec for reference:
+  A thin,
   optional helper in Python/Go/Rust/JS that fetches the data `build()` needs and returns it in the
   exact shape the wrapper already accepts, e.g.:
   ```

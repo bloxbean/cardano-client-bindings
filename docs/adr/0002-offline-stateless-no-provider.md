@@ -24,8 +24,10 @@ using each language's own HTTP client — never inside `libccl`.
 
 - Deterministic, easily testable; no secrets or keys to manage inside the library.
 - Submission/broadcast is the caller's responsibility, with their own client.
-- Callers must obtain UTxOs / params / exec units themselves — friction, mitigated by planned
-  wrapper-side helpers (TODO §2b exec-unit evaluators, §2c chain-data providers).
+- Callers must obtain UTxOs / params / exec units themselves — friction, mitigated by wrapper-side
+  helpers: chain-data providers (UTxOs + protocol params) are **implemented** in all four wrappers
+  ([ADR-0011](0011-wrapper-side-chain-data-providers.md)); exec-unit evaluators are still planned
+  (TODO §2b). The native lib remains untouched.
 - No lazy fetching; integration tests pass static data in.
 
 ## Alternatives considered

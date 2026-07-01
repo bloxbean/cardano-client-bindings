@@ -82,3 +82,24 @@ let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params)?; // -> TxR
 
 Network IDs: `network::MAINNET` (0), `network::TESTNET` (1), `network::PREPROD` (2),
 `network::PREVIEW` (3). Errors are `ccl::CclError`.
+
+## Chain-data providers (optional)
+
+`build` is offline — you supply the UTXOs and protocol parameters. Enable the `providers` feature for
+optional HTTP helpers (via `ureq`) that fetch those for you, keeping the native library offline and
+provider-free:
+
+```toml
+ccl = { version = "0.1", features = ["providers"] }
+```
+
+```rust
+use ccl::providers::BlockfrostProvider; // or YaciProvider
+
+let provider = BlockfrostProvider::new("proj_id", "preprod")?; // or YaciProvider::default()
+let result = bridge.quicktx().build_with_provider(&yaml, &provider, sender, None)?;
+```
+
+Plug in any backend (Koios, Ogmios, …) by implementing the `ChainDataProvider` trait (`utxos`,
+`protocol_params`). UTXO *selection* is handled inside the bridge — a provider only returns all
+UTXOs at the address.

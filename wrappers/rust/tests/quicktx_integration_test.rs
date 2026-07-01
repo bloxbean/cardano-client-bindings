@@ -260,6 +260,32 @@ fn test_integration_insufficient_funds() {
     assert!(result.is_err(), "expected insufficient funds error");
 }
 
+// The shipped YaciProvider fetches the devnet's real chain data and feeds build via
+// build_with_provider.
+#[cfg(feature = "providers")]
+#[test]
+fn test_integration_build_with_yaci_provider() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
+
+    let bridge = Bridge::new().expect("create bridge");
+    let (sender, _mnemonic) = fund_sender(&bridge, 150);
+    let (receiver, _, _) = get_testnet_account(&bridge);
+
+    let provider = ccl::providers::YaciProvider::default(); // local DevKit cluster
+    let yaml = payment_yaml(&sender, &receiver, "5000000");
+    let result = bridge
+        .quicktx()
+        .build_with_provider(&yaml, &provider, &sender, None)
+        .expect("build_with_provider failed");
+
+    assert!(!result.tx_cbor.is_empty());
+    assert_eq!(result.tx_hash.len(), 64);
+}
+
 // The fixed test account the quicktx-intents fixtures are derived from (account 0/0).
 const INTENT_MNEMONIC: &str = "test walk nut penalty hip pave soap entry language right filter choice";
 const INTENT_SENDER: &str = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp";

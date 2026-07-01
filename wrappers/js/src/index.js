@@ -3,6 +3,9 @@ import path from 'path';
 import os from 'os';
 import { parse as parseYaml } from 'yaml';
 
+// Optional chain-data provider helpers (re-exported for convenience).
+export { ChainDataProvider, YaciProvider, BlockfrostProvider } from './providers.js';
+
 // Error codes
 export const CCL_SUCCESS = 0;
 export const CCL_ERROR_GENERAL = -1;
@@ -414,7 +417,7 @@ class WalletApi {
   }
 }
 
-class QuickTxApi {
+export class QuickTxApi {
   constructor(bridge) {
     this._b = bridge;
   }
@@ -441,5 +444,25 @@ class QuickTxApi {
     );
     // The build result is a YAML document.
     return parseYaml(this._b._check(rc));
+  }
+
+  /**
+   * Convenience: fetch chain data from a provider and build, in one call.
+   *
+   * Composes `provider.utxos(sender)` + `provider.protocolParams()` with {@link QuickTxApi#build}.
+   * The bridge stays offline — this only moves the optional HTTP fetch into wrapper code. See
+   * `src/providers.js` for available providers (Yaci DevKit, Blockfrost) or supply your own object
+   * with `utxos(address)` and `protocolParams()`.
+   *
+   * @param {string} txplanYaml - the TxPlan YAML document defining the transaction(s).
+   * @param {{utxos: (a: string) => Promise<object[]>, protocolParams: () => Promise<object>}} provider
+   * @param {string} sender - the address whose UTXOs fund the transaction.
+   * @param {Array<{mem: (number|string), steps: (number|string)}>} [execUnits]
+   * @returns {Promise<{tx_cbor: string, tx_hash: string, fee: string}>}
+   */
+  async buildWithProvider(txplanYaml, provider, sender, execUnits = null) {
+    const utxos = await provider.utxos(sender);
+    const protocolParams = await provider.protocolParams();
+    return this.build(txplanYaml, utxos, protocolParams, execUnits);
   }
 }

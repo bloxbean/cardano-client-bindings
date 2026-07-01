@@ -81,3 +81,21 @@ const result = bridge.quicktx.build(yaml, utxos, protocolParams); // { tx_cbor, 
 ```
 
 See [`examples/transaction.js`](examples/transaction.js).
+
+## Chain-data providers (optional)
+
+`build()` is offline — you supply the UTXOs and protocol parameters. The optional providers fetch
+those for you over HTTP (Bun's built-in `fetch`), so the native library stays offline and
+provider-free:
+
+```js
+import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/ccl";
+
+const bridge = new CclBridge();
+const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
+const result = await bridge.quicktx.buildWithProvider(yaml, provider, senderAddress);
+```
+
+Plug in any backend (Koios, Ogmios, …) by supplying an object with `utxos(address)` and
+`protocolParams()`. UTXO *selection* is handled inside the bridge — a provider only returns all
+UTXOs at the address.
