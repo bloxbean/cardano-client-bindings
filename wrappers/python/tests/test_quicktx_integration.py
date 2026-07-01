@@ -8,6 +8,7 @@ Run with:
     PYTHONPATH=wrappers/python CCL_LIB_PATH=core/build/native/nativeCompile \
         pytest wrappers/python/tests/test_quicktx_integration.py -v
 """
+import re
 import time
 from pathlib import Path
 
@@ -138,10 +139,23 @@ def test_insufficient_funds(ccl_lib, devkit):
 
 
 def test_donation_treasury(ccl_lib, devkit):
-    """Treasury donation: Conway validates the tx's declared current_treasury_value against the
-    node's live treasury. Read the current value from yaci-store's /network endpoint and declare
-    exactly that. The treasury only moves at epoch boundaries, so retry (re-reading) if one lands
-    between build and submit.
+    """Submit a treasury donation.
+
+    Conway validates the tx's declared current_treasury_value against the node's live ledger treasury
+    *exactly* (ConwayTreasuryValueMismatch otherwise), so the donation.yaml fixture's hardcoded
+    current_treasury_value: 0 no longer works on Yaci DevKit 0.12 (non-zero, epoch-varying treasury).
+
+    We deliberately do NOT read the treasury from an endpoint and declare it — and not for lack of
+    trying. The obvious "clean" design was to read yaci-store's /network endpoint
+    (http://localhost:8080/api/v1/network -> supply.treasury) and submit that exact value. It does not
+    work reliably: yaci-store computes the treasury off-chain and its value drifts from the node's
+    ledger — in CI it returned 21,599,698,134,578 while the node held 43,186,776,312,112 (an epoch of
+    indexing lag), so the fetched value was rejected. The node is the sole authority on its own
+    treasury, and the only channel that reports its exact current value is the rejection itself.
+
+    So: submit, read "expected: Coin N" out of the ConwayTreasuryValueMismatch, rebuild with N, and
+    resubmit. Retrying also absorbs an epoch boundary landing between attempts. The offline donation
+    build is covered separately by the intents build tests.
     """
     devkit.reset()
     devkit.wait_for_block(3)
@@ -152,9 +166,9 @@ def test_donation_treasury(ccl_lib, devkit):
     pp = devkit.get_protocol_params()
     base_yaml = (FIXTURES / "donation.yaml").read_text()
 
+    treasury = "0"
     last_err = None
     for _ in range(5):
-        treasury = devkit.get_treasury()
         yaml_str = base_yaml.replace("current_treasury_value: 0", f"current_treasury_value: {treasury}")
         result = ccl_lib.quicktx.build(yaml_str, utxos, pp)
         signed = ccl_lib.account.sign_tx(INTENT_MNEMONIC, result["tx_cbor"], CclLib.TESTNET, 0, 0)
@@ -164,7 +178,8 @@ def test_donation_treasury(ccl_lib, devkit):
             return  # accepted
         except RuntimeError as e:
             last_err = str(e)
-            if "TreasuryValueMismatch" not in last_err:
+            m = re.search(r"expected:\s*Coin\s*(\d+)", last_err)
+            if not m:
                 raise
-            devkit.wait_for_block(3)  # epoch may have advanced; re-read treasury and retry
+            treasury = m.group(1)
     raise AssertionError(f"donation submit failed after retries: {last_err}")

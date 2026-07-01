@@ -87,22 +87,17 @@ fn devkit_get_tx(tx_hash: &str) -> Option<Value> {
     }
 }
 
-// yaci-store's own API (a separate port from the devkit local-cluster API) exposes network/supply
-// info the local-cluster API does not.
-const STORE_API_URL: &str = "http://localhost:8080/api/v1";
-
-// Current treasury value (lovelace) from yaci-store's /network endpoint; a Conway donation tx must
-// declare this exact value.
-fn devkit_get_treasury() -> String {
-    let resp = ureq::get(&format!("{}/network", STORE_API_URL))
-        .call()
-        .expect("Failed to get network info");
-    let v: Value = resp.into_json().expect("Invalid network JSON");
-    let t = &v["supply"]["treasury"];
-    t.as_u64()
-        .map(|n| n.to_string())
-        .or_else(|| t.as_str().map(|s| s.to_string()))
-        .expect("treasury value")
+// Pull the expected treasury value out of a Conway ConwayTreasuryValueMismatch rejection, e.g.
+// "... expected: Coin 43186776312112}".
+fn parse_expected_treasury(submit_err: &str) -> Option<String> {
+    let idx = submit_err.find("expected: Coin ")?;
+    let rest = &submit_err[idx + "expected: Coin ".len()..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits)
+    }
 }
 
 // Submit that returns the error body instead of panicking, so callers can inspect a rejection (ureq
@@ -269,10 +264,23 @@ fn test_integration_insufficient_funds() {
 const INTENT_MNEMONIC: &str = "test walk nut penalty hip pave soap entry language right filter choice";
 const INTENT_SENDER: &str = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp";
 
-// Treasury donation: Conway validates the tx's declared current_treasury_value against the node's
-// live treasury. Read the current value from yaci-store's /network endpoint and declare exactly
-// that. The treasury only moves at epoch boundaries, so retry (re-reading) if one lands between
-// build and submit.
+// Submit a treasury donation.
+//
+// Conway validates the tx's declared current_treasury_value against the node's live ledger treasury
+// *exactly* (ConwayTreasuryValueMismatch otherwise), so the donation.yaml fixture's hardcoded
+// current_treasury_value: 0 no longer works on Yaci DevKit 0.12 (non-zero, epoch-varying treasury).
+//
+// We deliberately do NOT read the treasury from an endpoint and declare it — and not for lack of
+// trying. The obvious "clean" design was to read yaci-store's /network endpoint
+// (http://localhost:8080/api/v1/network -> supply.treasury) and submit that exact value. It does not
+// work reliably: yaci-store computes the treasury off-chain and its value drifts from the node's
+// ledger — in CI it returned 21,599,698,134,578 while the node held 43,186,776,312,112 (an epoch of
+// indexing lag), so the fetched value was rejected. The node is the sole authority on its own
+// treasury, and the only channel that reports its exact current value is the rejection itself.
+//
+// So: submit, read "expected: Coin N" out of the ConwayTreasuryValueMismatch, rebuild with N, and
+// resubmit. Retrying also absorbs an epoch boundary landing between attempts. The offline donation
+// build is covered separately by the intents build tests.
 #[test]
 fn test_integration_donation_treasury() {
     if skip_if_no_devkit() {
@@ -289,9 +297,9 @@ fn test_integration_donation_treasury() {
     let base_yaml = std::fs::read_to_string("../../test-fixtures/quicktx-intents/donation.yaml")
         .expect("read donation fixture");
 
+    let mut treasury = String::from("0");
     let mut last_err = String::new();
     for _ in 0..5 {
-        let treasury = devkit_get_treasury();
         let yaml = base_yaml.replace(
             "current_treasury_value: 0",
             &format!("current_treasury_value: {}", treasury),
@@ -308,12 +316,10 @@ fn test_integration_donation_treasury() {
             }
             Err(e) => {
                 last_err = e;
-                assert!(
-                    last_err.contains("TreasuryValueMismatch"),
-                    "unexpected submit error: {}",
-                    last_err
-                );
-                wait_for_block(); // epoch may have advanced; re-read treasury and retry
+                match parse_expected_treasury(&last_err) {
+                    Some(v) => treasury = v,
+                    None => panic!("unexpected submit error: {}", last_err),
+                }
             }
         }
     }

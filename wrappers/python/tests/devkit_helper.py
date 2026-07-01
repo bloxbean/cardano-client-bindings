@@ -8,16 +8,13 @@ import urllib.request
 import urllib.error
 
 DEVKIT_URL = "http://localhost:10000/local-cluster/api"
-# yaci-store's own API (separate port from the devkit local-cluster API) exposes network/supply info.
-STORE_API_URL = "http://localhost:8080/api/v1"
 
 
 class DevKitHelper:
     """Helper class for interacting with Yaci DevKit local cluster."""
 
-    def __init__(self, base_url=DEVKIT_URL, store_url=STORE_API_URL):
+    def __init__(self, base_url=DEVKIT_URL):
         self.base_url = base_url
-        self.store_url = store_url
 
     def reset(self):
         """Reset the devnet to initial state."""
@@ -67,16 +64,6 @@ class DevKitHelper:
         url = f"{self.base_url}/epochs/parameters"
         with urllib.request.urlopen(url) as resp:
             return json.loads(resp.read())
-
-    def get_treasury(self):
-        """Current treasury value (lovelace) from yaci-store's /network endpoint.
-
-        A Conway donation tx must declare this exact value.
-        """
-        url = f"{self.store_url}/network"
-        with urllib.request.urlopen(url) as resp:
-            data = json.loads(resp.read())
-        return int(data["supply"]["treasury"])
 
     def submit_tx(self, tx_cbor_hex):
         """Submit a signed transaction (CBOR hex string).

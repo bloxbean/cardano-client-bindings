@@ -4,13 +4,10 @@
  */
 
 const DEVKIT_URL = "http://localhost:10000/local-cluster/api";
-// yaci-store's own API (separate port from the devkit local-cluster API) exposes network/supply info.
-const STORE_API_URL = "http://localhost:8080/api/v1";
 
 export class DevKitHelper {
-  constructor(baseUrl = DEVKIT_URL, storeUrl = STORE_API_URL) {
+  constructor(baseUrl = DEVKIT_URL) {
     this.baseUrl = baseUrl;
-    this.storeUrl = storeUrl;
   }
 
   async reset() {
@@ -50,15 +47,6 @@ export class DevKitHelper {
   async getProtocolParams() {
     const resp = await fetch(`${this.baseUrl}/epochs/parameters`);
     return resp.json();
-  }
-
-  // Current treasury value (lovelace) from yaci-store's /network endpoint; a Conway donation tx must
-  // declare this exact value.
-  async getTreasury() {
-    const resp = await fetch(`${this.storeUrl}/network`);
-    if (!resp.ok) throw new Error(`get network failed: HTTP ${resp.status}`);
-    const data = await resp.json();
-    return String(data.supply.treasury);
   }
 
   async submitTx(txCborHex) {
