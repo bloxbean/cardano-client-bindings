@@ -87,6 +87,40 @@ fn devkit_get_tx(tx_hash: &str) -> Option<Value> {
     }
 }
 
+// Pull the expected treasury value out of a Conway ConwayTreasuryValueMismatch rejection, e.g.
+// "... expected: Coin 43186776312112}".
+fn parse_expected_treasury(submit_err: &str) -> Option<String> {
+    let idx = submit_err.find("expected: Coin ")?;
+    let rest = &submit_err[idx + "expected: Coin ".len()..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits)
+    }
+}
+
+// Submit that returns the error body instead of panicking, so callers can inspect a rejection (ureq
+// treats 4xx/5xx as Err by default).
+fn devkit_try_submit(tx_cbor_hex: &str) -> Result<String, String> {
+    let tx_bytes = hex::decode(tx_cbor_hex).map_err(|e| e.to_string())?;
+    match ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
+        .set("Content-Type", "application/cbor")
+        .send_bytes(&tx_bytes)
+    {
+        Ok(resp) => Ok(resp
+            .into_string()
+            .unwrap_or_default()
+            .trim()
+            .trim_matches('"')
+            .to_string()),
+        Err(ureq::Error::Status(code, resp)) => {
+            Err(format!("submit failed ({}): {}", code, resp.into_string().unwrap_or_default()))
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn wait_for_block() {
     thread::sleep(Duration::from_secs(3));
 }
@@ -224,4 +258,57 @@ fn test_integration_insufficient_funds() {
     let yaml = payment_yaml(&sender, &receiver, "100000000");
     let result = bridge.quicktx().build(&yaml, &utxos, &pp, None);
     assert!(result.is_err(), "expected insufficient funds error");
+}
+
+// The fixed test account the quicktx-intents fixtures are derived from (account 0/0).
+const INTENT_MNEMONIC: &str = "test walk nut penalty hip pave soap entry language right filter choice";
+const INTENT_SENDER: &str = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp";
+
+// Treasury donation: Conway validates the tx's declared current_treasury_value against the node's
+// live treasury. Learn the required value from the ledger's own rejection — submit, read the
+// expected value out of a ConwayTreasuryValueMismatch, rebuild with it, and resubmit (retrying also
+// absorbs an epoch boundary landing between attempts).
+#[test]
+fn test_integration_donation_treasury() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, 6000);
+    wait_for_block();
+
+    let bridge = Bridge::new().expect("create bridge");
+    let utxos = devkit_get_utxos(INTENT_SENDER);
+    let pp = devkit_get_protocol_params();
+    let base_yaml = std::fs::read_to_string("../../test-fixtures/quicktx-intents/donation.yaml")
+        .expect("read donation fixture");
+
+    let mut treasury = String::from("0");
+    let mut last_err = String::new();
+    for _ in 0..5 {
+        let yaml = base_yaml.replace(
+            "current_treasury_value: 0",
+            &format!("current_treasury_value: {}", treasury),
+        );
+        let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build");
+        let signed = bridge
+            .account()
+            .sign_tx(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
+            .expect("sign");
+        match devkit_try_submit(&signed) {
+            Ok(tx_hash) => {
+                assert!(!tx_hash.is_empty(), "empty tx hash from submit");
+                return; // accepted
+            }
+            Err(e) => {
+                last_err = e;
+                match parse_expected_treasury(&last_err) {
+                    Some(v) => treasury = v,
+                    None => panic!("unexpected submit error: {}", last_err),
+                }
+            }
+        }
+    }
+    panic!("donation submit failed after retries: {}", last_err);
 }

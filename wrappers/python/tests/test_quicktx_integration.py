@@ -8,12 +8,19 @@ Run with:
     PYTHONPATH=wrappers/python CCL_LIB_PATH=core/build/native/nativeCompile \
         pytest wrappers/python/tests/test_quicktx_integration.py -v
 """
+import re
 import time
+from pathlib import Path
 
 import pytest
 
 from ccl._ffi import CclLib, CclError
 from tests.devkit_helper import DevKitHelper
+
+# The fixed test account the quicktx-intents fixtures are derived from (account 0/0).
+INTENT_MNEMONIC = "test walk nut penalty hip pave soap entry language right filter choice"
+INTENT_SENDER = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp"
+FIXTURES = Path(__file__).parent / "../../../test-fixtures/quicktx-intents"
 
 
 @pytest.fixture(scope="module")
@@ -129,3 +136,37 @@ def test_insufficient_funds(ccl_lib, devkit):
     yaml_str = _payment_yaml(sender["base_address"], receiver["base_address"], "100000000")
     with pytest.raises(CclError):
         ccl_lib.quicktx.build(yaml_str, utxos, pp)
+
+
+def test_donation_treasury(ccl_lib, devkit):
+    """Treasury donation: Conway validates the tx's declared current_treasury_value against the
+    node's live treasury. Learn the required value from the ledger's own rejection — submit, read the
+    expected value out of a ConwayTreasuryValueMismatch, rebuild with it, and resubmit (retrying also
+    absorbs an epoch boundary landing between attempts).
+    """
+    devkit.reset()
+    devkit.wait_for_block(3)
+    devkit.topup(INTENT_SENDER, 6000)
+    devkit.wait_for_block(3)
+
+    utxos = devkit.get_utxos(INTENT_SENDER)
+    pp = devkit.get_protocol_params()
+    base_yaml = (FIXTURES / "donation.yaml").read_text()
+
+    treasury = "0"
+    last_err = None
+    for _ in range(5):
+        yaml_str = base_yaml.replace("current_treasury_value: 0", f"current_treasury_value: {treasury}")
+        result = ccl_lib.quicktx.build(yaml_str, utxos, pp)
+        signed = ccl_lib.account.sign_tx(INTENT_MNEMONIC, result["tx_cbor"], CclLib.TESTNET, 0, 0)
+        try:
+            tx_hash = devkit.submit_tx(signed)
+            assert tx_hash
+            return  # accepted
+        except RuntimeError as e:
+            last_err = str(e)
+            m = re.search(r"expected:\s*Coin\s*(\d+)", last_err)
+            if not m:
+                raise
+            treasury = m.group(1)
+    raise AssertionError(f"donation submit failed after retries: {last_err}")

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -98,27 +99,14 @@ func devkitGetProtocolParams() (map[string]interface{}, error) {
 	return pp, nil
 }
 
-// devkitGetTreasury returns the devnet's current treasury value (lovelace) from yaci-store's
-// Blockfrost-style /network endpoint. Conway donation txs must declare this exact value.
-func devkitGetTreasury() (int64, error) {
-	resp, err := http.Get(devkitURL + "/network")
-	if err != nil {
-		return 0, err
+// parseExpectedTreasury pulls the expected treasury value out of a Conway
+// ConwayTreasuryValueMismatch rejection, e.g. "... expected: Coin 43186776312112}".
+func parseExpectedTreasury(submitErr string) string {
+	m := regexp.MustCompile(`expected:\s*Coin\s*(\d+)`).FindStringSubmatch(submitErr)
+	if len(m) == 2 {
+		return m[1]
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("get network (%d): %s", resp.StatusCode, string(b))
-	}
-	var out struct {
-		Supply struct {
-			Treasury json.Number `json:"treasury"`
-		} `json:"supply"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return 0, err
-	}
-	return out.Supply.Treasury.Int64()
+	return ""
 }
 
 func devkitSubmitTx(txCborHex string) (string, error) {

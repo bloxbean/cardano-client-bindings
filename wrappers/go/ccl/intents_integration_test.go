@@ -186,14 +186,14 @@ func TestIntegrationDonation(t *testing.T) {
 	pp := devnetPP(t)
 	baseYaml := readIntentFixture(t, "donation.yaml")
 
+	// Learn the required treasury value from the ledger's own rejection: submit, and on a
+	// ConwayTreasuryValueMismatch read the expected value out of the error, rebuild with it, and
+	// resubmit. Retrying also absorbs an epoch boundary landing between submit attempts.
+	treasury := "0"
 	var lastErr error
-	for attempt := 1; attempt <= 4; attempt++ {
-		treasury, err := devkitGetTreasury()
-		if err != nil {
-			t.Fatalf("get treasury: %v", err)
-		}
+	for attempt := 1; attempt <= 5; attempt++ {
 		yaml := strings.Replace(baseYaml, "current_treasury_value: 0",
-			fmt.Sprintf("current_treasury_value: %d", treasury), 1)
+			"current_treasury_value: "+treasury, 1)
 
 		result, err := bridge.QuickTx.Build(yaml, utxos, pp)
 		if err != nil {
@@ -203,18 +203,19 @@ func TestIntegrationDonation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("sign: %v", err)
 		}
-		if txHash, err := devkitSubmitTx(signed); err == nil {
+		txHash, err := devkitSubmitTx(signed)
+		if err == nil {
 			if len(txHash) == 0 {
 				t.Fatal("empty tx hash from submit")
 			}
 			return // accepted
-		} else {
-			lastErr = err
-			if !strings.Contains(err.Error(), "TreasuryValueMismatch") {
-				t.Fatalf("submit: %v", err) // an unrelated failure
-			}
-			waitForBlock() // treasury may have advanced an epoch; refetch and retry
 		}
+		lastErr = err
+		expected := parseExpectedTreasury(err.Error())
+		if expected == "" {
+			t.Fatalf("submit: %v", err) // an unrelated failure
+		}
+		treasury = expected
 	}
 	t.Fatalf("donation submit failed after retries: %v", lastErr)
 }
