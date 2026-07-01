@@ -166,9 +166,73 @@ func TestIntegrationDRepKeyRequired(t *testing.T) {
 	}
 }
 
+// TestIntegrationDonation submits a treasury donation.
+//
+// Conway validates the tx's declared current_treasury_value against the node's live ledger treasury
+// *exactly* (ConwayTreasuryValueMismatch otherwise). The donation.yaml fixture hardcodes
+// current_treasury_value: 0, which was fine on the old empty-treasury devnet but not on Yaci DevKit
+// 0.12, whose node carries a non-zero, epoch-varying treasury.
+//
+// We deliberately do NOT read the treasury from an endpoint and declare it — and this is not for lack
+// of trying. The obvious "clean" design was to read yaci-store's /network endpoint
+// (http://localhost:8080/api/v1/network -> supply.treasury) and submit that exact value. It does not
+// work reliably: yaci-store computes the treasury (ada pots) off-chain and its value drifts from the
+// node's ledger. In CI that endpoint returned 21,599,698,134,578 while the node's ledger held
+// 43,186,776,312,112 (an epoch of indexing lag), so the fetched value was rejected. The node is the
+// sole authority on its own treasury, and the only channel that reports its exact current value is
+// the rejection itself — so we use that. (The DevKit's own local-cluster API on :10000 exposes no
+// treasury endpoint at all; only yaci-store's :8080 API does, and it disagrees with the node.)
+//
+// So: submit, read "expected: Coin N" out of the ConwayTreasuryValueMismatch, rebuild with N, and
+// resubmit. Retrying also absorbs an epoch boundary landing between attempts. The offline donation
+// *build* is covered separately by the intents build tests.
 func TestIntegrationDonation(t *testing.T) {
 	skipIfNoDevKit(t)
-	buildSignSubmit(t, "donation.yaml", nil, "payment")
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	pp := devnetPP(t)
+	baseYaml := readIntentFixture(t, "donation.yaml")
+
+	// Learn the required treasury value from the ledger's own rejection: submit, and on a
+	// ConwayTreasuryValueMismatch read the expected value out of the error, rebuild with it, and
+	// resubmit. Retrying also absorbs an epoch boundary landing between submit attempts.
+	treasury := "0"
+	var lastErr error
+	for attempt := 1; attempt <= 5; attempt++ {
+		yaml := strings.Replace(baseYaml, "current_treasury_value: 0",
+			"current_treasury_value: "+treasury, 1)
+
+		result, err := bridge.QuickTx.Build(yaml, utxos, pp)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, "payment")
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		txHash, err := devkitSubmitTx(signed)
+		if err == nil {
+			if len(txHash) == 0 {
+				t.Fatal("empty tx hash from submit")
+			}
+			return // accepted
+		}
+		lastErr = err
+		expected := parseExpectedTreasury(err.Error())
+		if expected == "" {
+			t.Fatalf("submit: %v", err) // an unrelated failure
+		}
+		treasury = expected
+	}
+	t.Fatalf("donation submit failed after retries: %v", lastErr)
 }
 
 func TestIntegrationInfoProposal(t *testing.T) {

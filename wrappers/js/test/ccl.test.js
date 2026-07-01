@@ -461,6 +461,18 @@ describe('normalizeCostModels', () => {
         expect(out.min_fee_a).toBe(44);
     });
 
+    it('prefers an existing cost_models_raw and passes params through untouched', () => {
+        // cost_models_raw is the preferred (ordered) form; the deprecated cost_models must be ignored.
+        const pp = {
+            min_fee_a: 44,
+            cost_models_raw: { PlutusV2: [100, 200, 300] },
+            cost_models: { PlutusV2: { '0': 1, '1': 2 } },
+        };
+        const out = normalizeCostModels(pp);
+        expect(out).toBe(pp);                                  // same object, unchanged
+        expect(out.cost_models_raw.PlutusV2).toEqual([100, 200, 300]);
+    });
+
     it('leaves named-operation cost models (which JS does not reorder) as a cost_models map', () => {
         const named = { 'addInteger-cpu-arguments-intercept': 205665, 'addInteger-cpu-arguments-slope': 812 };
         const out = normalizeCostModels({ cost_models: { PlutusV2: named } });

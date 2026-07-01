@@ -154,6 +154,51 @@ transaction:
     expect(Number(result.fee)).toBeGreaterThan(0);
   });
 
+  // Submit a treasury donation.
+  //
+  // Conway validates the tx's declared current_treasury_value against the node's live ledger treasury
+  // *exactly* (ConwayTreasuryValueMismatch otherwise), so the donation.yaml fixture's hardcoded
+  // current_treasury_value: 0 no longer works on Yaci DevKit 0.12 (non-zero, epoch-varying treasury).
+  //
+  // We deliberately do NOT read the treasury from an endpoint and declare it — and not for lack of
+  // trying. The obvious "clean" design was to read yaci-store's /network endpoint
+  // (http://localhost:8080/api/v1/network -> supply.treasury) and submit that exact value. It does
+  // not work reliably: yaci-store computes the treasury off-chain and its value drifts from the
+  // node's ledger — in CI it returned 21,599,698,134,578 while the node held 43,186,776,312,112 (an
+  // epoch of indexing lag), so the fetched value was rejected. The node is the sole authority on its
+  // own treasury, and the only channel that reports its exact current value is the rejection itself.
+  //
+  // So: submit, read "expected: Coin N" out of the ConwayTreasuryValueMismatch, rebuild with N, and
+  // resubmit. Retrying also absorbs an epoch boundary landing between attempts. The offline donation
+  // build is covered separately by the intents build tests.
+  it("should build, sign, and submit a treasury donation", async () => {
+    if (skip) return;
+
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
+    await devkit.topup(INTENT_SENDER, 6000);
+    await devkit.waitForBlock(3000);
+
+    const utxos = await devkit.getUtxos(INTENT_SENDER);
+    const pp = await devkit.getProtocolParams();
+    const baseYaml = readFileSync(join(FIXTURES, "donation.yaml"), "utf8");
+
+    let treasury = "0";
+    let lastErr;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const yaml = baseYaml.replace("current_treasury_value: 0", `current_treasury_value: ${treasury}`);
+      const result = bridge.quicktx.build(yaml, utxos, pp);
+      const signed = bridge.account.signTx(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor);
+      const submitResult = await devkit.submitTx(signed);
+      if (/^[0-9a-f]{64}$/.test(submitResult)) return; // accepted
+      lastErr = submitResult;
+      const m = String(submitResult).match(/expected:\s*Coin\s*(\d+)/);
+      if (!m) throw new Error(`submit: ${submitResult}`);
+      treasury = m[1];
+    }
+    throw new Error(`donation submit failed after retries: ${lastErr}`);
+  });
+
   it("should throw on insufficient funds", async () => {
     if (skip) return;
 
@@ -186,6 +231,9 @@ transaction:
 
     const utxos = await devkit.getUtxos(INTENT_SENDER);
     const pp = await devkit.getProtocolParams();
+    // DIAG: does this DevKit version emit the preferred cost_models_raw form?
+    console.log("DIAG has cost_models_raw:", !!pp.cost_models_raw,
+      pp.cost_models_raw ? Object.keys(pp.cost_models_raw).join("+") : "");
     const yaml = readFileSync(join(FIXTURES, "plutus", "script_minting.yaml"), "utf8");
 
     const result = bridge.quicktx.build(yaml, utxos, pp, [{ mem: 2000000, steps: 500000000 }]);

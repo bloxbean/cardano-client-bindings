@@ -31,7 +31,8 @@ jobs:
         run: python3 -m pip install --break-system-packages pytest pyyaml
 
       - name: Install Yaci DevKit
-        run: npm install -g @bloxbean/yaci-devkit
+        # Pinned to the newest release (ccl-bridge tracks latest, incl. previews).
+        run: npm install -g @bloxbean/yaci-devkit@0.12.0-beta5
 
       # Start the devnet in the background; it warms up while the native lib builds.
       - name: Start Yaci DevKit

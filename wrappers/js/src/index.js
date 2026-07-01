@@ -37,25 +37,37 @@ function cstr(str) {
   return Buffer.from(str + '\0', 'utf-8');
 }
 
-// Protocol-params providers (e.g. Yaci DevKit / Blockfrost-style backends) return Plutus cost models
-// as a map keyed by numeric indices, e.g. {"PlutusV2": {"0": 100788, ..., "165": 10}}. JavaScript
-// object semantics iterate canonical integer-string keys ("100") in ascending order *before*
-// zero-padded ones ("000"), so JSON.stringify emits them out of order. CCL reads the cost-model
-// entries in document order to rebuild the per-language cost array, so this scrambled order yields a
-// wrong script-integrity hash and the node rejects the tx with PPViewHashesDontMatch. (Go/Python are
-// unaffected: Go's json.Marshal sorts keys, and Python preserves the provider's order.)
+// Plutus cost models: prefer the ordered `cost_models_raw` array form.
 //
-// Fix: convert any numerically-keyed language into CCL's ordered `cost_models_raw` array form (a
-// List<Long> CCL consumes directly, in order), which JSON serializes order-stably. Languages with
-// named-operation keys (which JS does not reorder) are left as a cost_models map untouched.
+// Per upstream guidance (bloxbean/cardano-client-lib#633), `cost_models_raw` — a per-language ordered
+// list of costs that CCL consumes directly — is the preferred way to carry cost models. The map form
+// `cost_models` is deprecated: after recent cost-model changes its entries are no longer ordered, so
+// relying on their order is unsafe. Providers that already return `cost_models_raw` (e.g. real
+// Blockfrost, and yaci-store's own API) pass straight through here untouched.
 //
-// Root cause is upstream: CCL's CostModelUtil.getCostModelFromProtocolParams only numeric-sorts
-// cost_models when the unpadded keys "0"/"1" are present, so zero-padded keys ("000"..) fall back to
-// document order. Tracked in bloxbean/cardano-client-lib#633 — once that lands and we upgrade CCL,
-// this workaround can be removed (the Plutus-mint DevKit test, which passes the real fetched cost
-// models, guards that removal).
+// Only when a provider returns *just* the deprecated `cost_models` (a map keyed by numeric indices)
+// do we convert it here: JavaScript object semantics iterate canonical integer-string keys ("100")
+// ahead of zero-padded ones ("000"), so JSON.stringify would emit the map out of order and the node
+// would reject Plutus txs with PPViewHashesDontMatch. We sort by numeric key and emit
+// `cost_models_raw`, which serializes order-stably. (Go/Python are unaffected: Go's json.Marshal
+// sorts keys, Python preserves the provider's order.) Languages with named-operation keys (which JS
+// does not reorder) are left as a `cost_models` map untouched.
+//
+// This conversion is still load-bearing because the endpoint our tests/provider-helpers use — the
+// Yaci DevKit :10000 local-cluster proxy — returns numeric `cost_models` only (empirically verified:
+// no `cost_models_raw`), even though the DevKit's own yaci-store serves the ordered form on :8080.
+// Remove this whole function once every endpoint we fetch params from returns `cost_models_raw` —
+// tracked in bloxbean/ccl-bridge#11.
 export function normalizeCostModels(protocolParams) {
   if (!protocolParams || typeof protocolParams !== 'object') return protocolParams;
+
+  // Preferred form already present — CCL consumes cost_models_raw ahead of the deprecated map, so
+  // pass the params through unchanged rather than touch the deprecated cost_models.
+  const existingRaw = protocolParams.cost_models_raw ?? protocolParams.costModelsRaw;
+  if (existingRaw && typeof existingRaw === 'object' && Object.keys(existingRaw).length > 0) {
+    return protocolParams;
+  }
+
   const costModels = protocolParams.cost_models ?? protocolParams.costModels;
   if (!costModels || typeof costModels !== 'object') return protocolParams;
 
@@ -77,7 +89,7 @@ export function normalizeCostModels(protocolParams) {
   delete out.cost_models;
   delete out.costModels;
   if (Object.keys(named).length > 0) out.cost_models = named;
-  out.cost_models_raw = { ...(protocolParams.cost_models_raw ?? {}), ...raw };
+  out.cost_models_raw = raw;
   return out;
 }
 
