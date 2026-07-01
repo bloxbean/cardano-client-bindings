@@ -41,9 +41,13 @@ exec-unit evaluators (the §2b sibling, still planned).
 - A first-time user reaches a built transaction without hand-rolling HTTP calls, in every language,
   while the native lib stays offline, deterministic, and secret-free.
 - Adding a backend (Koios, Ogmios, …) is a wrapper-only change: implement the two methods.
-- Cost models fetched from a provider flow through the JS cost-model key-ordering normalization
-  (`normalizeCostModels`), a wrapper-side workaround for an upstream ordering bug
-  ([cardano-client-lib#633](https://github.com/bloxbean/cardano-client-lib/issues/633)).
+- Cost models fetched from a provider flow through the JS wrapper's `normalizeCostModels`, which
+  prefers the ordered `cost_models_raw` form and converts the deprecated numeric-keyed `cost_models`
+  map only as a fallback. This is a JavaScript-only concern (JS reorders numeric-string object keys,
+  unlike Go/Python). Providers that already emit `cost_models_raw` (real Blockfrost, yaci-store's own
+  API) pass through untouched; the DevKit `:10000` proxy currently emits the numeric form, so the
+  conversion is still load-bearing. Removal once every endpoint we fetch from returns `cost_models_raw`
+  is tracked in [ccl-bridge#11](https://github.com/bloxbean/ccl-bridge/issues/11).
 - Rust consumers must opt in with `features = ["providers"]`; the helpers are absent otherwise.
 - `BlockfrostProvider` is validated against mocked responses, not live in CI (a Blockfrost key would
   be required); `YaciProvider` is exercised live by the DevKit integration suites.
