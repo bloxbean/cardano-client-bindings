@@ -186,12 +186,15 @@ func TestIntegrationDonation(t *testing.T) {
 	pp := devnetPP(t)
 	baseYaml := readIntentFixture(t, "donation.yaml")
 
-	// Learn the required treasury value from the ledger's own rejection: submit, and on a
-	// ConwayTreasuryValueMismatch read the expected value out of the error, rebuild with it, and
-	// resubmit. Retrying also absorbs an epoch boundary landing between submit attempts.
-	treasury := "0"
+	// Read the current treasury from yaci-store's /network endpoint and declare exactly that. The
+	// treasury only moves at epoch boundaries, so retry (re-reading) if one lands between build and
+	// submit.
 	var lastErr error
 	for attempt := 1; attempt <= 5; attempt++ {
+		treasury, err := devkitGetTreasury()
+		if err != nil {
+			t.Fatalf("get treasury: %v", err)
+		}
 		yaml := strings.Replace(baseYaml, "current_treasury_value: 0",
 			"current_treasury_value: "+treasury, 1)
 
@@ -211,11 +214,10 @@ func TestIntegrationDonation(t *testing.T) {
 			return // accepted
 		}
 		lastErr = err
-		expected := parseExpectedTreasury(err.Error())
-		if expected == "" {
+		if !strings.Contains(err.Error(), "TreasuryValueMismatch") {
 			t.Fatalf("submit: %v", err) // an unrelated failure
 		}
-		treasury = expected
+		waitForBlock() // epoch may have advanced; re-read treasury and retry
 	}
 	t.Fatalf("donation submit failed after retries: %v", lastErr)
 }

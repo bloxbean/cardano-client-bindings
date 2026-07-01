@@ -139,9 +139,9 @@ transaction:
   });
 
   // Treasury donation: Conway validates the tx's declared current_treasury_value against the node's
-  // live treasury. Learn the required value from the ledger's own rejection — submit, read the
-  // expected value out of a ConwayTreasuryValueMismatch, rebuild with it, and resubmit (retrying
-  // also absorbs an epoch boundary landing between attempts).
+  // live treasury. Read the current value from yaci-store's /network endpoint and declare exactly
+  // that. The treasury only moves at epoch boundaries, so retry (re-reading) if one lands between
+  // build and submit.
   it("should build, sign, and submit a treasury donation", async () => {
     if (skip) return;
 
@@ -154,18 +154,19 @@ transaction:
     const pp = await devkit.getProtocolParams();
     const baseYaml = readFileSync(join(FIXTURES, "donation.yaml"), "utf8");
 
-    let treasury = "0";
     let lastErr;
     for (let attempt = 1; attempt <= 5; attempt++) {
+      const treasury = await devkit.getTreasury();
       const yaml = baseYaml.replace("current_treasury_value: 0", `current_treasury_value: ${treasury}`);
       const result = bridge.quicktx.build(yaml, utxos, pp);
       const signed = bridge.account.signTx(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor);
       const submitResult = await devkit.submitTx(signed);
       if (/^[0-9a-f]{64}$/.test(submitResult)) return; // accepted
       lastErr = submitResult;
-      const m = String(submitResult).match(/expected:\s*Coin\s*(\d+)/);
-      if (!m) throw new Error(`submit: ${submitResult}`);
-      treasury = m[1];
+      if (!String(submitResult).includes("TreasuryValueMismatch")) {
+        throw new Error(`submit: ${submitResult}`);
+      }
+      await devkit.waitForBlock(3000); // epoch may have advanced; re-read treasury and retry
     }
     throw new Error(`donation submit failed after retries: ${lastErr}`);
   });

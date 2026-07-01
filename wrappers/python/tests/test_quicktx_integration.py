@@ -8,7 +8,6 @@ Run with:
     PYTHONPATH=wrappers/python CCL_LIB_PATH=core/build/native/nativeCompile \
         pytest wrappers/python/tests/test_quicktx_integration.py -v
 """
-import re
 import time
 from pathlib import Path
 
@@ -140,9 +139,9 @@ def test_insufficient_funds(ccl_lib, devkit):
 
 def test_donation_treasury(ccl_lib, devkit):
     """Treasury donation: Conway validates the tx's declared current_treasury_value against the
-    node's live treasury. Learn the required value from the ledger's own rejection — submit, read the
-    expected value out of a ConwayTreasuryValueMismatch, rebuild with it, and resubmit (retrying also
-    absorbs an epoch boundary landing between attempts).
+    node's live treasury. Read the current value from yaci-store's /network endpoint and declare
+    exactly that. The treasury only moves at epoch boundaries, so retry (re-reading) if one lands
+    between build and submit.
     """
     devkit.reset()
     devkit.wait_for_block(3)
@@ -153,9 +152,9 @@ def test_donation_treasury(ccl_lib, devkit):
     pp = devkit.get_protocol_params()
     base_yaml = (FIXTURES / "donation.yaml").read_text()
 
-    treasury = "0"
     last_err = None
     for _ in range(5):
+        treasury = devkit.get_treasury()
         yaml_str = base_yaml.replace("current_treasury_value: 0", f"current_treasury_value: {treasury}")
         result = ccl_lib.quicktx.build(yaml_str, utxos, pp)
         signed = ccl_lib.account.sign_tx(INTENT_MNEMONIC, result["tx_cbor"], CclLib.TESTNET, 0, 0)
@@ -165,8 +164,7 @@ def test_donation_treasury(ccl_lib, devkit):
             return  # accepted
         except RuntimeError as e:
             last_err = str(e)
-            m = re.search(r"expected:\s*Coin\s*(\d+)", last_err)
-            if not m:
+            if "TreasuryValueMismatch" not in last_err:
                 raise
-            treasury = m.group(1)
+            devkit.wait_for_block(3)  # epoch may have advanced; re-read treasury and retry
     raise AssertionError(f"donation submit failed after retries: {last_err}")

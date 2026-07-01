@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -99,14 +98,31 @@ func devkitGetProtocolParams() (map[string]interface{}, error) {
 	return pp, nil
 }
 
-// parseExpectedTreasury pulls the expected treasury value out of a Conway
-// ConwayTreasuryValueMismatch rejection, e.g. "... expected: Coin 43186776312112}".
-func parseExpectedTreasury(submitErr string) string {
-	m := regexp.MustCompile(`expected:\s*Coin\s*(\d+)`).FindStringSubmatch(submitErr)
-	if len(m) == 2 {
-		return m[1]
+// devkitStoreURL is yaci-store's own API (a separate port from the devkit local-cluster API); it
+// exposes network/supply info the local-cluster API does not.
+const devkitStoreURL = "http://localhost:8080/api/v1"
+
+// devkitGetTreasury returns the devnet's current treasury value (lovelace) from yaci-store's
+// /network endpoint. A Conway donation tx must declare this exact value.
+func devkitGetTreasury() (string, error) {
+	resp, err := http.Get(devkitStoreURL + "/network")
+	if err != nil {
+		return "", err
 	}
-	return ""
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("get network (%d): %s", resp.StatusCode, string(b))
+	}
+	var out struct {
+		Supply struct {
+			Treasury json.Number `json:"treasury"`
+		} `json:"supply"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Supply.Treasury.String(), nil
 }
 
 func devkitSubmitTx(txCborHex string) (string, error) {
