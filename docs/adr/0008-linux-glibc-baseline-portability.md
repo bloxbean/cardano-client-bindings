@@ -39,6 +39,9 @@ unaffected (stable ABIs).
 - **Does not run on Alpine / musl-only systems** — documented limitation; a musl variant is deferred
   and technically unproven for shared libraries.
 - Linux release builds run inside a container (extra CI plumbing).
+- This portable `.so` is what the per-wrapper packages bundle for Linux users
+  ([ADR-0012](0012-native-lib-bundled-in-wrapper-packages.md)); its glibc-2.17 floor is what lets the
+  Linux wheel be relabelled `manylinux_2_28` for PyPI.
 
 ## Alternatives considered
 
