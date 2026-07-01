@@ -18,12 +18,25 @@ export class DevKitHelper {
   }
 
   async topup(address, adaAmount = 100) {
-    const resp = await fetch(`${this.baseUrl}/addresses/topup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, adaAmount }),
-    });
-    return resp.json();
+    // Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
+    // node, so a topup right after reset can transiently fail. Retry with backoff.
+    let lastErr;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      try {
+        const resp = await fetch(`${this.baseUrl}/addresses/topup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address, adaAmount }),
+        });
+        const result = await resp.json();
+        if (resp.ok && !(result && result.status === false)) return result;
+        lastErr = new Error(`topup failed (${resp.status}): ${JSON.stringify(result)}`);
+      } catch (e) {
+        lastErr = e;
+      }
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+    throw lastErr;
   }
 
   async getUtxos(address) {

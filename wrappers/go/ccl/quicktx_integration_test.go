@@ -51,16 +51,25 @@ func devkitTopup(address string, adaAmount int) error {
 		"address":   address,
 		"adaAmount": adaAmount,
 	})
-	resp, err := http.Post(devkitURL+"/addresses/topup", "application/json", bytes.NewReader(body))
-	if err != nil {
-		return err
+	// Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
+	// node, so a topup right after reset can transiently fail ("Topup failed"). Retry with backoff
+	// until the faucet is ready.
+	var lastErr error
+	for attempt := 1; attempt <= 8; attempt++ {
+		resp, err := http.Post(devkitURL+"/addresses/topup", "application/json", bytes.NewReader(body))
+		if err != nil {
+			lastErr = err
+		} else {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 200 && !strings.Contains(string(b), "\"status\":false") {
+				return nil
+			}
+			lastErr = fmt.Errorf("topup failed (%d): %s", resp.StatusCode, string(b))
+		}
+		time.Sleep(4 * time.Second)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("topup failed (%d): %s", resp.StatusCode, string(b))
-	}
-	return nil
+	return lastErr
 }
 
 func devkitGetUtxos(address string) ([]map[string]interface{}, error) {

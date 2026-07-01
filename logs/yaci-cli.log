@@ -1,0 +1,6 @@
+2026-07-01 10:08:58,307 [           main] WARN  org.jline                                - Unable to create a system terminal, creating a dumb terminal (enable debug logging for more information)
+2026-07-01 10:08:58,401 [           main] WARN  o.s.m.p.r.SyncStatelessMcpResourceProvider - No resource methods found in the provided resource objects: []
+2026-07-01 10:08:58,401 [           main] WARN  o.s.m.p.r.SyncStatelessMcpResourceProvider - No resource methods found in the provided resource objects: []
+2026-07-01 10:08:58,401 [           main] WARN  o.s.m.p.p.SyncStatelessMcpPromptProvider - No prompt methods found in the provided prompt objects: []
+2026-07-01 10:08:58,401 [           main] WARN  o.s.m.p.c.SyncStatelessMcpCompleteProvider - No complete methods found in the provided complete objects: []
+2026-07-01 10:08:58,401 [           main] WARN  o.s.m.p.t.SyncStatelessMcpToolProvider   - No tool methods found in the provided tool objects: []

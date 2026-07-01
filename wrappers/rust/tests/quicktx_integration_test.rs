@@ -33,11 +33,26 @@ fn devkit_reset() {
 }
 
 fn devkit_topup(address: &str, ada_amount: u64) {
-    let body = json!({"address": address, "adaAmount": ada_amount});
-    ureq::post(&format!("{}/addresses/topup", DEVKIT_URL))
-        .set("Content-Type", "application/json")
-        .send_string(&body.to_string())
-        .expect("Failed to topup");
+    // Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
+    // node, so a topup right after reset can transiently fail. Retry with backoff.
+    let body = json!({"address": address, "adaAmount": ada_amount}).to_string();
+    for attempt in 1..=8 {
+        let resp = ureq::post(&format!("{}/addresses/topup", DEVKIT_URL))
+            .set("Content-Type", "application/json")
+            .send_string(&body);
+        match resp {
+            Ok(r) => {
+                let text = r.into_string().unwrap_or_default();
+                if !text.contains("\"status\":false") {
+                    return;
+                }
+            }
+            Err(e) if attempt == 8 => panic!("topup failed after retries: {}", e),
+            Err(_) => {}
+        }
+        thread::sleep(Duration::from_secs(4));
+    }
+    panic!("topup failed after retries");
 }
 
 fn devkit_get_utxos(address: &str) -> Value {
