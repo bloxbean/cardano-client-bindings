@@ -33,11 +33,26 @@ fn devkit_reset() {
 }
 
 fn devkit_topup(address: &str, ada_amount: u64) {
-    let body = json!({"address": address, "adaAmount": ada_amount});
-    ureq::post(&format!("{}/addresses/topup", DEVKIT_URL))
-        .set("Content-Type", "application/json")
-        .send_string(&body.to_string())
-        .expect("Failed to topup");
+    // Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
+    // node, so a topup right after reset can transiently fail. Retry with backoff.
+    let body = json!({"address": address, "adaAmount": ada_amount}).to_string();
+    for attempt in 1..=8 {
+        let resp = ureq::post(&format!("{}/addresses/topup", DEVKIT_URL))
+            .set("Content-Type", "application/json")
+            .send_string(&body);
+        match resp {
+            Ok(r) => {
+                let text = r.into_string().unwrap_or_default();
+                if !text.contains("\"status\":false") {
+                    return;
+                }
+            }
+            Err(e) if attempt == 8 => panic!("topup failed after retries: {}", e),
+            Err(_) => {}
+        }
+        thread::sleep(Duration::from_secs(4));
+    }
+    panic!("topup failed after retries");
 }
 
 fn devkit_get_utxos(address: &str) -> Value {
@@ -69,6 +84,40 @@ fn devkit_get_tx(tx_hash: &str) -> Option<Value> {
     match ureq::get(&format!("{}/txs/{}", DEVKIT_URL, tx_hash)).call() {
         Ok(resp) => resp.into_json::<Value>().ok(),
         Err(_) => None,
+    }
+}
+
+// Pull the expected treasury value out of a Conway ConwayTreasuryValueMismatch rejection, e.g.
+// "... expected: Coin 43186776312112}".
+fn parse_expected_treasury(submit_err: &str) -> Option<String> {
+    let idx = submit_err.find("expected: Coin ")?;
+    let rest = &submit_err[idx + "expected: Coin ".len()..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits)
+    }
+}
+
+// Submit that returns the error body instead of panicking, so callers can inspect a rejection (ureq
+// treats 4xx/5xx as Err by default).
+fn devkit_try_submit(tx_cbor_hex: &str) -> Result<String, String> {
+    let tx_bytes = hex::decode(tx_cbor_hex).map_err(|e| e.to_string())?;
+    match ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
+        .set("Content-Type", "application/cbor")
+        .send_bytes(&tx_bytes)
+    {
+        Ok(resp) => Ok(resp
+            .into_string()
+            .unwrap_or_default()
+            .trim()
+            .trim_matches('"')
+            .to_string()),
+        Err(ureq::Error::Status(code, resp)) => {
+            Err(format!("submit failed ({}): {}", code, resp.into_string().unwrap_or_default()))
+        }
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -209,4 +258,70 @@ fn test_integration_insufficient_funds() {
     let yaml = payment_yaml(&sender, &receiver, "100000000");
     let result = bridge.quicktx().build(&yaml, &utxos, &pp, None);
     assert!(result.is_err(), "expected insufficient funds error");
+}
+
+// The fixed test account the quicktx-intents fixtures are derived from (account 0/0).
+const INTENT_MNEMONIC: &str = "test walk nut penalty hip pave soap entry language right filter choice";
+const INTENT_SENDER: &str = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp";
+
+// Submit a treasury donation.
+//
+// Conway validates the tx's declared current_treasury_value against the node's live ledger treasury
+// *exactly* (ConwayTreasuryValueMismatch otherwise), so the donation.yaml fixture's hardcoded
+// current_treasury_value: 0 no longer works on Yaci DevKit 0.12 (non-zero, epoch-varying treasury).
+//
+// We deliberately do NOT read the treasury from an endpoint and declare it — and not for lack of
+// trying. The obvious "clean" design was to read yaci-store's /network endpoint
+// (http://localhost:8080/api/v1/network -> supply.treasury) and submit that exact value. It does not
+// work reliably: yaci-store computes the treasury off-chain and its value drifts from the node's
+// ledger — in CI it returned 21,599,698,134,578 while the node held 43,186,776,312,112 (an epoch of
+// indexing lag), so the fetched value was rejected. The node is the sole authority on its own
+// treasury, and the only channel that reports its exact current value is the rejection itself.
+//
+// So: submit, read "expected: Coin N" out of the ConwayTreasuryValueMismatch, rebuild with N, and
+// resubmit. Retrying also absorbs an epoch boundary landing between attempts. The offline donation
+// build is covered separately by the intents build tests.
+#[test]
+fn test_integration_donation_treasury() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, 6000);
+    wait_for_block();
+
+    let bridge = Bridge::new().expect("create bridge");
+    let utxos = devkit_get_utxos(INTENT_SENDER);
+    let pp = devkit_get_protocol_params();
+    let base_yaml = std::fs::read_to_string("../../test-fixtures/quicktx-intents/donation.yaml")
+        .expect("read donation fixture");
+
+    let mut treasury = String::from("0");
+    let mut last_err = String::new();
+    for _ in 0..5 {
+        let yaml = base_yaml.replace(
+            "current_treasury_value: 0",
+            &format!("current_treasury_value: {}", treasury),
+        );
+        let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build");
+        let signed = bridge
+            .account()
+            .sign_tx(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
+            .expect("sign");
+        match devkit_try_submit(&signed) {
+            Ok(tx_hash) => {
+                assert!(!tx_hash.is_empty(), "empty tx hash from submit");
+                return; // accepted
+            }
+            Err(e) => {
+                last_err = e;
+                match parse_expected_treasury(&last_err) {
+                    Some(v) => treasury = v,
+                    None => panic!("unexpected submit error: {}", last_err),
+                }
+            }
+        }
+    }
+    panic!("donation submit failed after retries: {}", last_err);
 }
