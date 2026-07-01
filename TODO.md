@@ -121,6 +121,7 @@ untouched and the helpers are optional and swappable. This is the sibling of §2
 - [ ] `P1` Raise Go and Rust test breadth toward Python's (~100 cases vs ~61); port Python's per-module unit tests.
 - [ ] `P1` Add a cross-wrapper parity test matrix asserting every `@CEntryPoint` is exercised in every language.
 - [ ] `P2` Run the Yaci DevKit integration tests in CI (containerized DevKit) instead of skip-if-not-running.
+- [ ] `P2` **Re-enable the donation submit integration test** (`TestIntegrationDonation`, currently `t.Skip`). Conway validates a treasury-donation tx's declared `current_treasury_value` against the node's live treasury; the `donation.yaml` fixture hardcodes `0`, which no longer matches DevKit 0.12's non-zero, dynamic treasury (`ConwayTreasuryValueMismatch`). Fetch the live treasury value from the devnet and inject it into the donation build before submitting. Offline donation build coverage is unaffected.
 - [ ] `P2` Expand the C smoke tests and add an FFI memory-leak / valgrind check across the native boundary.
 - [ ] `P2` Add benchmarks for FFI call overhead and JSON (de)serialization cost.
 
