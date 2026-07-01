@@ -36,3 +36,16 @@ task integrationTest(type: Exec) {
 
     commandLine 'bash', '-c', 'python3 -m pytest tests/ -v'
 }
+
+// Build a platform-specific wheel that bundles the native library into ccl/_libs/, so
+// `pip install` needs no CCL_LIB_PATH. Requires the `build` package (`pip install build`).
+task wheel(type: Exec) {
+    dependsOn copyNativeLib
+    workingDir projectDir
+
+    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
+    commandLine 'bash', '-c',
+        "set -eu; rm -rf ccl/_libs dist; mkdir -p ccl/_libs; " +
+        "for f in libccl.so libccl.dylib libccl.dll; do cp \"${nativeDir}/\$f\" ccl/_libs/ 2>/dev/null || true; done; " +
+        "python3 -m build --wheel"
+}

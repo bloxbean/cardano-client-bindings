@@ -10,25 +10,37 @@ via the CCL Bridge native library. Pure `ctypes` — no JVM, no compiler, no C e
 ## Requirements
 
 - Python 3.8+
-- The native library `libccl.{dylib,so,dll}` for your platform.
 
-## Getting the native library
+The native library is **bundled inside the platform wheel** — no separate download or
+`CCL_LIB_PATH` needed for an installed package.
 
-The bindings load a shared library at runtime; they do not bundle it (yet — see the
-project [`TODO.md`](../../TODO.md)). Two ways to get it:
+## Installing
 
-**Build from source** (needs Oracle GraalVM 25.0.3 — see the top-level README):
+**Recommended — a platform wheel that bundles the native library:**
 
 ```bash
-# from the repo root
-./gradlew :core:nativeCompile
-# produces core/build/native/nativeCompile/libccl.{dylib,so}
+pip install ccl                      # once published to PyPI
+# or, a locally built wheel:
+pip install path/to/ccl-*.whl
 ```
 
-**Or download a pre-built binary:**
+The wheel ships the matching `libccl.*` inside the package (`ccl/_libs/`), so `import ccl` just
+works — nothing else to set. Build one locally (needs `pip install build`):
 
 ```bash
-make download-lib   # fetches into core/build/native/nativeCompile/
+./gradlew :wrappers:python:wheel     # -> wrappers/python/dist/ccl-*.whl
+```
+
+At load time the bindings look for the library in this order: an explicit `CclLib(lib_path=...)`,
+the `CCL_LIB_PATH` env var, then the bundled `ccl/_libs/` copy.
+
+**Development — against a locally built library** (no wheel): point `CCL_LIB_PATH` at a directory
+containing `libccl.{dylib,so,dll}`:
+
+```bash
+./gradlew :core:nativeCompile        # produces core/build/native/nativeCompile/libccl.*
+export CCL_LIB_PATH=core/build/native/nativeCompile
+# (or: make download-lib to fetch a pre-built binary)
 ```
 
 ## Running the examples

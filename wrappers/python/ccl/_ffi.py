@@ -26,18 +26,44 @@ class CclLib:
     PREPROD = 2
     PREVIEW = 3
 
-    def __init__(self, lib_path=None):
-        if lib_path is None:
-            lib_path = os.environ.get('CCL_LIB_PATH', '.')
-
+    @staticmethod
+    def _lib_filename():
         if sys.platform == 'darwin':
-            lib_file = os.path.join(lib_path, 'libccl.dylib')
-        elif sys.platform == 'win32':
-            lib_file = os.path.join(lib_path, 'libccl.dll')
-        else:
-            lib_file = os.path.join(lib_path, 'libccl.so')
+            return 'libccl.dylib'
+        if sys.platform == 'win32':
+            return 'libccl.dll'
+        return 'libccl.so'
 
-        self._lib = ctypes.CDLL(lib_file)
+    @classmethod
+    def _resolve_lib_file(cls, lib_path=None):
+        """Locate the native library, in priority order:
+
+        1. an explicit ``lib_path`` argument (a directory), if given;
+        2. the ``CCL_LIB_PATH`` env var (a directory) — for development against a locally built lib;
+        3. the copy bundled inside this package (``ccl/_libs/``) — how an installed wheel ships it;
+        4. the bare filename, letting the system loader search its default paths.
+        """
+        name = cls._lib_filename()
+        if lib_path:
+            return os.path.join(lib_path, name)
+        env = os.environ.get('CCL_LIB_PATH')
+        if env:
+            return os.path.join(env, name)
+        bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_libs', name)
+        if os.path.exists(bundled):
+            return bundled
+        return name
+
+    def __init__(self, lib_path=None):
+        lib_file = self._resolve_lib_file(lib_path)
+        try:
+            self._lib = ctypes.CDLL(lib_file)
+        except OSError as e:
+            raise OSError(
+                f"Failed to load the CCL native library ({lib_file}): {e}\n"
+                f"Install a platform wheel that bundles it, or set CCL_LIB_PATH to the "
+                f"directory containing {self._lib_filename()}."
+            ) from None
         self._setup_functions()
         self._isolate = c_void_p()
         self._thread = c_void_p()
