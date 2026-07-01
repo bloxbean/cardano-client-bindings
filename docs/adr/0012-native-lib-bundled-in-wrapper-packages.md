@@ -64,9 +64,9 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
   machine — the adoption blocker is removed, one wrapper at a time.
 - Packages get **large** (tens of MB) and are **per-platform**; releasing means a build matrix producing one
   artifact per OS/arch, and users on an unsupported platform fall back to source/`CCL_LIB_PATH`.
-- The set of shippable platforms is bounded by what we build: today linux-x86_64 (glibc baseline),
-  macos-arm64, windows-x86_64. `linux-arm64` / `macos-x86_64` / musl remain follow-ups before wheels exist
-  for those.
+- The set of shippable platforms is bounded by what we build: `linux-x86_64` + `linux-aarch64` (both
+  glibc-baseline), `macos-aarch64` + `macos-x86_64`, and `windows-x86_64`. `windows-arm64` and
+  musl/Alpine remain unbuilt, so wheels can't exist for those yet.
 - Each ecosystem needs its own bundling code and its own publishing story; the four will land incrementally,
   not atomically.
 - A lib a version behind its wrapper still fails confusingly — bundling makes version-lock easier (same

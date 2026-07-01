@@ -12,6 +12,9 @@ jobs:
           - os: macos-14
             platform: macos-aarch64
             ext: dylib
+          - os: macos-13
+            platform: macos-x86_64
+            ext: dylib
           - os: windows-latest
             platform: windows-x86_64
             ext: dll
@@ -44,12 +47,24 @@ jobs:
   # very newest distros. Portability is verified continuously by portable-linux-lib.yml; here we
   # re-assert the floor before shipping. See docs/adr/0008-linux-glibc-baseline-portability.md.
   build-linux:
-    name: build (linux-x86_64, glibc 2.17 baseline)
-    runs-on: ubuntu-latest
+    name: build (${{ matrix.platform }}, glibc 2.17 baseline)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+            image: quay.io/pypa/manylinux_2_28_x86_64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-aarch64_bin.tar.gz
     container:
-      image: quay.io/pypa/manylinux_2_28_x86_64
+      image: ${{ matrix.image }}
     env:
-      GRAALVM_URL: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
+      GRAALVM_URL: ${{ matrix.graalvm_url }}
     steps:
       - uses: actions/checkout@v4
       - name: Ensure build prerequisites
@@ -75,11 +90,11 @@ jobs:
       - name: Package
         run: |
           cd core/build/native/nativeCompile
-          tar czf ccl-bridge-${{ github.ref_name }}-linux-x86_64.tar.gz \
+          tar czf ccl-bridge-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
             libccl.so libccl.h graal_isolate.h
       - uses: actions/upload-artifact@v4
         with:
-          name: ccl-bridge-linux-x86_64
+          name: ccl-bridge-${{ matrix.platform }}
           path: core/build/native/nativeCompile/ccl-bridge-*.tar.gz
 
   release:
