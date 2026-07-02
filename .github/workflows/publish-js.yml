@@ -80,11 +80,11 @@ jobs:
           }
           JSON
           echo "CCL Bridge native library for \`${{ matrix.platform }}\`. Installed automatically as an optionalDependency of \`@bloxbean/cardano-client-bridge\`." > package/README.md
-          tar czf "ccl-${{ matrix.platform }}.tgz" package
+          tar czf "platform-${{ matrix.platform }}.tgz" package
       - uses: actions/upload-artifact@v4
         with:
           name: npmpkg-${{ matrix.platform }}
-          path: ccl-${{ matrix.platform }}.tgz
+          path: platform-${{ matrix.platform }}.tgz
 
   # Linux: build the lib in the manylinux_2_28 container (glibc-2.17 baseline, ADR-0008), then
   # assemble the platform pkg with tar (no node needed in the container).
@@ -139,11 +139,11 @@ jobs:
           }
           JSON
           echo "CCL Bridge native library for ${{ matrix.platform }}. Installed automatically as an optionalDependency of @bloxbean/cardano-client-bridge." > package/README.md
-          tar czf "ccl-${{ matrix.platform }}.tgz" package
+          tar czf "platform-${{ matrix.platform }}.tgz" package
       - uses: actions/upload-artifact@v4
         with:
           name: npmpkg-${{ matrix.platform }}
-          path: ccl-${{ matrix.platform }}.tgz
+          path: platform-${{ matrix.platform }}.tgz
 
   publish:
     needs: [pkg-native, pkg-linux]
@@ -176,5 +176,5 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -eux
-          for t in dist/ccl-*.tgz; do npm publish "$t" --access public; done
-          npm publish dist/bloxbean-ccl-*.tgz --access public
+          for t in dist/platform-*.tgz; do npm publish "$t" --access public; done
+          npm publish dist/bloxbean-*.tgz --access public
