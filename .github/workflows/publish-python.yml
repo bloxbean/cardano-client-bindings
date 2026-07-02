@@ -9,7 +9,7 @@ name: Publish Python wheels
 #   - workflow_dispatch    -> build the wheels as artifacts only (validation; never publishes)
 #
 # Enabling PyPI (admin, one-time):
-#   1. Create the `ccl` project on PyPI and register this repo+workflow as a Trusted Publisher
+#   1. Create the `cardano-client-lib` project on PyPI and register this repo+workflow as a Trusted Publisher
 #      (https://docs.pypi.org/trusted-publishers/).
 #   2. Set repository variable `PYPI_PUBLISH=true` (Settings -> Secrets and variables -> Actions -> Variables).
 #   Until then the publish step is skipped; wheels are still produced + attached to releases.
