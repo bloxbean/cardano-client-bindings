@@ -45,7 +45,7 @@ jobs:
           set -eux
           ./gradlew :wrappers:python:wheel
           python3 -m venv "$RUNNER_TEMP/wheelvenv"
-          "$RUNNER_TEMP/wheelvenv/bin/pip" install --quiet wrappers/python/dist/ccl-*.whl
+          "$RUNNER_TEMP/wheelvenv/bin/pip" install --quiet wrappers/python/dist/*.whl
           cd "$RUNNER_TEMP" && env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
             "$RUNNER_TEMP/wheelvenv/bin/python" -c "import ccl; assert ccl.CclLib().version(); ccl.CclLib().account.create(ccl.CclLib.TESTNET); print('bundled wheel OK, no CCL_LIB_PATH')"
       - name: Run Go tests

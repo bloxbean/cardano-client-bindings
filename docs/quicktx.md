@@ -302,7 +302,7 @@ signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], CclLib.TESTNET, 0, 0)
 ### JavaScript (Bun)
 
 ```javascript
-import { CclBridge, TESTNET } from '@bloxbean/ccl';
+import { CclBridge, TESTNET } from '@bloxbean/cardano-client-bridge';
 
 const bridge = new CclBridge();
 const result = bridge.quicktx.build(txplanYaml, utxos, protocolParams);
