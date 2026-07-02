@@ -90,7 +90,8 @@ optional HTTP helpers (via `ureq`) that fetch those for you, keeping the native 
 provider-free:
 
 ```toml
-ccl = { version = "0.1", features = ["providers"] }
+# Published as `cardano-client-bridge`; imported as `ccl` (see below).
+cardano-client-bridge = { version = "0.1", features = ["providers"] }
 ```
 
 ```rust

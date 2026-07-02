@@ -19,16 +19,17 @@ The native library is **bundled inside the platform wheel** — no separate down
 **Recommended — a platform wheel that bundles the native library:**
 
 ```bash
-pip install ccl                      # once published to PyPI
+pip install cardano-client-bridge    # once published to PyPI
 # or, a locally built wheel:
-pip install path/to/ccl-*.whl
+pip install path/to/cardano_client_bridge-*.whl
 ```
 
-The wheel ships the matching `libccl.*` inside the package (`ccl/_libs/`), so `import ccl` just
-works — nothing else to set. Build one locally (needs `pip install build`):
+The distribution is named `cardano-client-bridge`, but the import stays short: `import ccl`. The wheel
+ships the matching `libccl.*` inside the package (`ccl/_libs/`), so `import ccl` just works — nothing
+else to set. Build one locally (needs `pip install build`):
 
 ```bash
-./gradlew :wrappers:python:wheel     # -> wrappers/python/dist/ccl-*.whl
+./gradlew :wrappers:python:wheel     # -> wrappers/python/dist/cardano_client_bridge-*.whl
 ```
 
 At load time the bindings look for the library in this order: an explicit `CclLib(lib_path=...)`,

@@ -1,8 +1,13 @@
 [package]
-name = "ccl"
+name = "cardano-client-bridge"
 version = "0.1.0"
 edition = "2021"
 description = "Rust bindings for Cardano Client Lib (CCL) via GraalVM native library"
+
+# Published as `cardano-client-bridge`, but imported as `ccl` (e.g. `use ccl::...`) — keep the short
+# crate identifier stable while the registry/dist name is descriptive.
+[lib]
+name = "ccl"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

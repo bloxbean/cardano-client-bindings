@@ -295,7 +295,7 @@ wallet, _ := bridge.Wallet.Create(ccl.Mainnet)
 ### Usage Pattern (JavaScript / Bun)
 
 ```javascript
-import { CclBridge, MAINNET } from '@bloxbean/ccl';
+import { CclBridge, MAINNET } from '@bloxbean/cardano-client-bridge';
 
 const bridge = new CclBridge();
 
