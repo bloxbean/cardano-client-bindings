@@ -3,7 +3,7 @@ plugins {
     id 'org.graalvm.buildtools.native'
 }
 
-base.archivesName = 'ccl-bridge-core'
+base.archivesName = 'cardano-client-bridge-core'
 
 def cclVersion = '0.8.0-pre4'
 
