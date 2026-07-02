@@ -1,10 +1,127 @@
+// Build script: make `libccl.*` available to the linker AND findable at runtime with no
+// DYLD_LIBRARY_PATH / LD_LIBRARY_PATH, so `cargo build` "just works".
+//
+// The native lib is sourced in priority order:
+//   1. CCL_LIB_PATH        — an explicit directory (local development);
+//   2. the in-tree build   — ../../core/build/native/nativeCompile (developing in this repo);
+//   3. the GitHub release  — downloaded for the target platform (published-crate path).
+//
+// We stage a *copy* of the lib into OUT_DIR (a dir we control), rewrite its macOS install name to
+// `@rpath/libccl.dylib` (GraalVM stamps an absolute build path, which would otherwise be baked into
+// every consumer binary), and emit an rpath to OUT_DIR — so the runtime loader finds it with no env.
+
 use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+// Release tag the prebuilt native lib is fetched from when it isn't available locally. Kept separate
+// from the crate version (release tags may carry a preview suffix); override with CCL_LIB_VERSION.
+const DEFAULT_LIB_VERSION: &str = "v0.1.0-preview1";
+const REPO: &str = "bloxbean/ccl-bridge";
 
 fn main() {
-    let lib_path = env::var("CCL_LIB_PATH")
-        .unwrap_or_else(|_| "../../core/build/native/nativeCompile".to_string());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let lib_file = lib_filename(&target_os);
 
-    println!("cargo:rustc-link-search=native={}", lib_path);
+    let src = resolve_source_lib(&lib_file, &out_dir);
+    let staged = out_dir.join(&lib_file);
+    if src != staged {
+        fs::copy(&src, &staged)
+            .unwrap_or_else(|e| panic!("staging {} -> {}: {e}", src.display(), staged.display()));
+    }
+
+    if target_os == "macos" {
+        // Make the dependency resolvable via rpath instead of the absolute build path.
+        let _ = Command::new("install_name_tool")
+            .args(["-id", &format!("@rpath/{lib_file}")])
+            .arg(&staged)
+            .status();
+    }
+
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=dylib=ccl");
+    if target_os != "windows" {
+        // Runtime: find libccl next to where we staged it — no DYLD/LD_LIBRARY_PATH needed.
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", out_dir.display());
+    }
+    println!("cargo:rerun-if-env-changed=CCL_LIB_PATH");
+    println!("cargo:rerun-if-env-changed=CCL_LIB_VERSION");
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+fn lib_filename(target_os: &str) -> String {
+    match target_os {
+        "macos" => "libccl.dylib",
+        "windows" => "libccl.dll",
+        _ => "libccl.so",
+    }
+    .to_string()
+}
+
+fn resolve_source_lib(lib_file: &str, out_dir: &Path) -> PathBuf {
+    if let Ok(dir) = env::var("CCL_LIB_PATH") {
+        let p = Path::new(&dir).join(lib_file);
+        if p.exists() {
+            return p;
+        }
+    }
+    let in_tree = Path::new("../../core/build/native/nativeCompile").join(lib_file);
+    if in_tree.exists() {
+        return in_tree;
+    }
+    download_lib(lib_file, out_dir)
+}
+
+fn download_lib(lib_file: &str, out_dir: &Path) -> PathBuf {
+    let version = env::var("CCL_LIB_VERSION").unwrap_or_else(|_| DEFAULT_LIB_VERSION.to_string());
+    let platform = platform_tag();
+    let tarball = format!("cardano-client-bridge-{version}-{platform}.tar.gz");
+    let url = format!("https://github.com/{REPO}/releases/download/{version}/{tarball}");
+    let dl = out_dir.join(&tarball);
+
+    run(
+        Command::new("curl")
+            .args(["-fsSL", "-o"])
+            .arg(&dl)
+            .arg(&url),
+        &format!("download {url}"),
+    );
+    run(
+        Command::new("tar")
+            .arg("xzf")
+            .arg(&dl)
+            .arg("-C")
+            .arg(out_dir),
+        "extract native library",
+    );
+    let extracted = out_dir.join(lib_file);
+    assert!(
+        extracted.exists(),
+        "native library {lib_file} not found after extracting {tarball}"
+    );
+    extracted
+}
+
+fn platform_tag() -> String {
+    let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let os = match os.as_str() {
+        "macos" => "macos",
+        "windows" => "windows",
+        _ => "linux",
+    };
+    let arch = match arch.as_str() {
+        "aarch64" => "aarch64",
+        _ => "x86_64",
+    };
+    format!("{os}-{arch}")
+}
+
+fn run(cmd: &mut Command, what: &str) {
+    let status = cmd
+        .status()
+        .unwrap_or_else(|e| panic!("failed to run ({what}): {e}"));
+    assert!(status.success(), "command failed ({what}): {status}");
 }

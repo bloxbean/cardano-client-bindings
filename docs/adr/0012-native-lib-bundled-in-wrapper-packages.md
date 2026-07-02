@@ -52,8 +52,12 @@ Per-wrapper mechanism (each is a separate delivery, but all follow the rule abov
   pack time). For *publishing*, a single npm package can't be per-platform, so the release step will ship
   per-platform packages via `optionalDependencies` (each carrying one platform's lib) — the loader already
   finds a bundled lib regardless of which package provides it.
-- **Rust — crates.io.** crates.io will not host a 50 MB binary, so a `build.rs` fetches the lib from the
-  release (or `include_bytes!` from a locally staged copy) at build time.
+- **Rust — crates.io (implemented).** crates.io won't host the ~50 MB binary, so the crate carries only
+  source + `build.rs`; `build.rs` sources `libccl.*` (from `CCL_LIB_PATH`, the in-tree build, or the GitHub
+  release), stages a copy in `OUT_DIR`, rewrites the macOS install name to `@rpath`, and emits an `rpath` —
+  so linking *and* runtime work with no env vars. CI proves the crate loads with `CCL_LIB_PATH`/`DYLD`/`LD`
+  unset. Tradeoff vs. the wheel/npm: network is needed at the *first build* (not install), since Rust has no
+  install hook.
 - **Go — hardest.** Go modules run no install hooks, so bundling means `go:embed` of the platform lib +
   extract-to-temp at runtime, or a documented fetch step.
 
