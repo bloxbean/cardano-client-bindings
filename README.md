@@ -129,13 +129,13 @@ Download the native library for your platform from
 **macOS (Apple Silicon):**
 
 ```bash
-curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-bridge-v0.1.0-macos-aarch64.tar.gz | tar xz -C /usr/local/lib/
+curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/cardano-client-bridge-v0.1.0-macos-aarch64.tar.gz | tar xz -C /usr/local/lib/
 ```
 
 **Linux (x86_64):**
 
 ```bash
-curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-bridge-v0.1.0-linux-x86_64.tar.gz | tar xz -C /usr/local/lib/
+curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/cardano-client-bridge-v0.1.0-linux-x86_64.tar.gz | tar xz -C /usr/local/lib/
 ```
 
 > The Linux `libccl.so` is built against an old **glibc 2.17** baseline (in a `manylinux_2_28`
