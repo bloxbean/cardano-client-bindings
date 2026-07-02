@@ -3,7 +3,7 @@
 import { test, expect, afterEach } from "bun:test";
 import path from "path";
 import os from "os";
-import { resolveLibFile } from "../src/index.js";
+import { resolveLibFile, platformSuffix } from "../src/index.js";
 
 const NAME =
   os.platform() === "darwin" ? "libccl.dylib" : os.platform() === "win32" ? "libccl.dll" : "libccl.so";
@@ -27,6 +27,18 @@ test("CCL_LIB_PATH is used when no explicit path is given", () => {
 test("falls back to the bare filename when nothing is set or bundled", () => {
   delete process.env.CCL_LIB_PATH;
   const resolved = resolveLibFile();
-  // Either the bundled copy (if a lib was staged into libs/) or the bare filename.
+  // With no lib staged in libs/ and no @bloxbean/ccl-<platform> package installed, resolution ends
+  // at the bare filename (or the bundled copy if one happens to be staged).
   expect(resolved === NAME || resolved.endsWith(path.join("libs", NAME))).toBe(true);
+});
+
+test("platformSuffix matches one of the published per-platform package names", () => {
+  const valid = [
+    "linux-x86_64",
+    "linux-aarch64",
+    "macos-aarch64",
+    "macos-x86_64",
+    "windows-x86_64",
+  ];
+  expect(valid).toContain(platformSuffix());
 });
