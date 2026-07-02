@@ -65,7 +65,7 @@ jobs:
           echo '{"name":"verify","type":"module"}' > package.json
           bun add "$TGZ"
           env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
-            bun -e "import {CclBridge} from '@bloxbean/ccl'; const b=new CclBridge(); if(!b.version()) throw new Error('no version'); b.account.create(1); console.log('bundled npm package OK, no CCL_LIB_PATH')"
+            bun -e "import {CclBridge} from '@bloxbean/cardano-client-bridge'; const b=new CclBridge(); if(!b.version()) throw new Error('no version'); b.account.create(1); console.log('bundled npm package OK, no CCL_LIB_PATH')"
 
   # Windows: verify the native library (libccl.dll) builds and core logic passes.
   # Wrapper test coverage on Windows (Go cgo, C Makefile, etc.) is tracked separately
