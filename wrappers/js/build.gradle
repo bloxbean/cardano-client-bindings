@@ -35,7 +35,7 @@ task integrationTest(type: Exec) {
 }
 
 // Build an npm package tarball that bundles the native library into libs/, so `npm install`
-// needs no CCL_LIB_PATH. Produces bloxbean-ccl-<version>.tgz in the project dir.
+// needs no CCL_LIB_PATH. Produces bloxbean-cardano-client-bridge-<version>.tgz in the project dir.
 task pack(type: Exec) {
     dependsOn copyNativeLib
     workingDir projectDir

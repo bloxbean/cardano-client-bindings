@@ -25,14 +25,14 @@ The native library is **bundled inside the platform package** — no separate do
 ```bash
 bun add @bloxbean/cardano-client-bridge                 # once published
 # or, a locally built tarball:
-bun add ./bloxbean-ccl-0.1.0.tgz
+bun add ./bloxbean-cardano-client-bridge-0.1.0.tgz
 ```
 
 The package ships the matching `libccl.*` under `libs/`, so `new CclBridge()` just works — nothing
 else to set. Build the tarball locally with:
 
 ```bash
-./gradlew :wrappers:js:pack           # -> wrappers/js/bloxbean-ccl-*.tgz
+./gradlew :wrappers:js:pack           # -> wrappers/js/bloxbean-cardano-client-bridge-*.tgz
 ```
 
 At load time the bindings look for the library in this order: an explicit `new CclBridge(libPath)`,
