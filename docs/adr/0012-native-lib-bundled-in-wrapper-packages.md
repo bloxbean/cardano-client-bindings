@@ -79,6 +79,13 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
   not atomically.
 - A lib a version behind its wrapper still fails confusingly — bundling makes version-lock easier (same
   release builds both) but does not by itself add a runtime check (tracked separately).
+- **The two wrapper families resolve the lib differently.** Python (ctypes) and JS (`dlopen`) load a file
+  *by path* at runtime, so the lib's install name is irrelevant — they just point at the bundled copy. The
+  **native-linked** wrappers (Rust `extern "C"`, C, and Go via cgo) *link* against `libccl` at build time,
+  so removing the env-var requirement means making the runtime loader find it: stage the lib and reference
+  it via **`@rpath`** (macOS needs `install_name_tool -id @rpath/libccl.dylib` because GraalVM stamps an
+  absolute build path — exactly what forced `DYLD_LIBRARY_PATH` before; the Linux `.so`'s SONAME is already
+  the leaf name), plus emit an `rpath`. Rust does this in `build.rs`; Go/C will follow the same shape.
 
 ## Alternatives considered
 
@@ -92,3 +99,10 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
 - **One fat package carrying every platform's lib.** Simplest to publish (no matrix), but multiplies download
   size several-fold for everyone and fights each registry's platform-tag model. Rejected in favour of
   per-platform artifacts.
+- **Runtime `dlopen` for the native-linked wrappers, instead of build-time linking + `@rpath`.** Rust/C/Go
+  *could* drop `extern "C"`/cgo and load `libccl` at runtime (via `libloading` / `purego`, like Python and
+  JS), which sidesteps the install-name/`rpath` dance entirely. Rejected for Rust and taken as the default:
+  it's a full rewrite of each wrapper's FFI layer, whereas stage-`@rpath`-link keeps the existing,
+  well-tested bindings while still dropping the env-var requirement. **Left genuinely open for Go**, where
+  cgo's build-time linking *plus* Go's no-install-hook constraint (a ~250 MB all-platforms module otherwise)
+  may tip the balance toward `go:embed` + runtime `dlopen`.
