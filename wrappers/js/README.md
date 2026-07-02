@@ -23,7 +23,7 @@ The native library is **bundled inside the platform package** — no separate do
 **Recommended — a package that bundles the native library:**
 
 ```bash
-bun add @bloxbean/ccl                 # once published
+bun add @bloxbean/cardano-client-bridge                 # once published
 # or, a locally built tarball:
 bun add ./bloxbean-ccl-0.1.0.tgz
 ```
@@ -109,7 +109,7 @@ those for you over HTTP (Bun's built-in `fetch`), so the native library stays of
 provider-free:
 
 ```js
-import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/ccl";
+import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/cardano-client-bridge";
 
 const bridge = new CclBridge();
 const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
