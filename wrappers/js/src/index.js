@@ -1,6 +1,7 @@
 import { dlopen, FFIType, ptr, CString } from 'bun:ffi';
 import path from 'path';
 import os from 'os';
+import { existsSync } from 'fs';
 import { parse as parseYaml } from 'yaml';
 
 // Optional chain-data provider helpers (re-exported for convenience).
@@ -93,23 +94,34 @@ export function normalizeCostModels(protocolParams) {
   return out;
 }
 
+function libFilename() {
+  const platform = os.platform();
+  if (platform === 'darwin') return 'libccl.dylib';
+  if (platform === 'win32') return 'libccl.dll';
+  return 'libccl.so';
+}
+
+// Locate the native library, in priority order:
+//   1. an explicit `libPath` argument (a directory), if given;
+//   2. the CCL_LIB_PATH env var (a directory) — for development against a locally built lib;
+//   3. the copy bundled inside this package (`libs/`) — how an installed package ships it;
+//   4. the bare filename, letting the OS loader search its default paths.
+export function resolveLibFile(libPath) {
+  const name = libFilename();
+  if (libPath) return path.join(libPath, name);
+  if (process.env.CCL_LIB_PATH) return path.join(process.env.CCL_LIB_PATH, name);
+  const bundled = path.join(import.meta.dir, '..', 'libs', name);
+  if (existsSync(bundled)) return bundled;
+  return name;
+}
+
 export class CclBridge {
   constructor(libPath) {
-    if (!libPath) {
-      libPath = process.env.CCL_LIB_PATH || '.';
-    }
+    const libFile = resolveLibFile(libPath);
 
-    const platform = os.platform();
-    let libFile;
-    if (platform === 'darwin') {
-      libFile = path.join(libPath, 'libccl.dylib');
-    } else if (platform === 'win32') {
-      libFile = path.join(libPath, 'libccl.dll');
-    } else {
-      libFile = path.join(libPath, 'libccl.so');
-    }
-
-    const lib = dlopen(libFile, {
+    let lib;
+    try {
+      lib = dlopen(libFile, {
       graal_create_isolate: {
         args: [FFIType.ptr, FFIType.ptr, FFIType.ptr],
         returns: FFIType.i32,
@@ -175,6 +187,12 @@ export class CclBridge {
       // QuickTx
       ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
     });
+    } catch (e) {
+      throw new Error(
+        `Failed to load the CCL native library (${libFile}): ${e.message}\n` +
+        `Install a package that bundles it, or set CCL_LIB_PATH to the directory containing ${libFilename()}.`
+      );
+    }
 
     this._lib = lib.symbols;
 

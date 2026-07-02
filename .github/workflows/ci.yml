@@ -54,6 +54,18 @@ jobs:
         run: ./gradlew :wrappers:rust:test
       - name: Run JS tests
         run: ./gradlew :wrappers:js:test
+      # Prove the bundled npm package works: pack it (lib staged into libs/), install it into a clean
+      # project, and load the native lib with NO CCL_LIB_PATH / library-path env vars.
+      - name: Build & verify the bundled npm package
+        run: |
+          set -eux
+          ./gradlew :wrappers:js:pack
+          TGZ="$(ls "$PWD"/wrappers/js/*.tgz)"
+          WORK="$RUNNER_TEMP/jsverify"; rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+          echo '{"name":"verify","type":"module"}' > package.json
+          bun add "$TGZ"
+          env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+            bun -e "import {CclBridge} from '@bloxbean/cardano-client-bridge'; const b=new CclBridge(); if(!b.version()) throw new Error('no version'); b.account.create(1); console.log('bundled npm package OK, no CCL_LIB_PATH')"
 
   # Windows: verify the native library (libccl.dll) builds and core logic passes.
   # Wrapper test coverage on Windows (Go cgo, C Makefile, etc.) is tracked separately

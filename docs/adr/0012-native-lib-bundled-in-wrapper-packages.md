@@ -46,8 +46,12 @@ Per-wrapper mechanism (each is a separate delivery, but all follow the rule abov
   binary is platform-specific. The binary is never committed — it is staged at wheel-build time
   (`:wrappers:python:wheel`) and CI proves the built wheel installs into a clean venv and loads with no env
   vars.
-- **JavaScript — npm.** Bundle via per-platform `optionalDependencies` or an `npm postinstall` that fetches
-  the matching lib from the GitHub release.
+- **JavaScript — npm (implemented).** `CclBridge` resolves the lib with the same priority order and loads a
+  copy bundled under the package's `libs/`. `:wrappers:js:pack` stages the lib and runs `npm pack`; CI proves
+  the tarball installs into a clean project and loads with no env vars. The binary is gitignored (staged at
+  pack time). For *publishing*, a single npm package can't be per-platform, so the release step will ship
+  per-platform packages via `optionalDependencies` (each carrying one platform's lib) — the loader already
+  finds a bundled lib regardless of which package provides it.
 - **Rust — crates.io.** crates.io will not host a 50 MB binary, so a `build.rs` fetches the lib from the
   release (or `include_bytes!` from a locally staged copy) at build time.
 - **Go — hardest.** Go modules run no install hooks, so bundling means `go:embed` of the platform lib +

@@ -10,21 +10,41 @@ via the CCL Bridge native library, using Bun's built-in FFI.
 ## Requirements
 
 - [Bun](https://bun.sh/) 1.0+.
-- The native library `libccl.{dylib,so,dll}` for your platform.
+
+The native library is **bundled inside the platform package** — no separate download or
+`CCL_LIB_PATH` needed for an installed package.
 
 > **Node.js is not supported.** Node's FFI libraries (ffi-napi, koffi) crash against the
 > GraalVM native library due to stack-boundary detection. Use Bun, whose built-in FFI
 > works correctly. See the project [`TODO.md`](../../TODO.md) Non-Goals.
 
-## Getting the native library
+## Installing
 
-The bindings load the library at runtime via the `CCL_LIB_PATH` environment variable.
-Build or download it first. From the repo root:
+**Recommended — a package that bundles the native library:**
 
 ```bash
-./gradlew :core:nativeCompile   # build from source (needs Oracle GraalVM 25.0.3)
-# or:
-make download-lib               # download a pre-built binary
+bun add @bloxbean/cardano-client-bridge                 # once published
+# or, a locally built tarball:
+bun add ./bloxbean-cardano-client-bridge-0.1.0.tgz
+```
+
+The package ships the matching `libccl.*` under `libs/`, so `new CclBridge()` just works — nothing
+else to set. Build the tarball locally with:
+
+```bash
+./gradlew :wrappers:js:pack           # -> wrappers/js/bloxbean-cardano-client-bridge-*.tgz
+```
+
+At load time the bindings look for the library in this order: an explicit `new CclBridge(libPath)`,
+the `CCL_LIB_PATH` env var, then the bundled `libs/` copy.
+
+**Development — against a locally built library** (no package): point `CCL_LIB_PATH` at a directory
+containing `libccl.{dylib,so,dll}`:
+
+```bash
+./gradlew :core:nativeCompile         # build from source (needs Oracle GraalVM 25.0.3), or
+make download-lib                     # download a pre-built binary
+export CCL_LIB_PATH=core/build/native/nativeCompile
 ```
 
 At **runtime** the OS loader also needs it via `DYLD_LIBRARY_PATH` (macOS) /
@@ -89,7 +109,7 @@ those for you over HTTP (Bun's built-in `fetch`), so the native library stays of
 provider-free:
 
 ```js
-import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/ccl";
+import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/cardano-client-bridge";
 
 const bridge = new CclBridge();
 const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
