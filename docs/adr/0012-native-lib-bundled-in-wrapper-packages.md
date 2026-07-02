@@ -65,8 +65,8 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
 
 ## Consequences
 
-- `pip install ccl` (and eventually the npm/crates equivalents) works with **no `CCL_LIB_PATH`**, on a fresh
-  machine — the adoption blocker is removed, one wrapper at a time.
+- `pip install cardano-client-bridge` (and eventually the npm/crates equivalents) works with **no
+  `CCL_LIB_PATH`**, on a fresh machine — the adoption blocker is removed, one wrapper at a time.
 - Packages get **large** (tens of MB) and are **per-platform**; releasing means a build matrix producing one
   artifact per OS/arch, and users on an unsupported platform fall back to source/`CCL_LIB_PATH`.
 - The set of shippable platforms is bounded by what we build: `linux-x86_64` + `linux-aarch64` (both
