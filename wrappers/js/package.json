@@ -16,11 +16,11 @@
     "yaml": "^2.3.0"
   },
   "optionalDependencies": {
-    "@bloxbean/ccl-linux-x86_64": "0.1.0",
-    "@bloxbean/ccl-linux-aarch64": "0.1.0",
-    "@bloxbean/ccl-macos-aarch64": "0.1.0",
-    "@bloxbean/ccl-macos-x86_64": "0.1.0",
-    "@bloxbean/ccl-windows-x86_64": "0.1.0"
+    "@bloxbean/cardano-client-bridge-linux-x86_64": "0.1.0",
+    "@bloxbean/cardano-client-bridge-linux-aarch64": "0.1.0",
+    "@bloxbean/cardano-client-bridge-macos-aarch64": "0.1.0",
+    "@bloxbean/cardano-client-bridge-macos-x86_64": "0.1.0",
+    "@bloxbean/cardano-client-bridge-windows-x86_64": "0.1.0"
   },
   "engines": {
     "bun": ">=1.0.0"

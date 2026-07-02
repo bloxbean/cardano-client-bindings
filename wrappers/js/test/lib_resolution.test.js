@@ -27,7 +27,7 @@ test("CCL_LIB_PATH is used when no explicit path is given", () => {
 test("falls back to the bare filename when nothing is set or bundled", () => {
   delete process.env.CCL_LIB_PATH;
   const resolved = resolveLibFile();
-  // With no lib staged in libs/ and no @bloxbean/ccl-<platform> package installed, resolution ends
+  // With no lib staged in libs/ and no @bloxbean/cardano-client-bridge-<platform> package installed, resolution ends
   // at the bare filename (or the bundled copy if one happens to be staged).
   expect(resolved === NAME || resolved.endsWith(path.join("libs", NAME))).toBe(true);
 });

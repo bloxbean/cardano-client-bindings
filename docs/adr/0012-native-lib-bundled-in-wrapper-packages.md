@@ -50,9 +50,9 @@ Per-wrapper mechanism (each is a separate delivery, but all follow the rule abov
   copy bundled under the package's `libs/`. `:wrappers:js:pack` stages the lib and runs `npm pack`; CI proves
   the tarball installs into a clean project and loads with no env vars. The binary is gitignored (staged at
   pack time). For *publishing*, a single npm package can't be per-platform, so `publish-js.yml` ships
-  per-platform packages `@bloxbean/ccl-<platform>` via `optionalDependencies` (each carrying one platform's
+  per-platform packages `@bloxbean/cardano-client-bridge-<platform>` via `optionalDependencies` (each carrying one platform's
   lib, constrained by `os`/`cpu`); the loader resolves the lib from whichever one npm installed, so a plain
-  `npm install @bloxbean/ccl` needs no env vars. The npm upload is gated behind an admin-set repo variable.
+  `npm install @bloxbean/cardano-client-bridge` needs no env vars. The npm upload is gated behind an admin-set repo variable.
 - **Rust — crates.io.** crates.io will not host a 50 MB binary, so a `build.rs` fetches the lib from the
   release (or `include_bytes!` from a locally staged copy) at build time.
 - **Go — hardest.** Go modules run no install hooks, so bundling means `go:embed` of the platform lib +
