@@ -23,8 +23,10 @@ will:
 - Ship two reference implementations: **`YaciProvider`** (Yaci DevKit / yaci-store, Blockfrost-style
   REST; the CI-tested one) and **`BlockfrostProvider`** (project-id header, 100/page pagination,
   owning-address injection on each UTxO, `/epochs/latest/parameters`).
-- Expose a **`build_with_provider(yaml, provider, sender, exec_units?)`** convenience on the QuickTx
+- Expose a **`build_with(yaml, provider, sender)`** convenience on the QuickTx
   API that composes `provider.utxos(sender)` + `provider.protocol_params()` with the offline `build`.
+  (Renamed from `build_with_provider`; it gained an optional `evaluator` argument in
+  [ADR-0013](0013-transaction-evaluators.md) — execution units are no longer passed here.)
   The offline core imports no networking; the provider is duck-typed/interface-typed and only the
   convenience method touches it.
 - Do **no UTxO selection** in the helper — the bridge selects internally (it hands all of the

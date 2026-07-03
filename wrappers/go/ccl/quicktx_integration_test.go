@@ -379,8 +379,8 @@ func mustUtxos(t *testing.T, address string) []map[string]interface{} {
 	return utxos
 }
 
-// The shipped YaciProvider fetches the devnet's real chain data and feeds Build via BuildWithProvider.
-func TestIntegrationBuildWithProvider(t *testing.T) {
+// The shipped YaciProvider fetches the devnet's real chain data and feeds Build via BuildWith.
+func TestIntegrationBuildWith(t *testing.T) {
 	skipIfNoDevKit(t)
 	devkitReset()
 	waitForBlock()
@@ -390,9 +390,9 @@ func TestIntegrationBuildWithProvider(t *testing.T) {
 
 	provider := NewYaciProvider("") // local DevKit cluster
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "5000000")
-	result, err := bridge.QuickTx.BuildWithProvider(yaml, provider, sender.BaseAddress)
+	result, err := bridge.QuickTx.BuildWith(yaml, provider, sender.BaseAddress)
 	if err != nil {
-		t.Fatalf("BuildWithProvider: %v", err)
+		t.Fatalf("BuildWith: %v", err)
 	}
 	assertTxResult(t, result)
 }

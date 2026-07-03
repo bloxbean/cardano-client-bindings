@@ -138,7 +138,7 @@ transaction:
     expect(totalLovelace(r1Utxos)).toBe(3_000_000);
   });
 
-  it("builds via a YaciProvider (buildWithProvider) against the live devnet", async () => {
+  it("builds via a YaciProvider (buildWith) against the live devnet", async () => {
     if (skip) return;
 
     const sender = await fundSender();
@@ -147,7 +147,7 @@ transaction:
     // The shipped provider fetches the devnet's real UTXOs + protocol params and feeds build().
     const provider = new YaciProvider();
     const yaml = paymentYaml(sender.base_address, receiver.base_address, "5000000");
-    const result = await bridge.quicktx.buildWithProvider(yaml, provider, sender.base_address);
+    const result = await bridge.quicktx.buildWith(yaml, provider, sender.base_address);
 
     expect(result.tx_cbor.length).toBeGreaterThan(0);
     expect(result.tx_hash.length).toBe(64);

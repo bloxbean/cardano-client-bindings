@@ -113,7 +113,7 @@ import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/cardano-c
 
 const bridge = new CclBridge();
 const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
-const result = await bridge.quicktx.buildWithProvider(yaml, provider, senderAddress);
+const result = await bridge.quicktx.buildWith(yaml, provider, senderAddress);
 ```
 
 Plug in any backend (Koios, Ogmios, …) by supplying an object with `utxos(address)` and

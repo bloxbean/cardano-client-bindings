@@ -106,7 +106,7 @@ cardano-client-bridge = { version = "0.1", features = ["providers"] }
 use ccl::providers::BlockfrostProvider; // or YaciProvider
 
 let provider = BlockfrostProvider::new("proj_id", "preprod")?; // or YaciProvider::default()
-let result = bridge.quicktx().build_with_provider(&yaml, &provider, sender, None)?;
+let result = bridge.quicktx().build_with(&yaml, &provider, sender, None)?;
 ```
 
 Plug in any backend (Koios, Ogmios, …) by implementing the `ChainDataProvider` trait (`utxos`,

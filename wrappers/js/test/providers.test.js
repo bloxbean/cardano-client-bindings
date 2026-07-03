@@ -1,9 +1,9 @@
 // Unit tests for the optional chain-data provider helpers. These exercise the HTTP-shaping logic
-// (URLs, headers, pagination, address injection) and the buildWithProvider composition by stubbing
+// (URLs, headers, pagination, address injection) and the buildWith composition by stubbing
 // global fetch — the actual Yaci round-trip is covered by the DevKit integration tests.
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { YaciProvider, BlockfrostProvider } from "../src/providers.js";
+import { YaciProvider, BlockfrostProvider, TransactionEvaluator, BlockfrostEvaluator, parseEvaluation } from "../src/providers.js";
 import { QuickTxApi } from "../src/index.js";
 
 const realFetch = globalThis.fetch;
@@ -64,25 +64,81 @@ describe("BlockfrostProvider", () => {
   });
 });
 
-describe("buildWithProvider", () => {
-  it("composes provider fetch with build()", async () => {
-    const utxos = [{ tx_hash: "a".repeat(64), output_index: 0, address: "addrX",
-      amount: [{ unit: "lovelace", quantity: "9" }] }];
-    const pp = { min_fee_a: 44 };
-    const provider = {
-      utxos: async (addr) => { expect(addr).toBe("addrX"); return utxos; },
-      protocolParams: async () => pp,
-    };
+describe("buildWith", () => {
+  const utxos = [{ tx_hash: "a".repeat(64), output_index: 0, address: "addrX",
+    amount: [{ unit: "lovelace", quantity: "9" }] }];
+  const pp = { min_fee_a: 44 };
+  const provider = {
+    utxos: async (addr) => { expect(addr).toBe("addrX"); return utxos; },
+    protocolParams: async () => pp,
+  };
 
-    // buildWithProvider only calls provider.* then this.build, so test the real method against a
-    // stub `build` via the prototype — no native library needed.
+  // buildWith only calls provider.* then this.build, so test the real method against a stub
+  // `build` via the prototype — no native library needed.
+  function stubQuickTx() {
     const quicktx = Object.create(QuickTxApi.prototype);
-    const captured = {};
-    quicktx.build = (y, u, p, e) => { Object.assign(captured, { y, u, p, e }); return "RESULT"; };
+    const calls = [];
+    quicktx.build = (y, u, p, e = null) => { calls.push([y, u, p, e]); return { tx_cbor: "DRAFT" }; };
+    return { quicktx, calls };
+  }
 
-    const out = await quicktx.buildWithProvider("YAML", provider, "addrX", [{ mem: 1, steps: 2 }]);
+  it("with no evaluator, fetches then builds once (offline Scalus default)", async () => {
+    const { quicktx, calls } = stubQuickTx();
+    await quicktx.buildWith("YAML", provider, "addrX");
+    expect(calls).toEqual([["YAML", utxos, pp, null]]);
+  });
 
-    expect(out).toBe("RESULT");
-    expect(captured).toEqual({ y: "YAML", u: utxos, p: pp, e: [{ mem: 1, steps: 2 }] });
+  it("with an evaluator, runs the two-pass (draft → evaluate → rebuild)", async () => {
+    const { quicktx, calls } = stubQuickTx();
+    const evaluator = {
+      evaluate: async (txCbor, u) => {
+        expect(txCbor).toBe("DRAFT");
+        expect(u).toEqual(utxos);
+        return [{ mem: 1, steps: 2 }];
+      },
+    };
+    await quicktx.buildWith("YAML", provider, "addrX", evaluator);
+    expect(calls).toEqual([
+      ["YAML", utxos, pp, null],                    // draft
+      ["YAML", utxos, pp, [{ mem: 1, steps: 2 }]],  // rebuild
+    ]);
+  });
+});
+
+describe("parseEvaluation", () => {
+  it("orders map-form results by redeemer (spend before mint)", () => {
+    const resp = { result: { EvaluationResult: {
+      "mint:0": { memory: 1400, steps: 208100 },
+      "spend:0": { memory: 700, steps: 100000 },
+    } } };
+    expect(parseEvaluation(resp)).toEqual([
+      { mem: 700, steps: 100000 },
+      { mem: 1400, steps: 208100 },
+    ]);
+  });
+
+  it("parses the Ogmios v6 list form", () => {
+    const resp = { result: [
+      { validator: { index: 0, purpose: "mint" }, budget: { memory: 1400, cpu: 208100 } },
+      { validator: "spend:0", budget: { memory: 700, cpu: 100000 } },
+    ] };
+    expect(parseEvaluation(resp)).toEqual([
+      { mem: 700, steps: 100000 },
+      { mem: 1400, steps: 208100 },
+    ]);
+  });
+});
+
+describe("BlockfrostEvaluator", () => {
+  it("sets base url + headers", () => {
+    const ev = new BlockfrostEvaluator("proj", { network: "preprod" });
+    expect(ev instanceof TransactionEvaluator).toBe(true);
+    expect(ev.baseUrl.endsWith("cardano-preprod.blockfrost.io/api/v0")).toBe(true);
+    expect(ev._headers.project_id).toBe("proj");
+    expect(ev._headers["Content-Type"]).toBe("application/cbor");
+  });
+
+  it("throws on an unknown network without baseUrl", () => {
+    expect(() => new BlockfrostEvaluator("proj", { network: "nope" })).toThrow();
   });
 });

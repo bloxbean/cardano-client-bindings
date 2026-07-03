@@ -24,7 +24,7 @@ def test_plutus_mint_falls_back_to_scalus(ccl):
     assert int(result["fee"]) > 0
 
 
-def test_build_with_provider_uses_supplied_evaluator(ccl):
+def test_build_with_uses_supplied_evaluator(ccl):
     """A wrapper-side Evaluator (here a fake) overrides the Scalus default via the two-pass flow."""
     yaml = (FIXTURES / "mint.yaml").read_text()
     utxos = json.loads((FIXTURES / "utxos.json").read_text())
@@ -50,7 +50,7 @@ def test_build_with_provider_uses_supplied_evaluator(ccl):
     scalus_fee = int(ccl.quicktx.build(yaml, utxos, params)["fee"])
 
     evaluator = _FakeEvaluator()
-    result = ccl.quicktx.build_with_provider(yaml, _FakeProvider(), sender, evaluator=evaluator)
+    result = ccl.quicktx.build_with(yaml, _FakeProvider(), sender, evaluator=evaluator)
 
     assert evaluator.draft_cbor, "evaluator should be consulted with the draft transaction"
     assert result["tx_cbor"]

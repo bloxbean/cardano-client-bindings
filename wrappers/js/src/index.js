@@ -6,6 +6,7 @@ import { parse as parseYaml } from 'yaml';
 
 // Optional chain-data provider helpers (re-exported for convenience).
 export { ChainDataProvider, YaciProvider, BlockfrostProvider } from './providers.js';
+export { TransactionEvaluator, BlockfrostEvaluator } from './providers.js';
 
 // Error codes
 export const CCL_SUCCESS = 0;
@@ -478,9 +479,15 @@ export class QuickTxApi {
    * @param {Array<{mem: (number|string), steps: (number|string)}>} [execUnits]
    * @returns {Promise<{tx_cbor: string, tx_hash: string, fee: string}>}
    */
-  async buildWithProvider(txplanYaml, provider, sender, execUnits = null) {
+  async buildWith(txplanYaml, provider, sender, evaluator = null) {
     const utxos = await provider.utxos(sender);
     const protocolParams = await provider.protocolParams();
+    let execUnits = null;
+    if (evaluator != null) {
+      // Two-pass: draft (units computed offline by Scalus) -> remote evaluate -> rebuild.
+      const draft = this.build(txplanYaml, utxos, protocolParams);
+      execUnits = await evaluator.evaluate(draft.tx_cbor, utxos);
+    }
     return this.build(txplanYaml, utxos, protocolParams, execUnits);
   }
 }

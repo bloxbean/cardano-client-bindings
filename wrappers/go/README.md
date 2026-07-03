@@ -101,7 +101,7 @@ for you over HTTP (stdlib `net/http`), so the native library stays offline and p
 
 ```go
 provider, _ := ccl.NewBlockfrostProvider(projectID, "preprod") // or ccl.NewYaciProvider("")
-result, err := bridge.QuickTx.BuildWithProvider(yaml, provider, senderAddress)
+result, err := bridge.QuickTx.BuildWith(yaml, provider, senderAddress)
 ```
 
 Plug in any backend (Koios, Ogmios, …) by implementing the `ccl.ChainDataProvider` interface

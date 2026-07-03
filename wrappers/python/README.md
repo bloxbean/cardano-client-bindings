@@ -123,7 +123,7 @@ from ccl import CclLib, YaciProvider, BlockfrostProvider
 
 lib = CclLib()
 provider = BlockfrostProvider(project_id, network="preprod")  # or YaciProvider()
-result = lib.quicktx.build_with_provider(txplan_yaml, provider, sender_address)
+result = lib.quicktx.build_with(txplan_yaml, provider, sender_address)
 ```
 
 Plug in any backend (Koios, Ogmios, …) by supplying an object with `utxos(address)` and

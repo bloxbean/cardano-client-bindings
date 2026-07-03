@@ -11,14 +11,14 @@ A provider implements two methods:
     utxos(address)        -> list of UTXO dicts at the address (no selection — the bridge selects)
     protocol_params()     -> protocol parameters dict
 
-Use one directly, or via the ``QuickTx.build_with_provider`` convenience::
+Use one directly, or via the ``QuickTx.build_with`` convenience::
 
     from ccl import CclLib
     from ccl.providers import BlockfrostProvider
 
     lib = CclLib()
     provider = BlockfrostProvider(project_id, network="preprod")   # or YaciProvider() for DevKit
-    result = lib.quicktx.build_with_provider(txplan_yaml, provider, sender_address)
+    result = lib.quicktx.build_with(txplan_yaml, provider, sender_address)
 """
 import json
 import urllib.request
@@ -132,7 +132,7 @@ class BlockfrostProvider(ChainDataProvider):
 # The native library computes execution units offline with Scalus when you supply none (ADR-0013).
 # A TransactionEvaluator lets you compute them with a *remote* evaluator instead — e.g. as an
 # authoritative fallback. Remote evaluation is a wrapper concern: libccl never makes HTTP calls
-# (ADR-0002). Use one via ``quicktx.build_with_provider(..., evaluator=...)``.
+# (ADR-0002). Use one via ``quicktx.build_with(..., evaluator=...)``.
 
 class TransactionEvaluator:
     """Interface for computing a Plutus transaction's redeemer execution units."""
