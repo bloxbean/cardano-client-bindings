@@ -10,32 +10,40 @@ via the CCL Bridge native library.
 ## Requirements
 
 - Rust (stable, 2021 edition).
-- The native library `libccl.{dylib,so,dll}` for your platform.
 
-## Getting the native library
+The native library is **fetched automatically at build time** — no separate download and no
+`CCL_LIB_PATH` / `DYLD_LIBRARY_PATH` / `LD_LIBRARY_PATH` needed.
 
-`build.rs` links against `libccl`, looking in `CCL_LIB_PATH` (default:
-`../../core/build/native/nativeCompile`, relative to this crate). Build or download it
-there first. From the repo root:
+## Installing
 
 ```bash
-./gradlew :core:nativeCompile   # build from source (needs Oracle GraalVM 25.0.3)
-# or:
-make download-lib               # download a pre-built binary
+cargo add cardano-client-bridge          # published as cardano-client-bridge, imported as `ccl`
 ```
 
-At **runtime** the OS loader also needs the library via `DYLD_LIBRARY_PATH` (macOS) /
-`LD_LIBRARY_PATH` (Linux).
+`build.rs` sources `libccl.*` for your target — in priority order: `CCL_LIB_PATH` (a dir), the
+in-tree monorepo build, or **downloaded from the GitHub release** — then stages it and sets an
+`rpath`, so both linking and runtime "just work" with **no environment variables**.
+
+- Override the release tag it fetches from with `CCL_LIB_VERSION`.
+- crates.io can't host the ~50 MB binary, so the crate carries only source + `build.rs`; the lib is
+  pulled at build time (needs network on the first build). See
+  [ADR-0012](../../docs/adr/0012-native-lib-bundled-in-wrapper-packages.md).
 
 ## Running the examples
 
-From `wrappers/rust`:
+From `wrappers/rust`, **no env vars required**:
 
 ```bash
-LIB_DIR=../../core/build/native/nativeCompile
+cargo run --example account
+```
 
-CCL_LIB_PATH=$LIB_DIR DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
-  cargo run --example account
+For development against a locally built library, point `CCL_LIB_PATH` at it (optional — the in-tree
+build is found automatically):
+
+```bash
+./gradlew :core:nativeCompile            # build from source (needs Oracle GraalVM 25.0.3), or
+make download-lib                        # download a pre-built binary
+CCL_LIB_PATH=../../core/build/native/nativeCompile cargo run --example account
 ```
 
 The [`examples/`](examples/) directory contains:

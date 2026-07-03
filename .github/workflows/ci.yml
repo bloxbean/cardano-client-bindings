@@ -52,6 +52,15 @@ jobs:
         run: ./gradlew :wrappers:go:test
       - name: Run Rust tests
         run: ./gradlew :wrappers:rust:test
+      # Prove the crate loads the native lib with NO library env vars: build.rs stages the lib
+      # (from the in-tree build here) and sets an rpath, so the example runs with CCL_LIB_PATH /
+      # DYLD / LD unset. Mirrors the Python wheel / npm package verify.
+      - name: Verify the Rust crate loads with no library env vars
+        run: |
+          set -eux
+          cd wrappers/rust
+          env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+            cargo run --quiet --example account | head -1
       - name: Run JS tests
         run: ./gradlew :wrappers:js:test
       # Prove the bundled npm package works: pack it (lib staged into libs/), install it into a clean
