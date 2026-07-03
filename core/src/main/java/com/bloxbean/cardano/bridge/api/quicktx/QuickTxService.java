@@ -68,6 +68,14 @@ public class QuickTxService {
         List<ExUnits> execUnits = parseExUnits(execUnitsJson);
         if (!execUnits.isEmpty()) {
             txContext.withTxEvaluator(new StaticTransactionEvaluator(execUnits));
+        } else {
+            // No caller-supplied units: fall back to Scalus, which evaluates the script(s) offline
+            // (runs the UPLC engine in-process, no network). Requires cost models in the protocol
+            // params. TODO(evaluators): expose this as a pluggable Evaluator with a graceful path
+            // when cost models are absent (Scalus MachineParams.defaultPlutusV2PostConwayParams) and
+            // a remote (Blockfrost /utils/txs/evaluate) fallback.
+            txContext.withTxEvaluator(
+                    new scalus.bloxbean.ScalusTransactionEvaluator(protocolParams, utxoSupplier));
         }
 
         // Budget witnesses for fee estimation of the (still unsigned) transaction.

@@ -15,6 +15,9 @@ dependencies {
     implementation "com.bloxbean.cardano:cardano-client-governance:${cclVersion}"
     implementation "com.bloxbean.cardano:cardano-client-quicktx:${cclVersion}"
 
+    // POC: Scalus offline Plutus evaluator (Scala 3). Testing whether it survives native-image.
+    implementation "org.scalus:scalus-bloxbean-cardano-client-lib_3:0.17.0"
+
     // CCL CIP modules
     implementation "com.bloxbean.cardano:cardano-client-cip8:${cclVersion}"
     implementation "com.bloxbean.cardano:cardano-client-cip20:${cclVersion}"

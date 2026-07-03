@@ -210,10 +210,28 @@ class QuickTxApiTest {
     }
 
     @Test
-    void plutusMintWithoutExecUnitsFails() {
+    void plutusMintWithoutExecUnitsUsesScalus() throws Exception {
         String yaml = mintScriptYaml();
-        // No execution units → no offline evaluator runs the script → the build fails.
-        assertThrows(Exception.class,
-                () -> service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+        // Scalus needs cost models to run the UPLC machine; the default fixture omits them.
+        String paramsWithCostModels;
+        try (InputStream is = getClass().getClassLoader()
+                .getResourceAsStream("protocol-params-with-costmodels.json")) {
+            paramsWithCostModels = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        // No supplied units → the Scalus evaluator computes them offline by running the validator.
+        JsonNode result = YamlSerializer.getYamlMapper()
+                .readTree(service.buildTransaction(yaml, utxos(), paramsWithCostModels, null));
+        assertBuilt(result);
+
+        Transaction tx = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));
+        var exUnits = tx.getWitnessSet().getRedeemers().get(0).getExUnits();
+        System.out.println("SCALUS-COMPUTED UNITS: mem=" + exUnits.getMem() + " steps=" + exUnits.getSteps());
+        // A real UPLC evaluation of the always-succeeds script → non-zero mem and steps.
+        assertTrue(exUnits.getMem().signum() > 0);
+        assertTrue(exUnits.getSteps().signum() > 0);
+
+        // Dump fixtures for the native-image harness.
+        System.out.println("FIXTURE_YAML<<<" + yaml + ">>>");
+        System.out.println("FIXTURE_UTXOS<<<" + utxos() + ">>>");
     }
 }
