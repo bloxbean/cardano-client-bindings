@@ -2,6 +2,12 @@
   "name": "@bloxbean/cardano-client-bridge",
   "version": "0.1.0",
   "description": "JavaScript bindings for Cardano Client Lib (CCL) via GraalVM native library",
+  "license": "MIT",
+  "homepage": "https://github.com/bloxbean/ccl-bridge",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bloxbean/ccl-bridge"
+  },
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "files": [
