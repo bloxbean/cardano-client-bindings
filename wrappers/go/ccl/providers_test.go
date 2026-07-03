@@ -1,7 +1,7 @@
 package ccl
 
 // Unit tests for the optional chain-data provider helpers: the HTTP-shaping logic (URLs, headers,
-// pagination, address injection) via httptest, plus an offline BuildWithProvider round-trip that
+// pagination, address injection) via httptest, plus an offline BuildWith round-trip that
 // serves the known-good static params/UTXOs (no DevKit). The live Yaci round-trip is covered by the
 // DevKit integration tests.
 
@@ -89,9 +89,9 @@ func TestBlockfrostUnknownNetwork(t *testing.T) {
 	}
 }
 
-// BuildWithProvider end-to-end, offline: a local server returns the known-good static protocol
+// BuildWith end-to-end, offline: a local server returns the known-good static protocol
 // params and UTXOs, and the bridge builds a real payment from them — no DevKit required.
-func TestBuildWithProviderOffline(t *testing.T) {
+func TestBuildWithOffline(t *testing.T) {
 	sender := intentSender
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/utxos") {
@@ -104,9 +104,9 @@ func TestBuildWithProviderOffline(t *testing.T) {
 
 	provider := NewYaciProvider(srv.URL)
 	yaml := quickTxYaml(sender, intentSender2, "5000000")
-	res, err := bridge.QuickTx.BuildWithProvider(yaml, provider, sender)
+	res, err := bridge.QuickTx.BuildWith(yaml, provider, sender)
 	if err != nil {
-		t.Fatalf("BuildWithProvider: %v", err)
+		t.Fatalf("BuildWith: %v", err)
 	}
 	if len(res.TxHash) != 64 {
 		t.Errorf("expected 64-char tx hash, got %d", len(res.TxHash))

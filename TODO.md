@@ -96,7 +96,7 @@ untouched and the helpers are optional and swappable. This is the sibling of §2
   (all four wrappers).** Each ships a `ChainDataProvider` interface (`utxos(address)` /
   `protocol_params()`) plus `YaciProvider` (DevKit/yaci-store, CI-tested live) and `BlockfrostProvider`
   (project-id header, pagination, address injection; unit-tested against mock servers — not live in
-  CI), and a `build_with_provider(yaml, provider, sender, exec_units?)` convenience on the QuickTx
+  CI), and a `build_with(yaml, provider, sender, exec_units?)` convenience on the QuickTx
   API. The native lib stays offline/provider-free: helpers are pure wrapper code using each
   language's own HTTP client (urllib / net/http / Bun fetch / ureq). Rust gates it behind a
   `providers` feature so the core crate needs no HTTP client. Cost models from these providers flow
@@ -115,7 +115,7 @@ untouched and the helpers are optional and swappable. This is the sibling of §2
     UTXOs to `QuickTxBuilder`/`StaticUtxoSupplier`). The helper only needs "UTXOs at address X".
   - Define a small provider interface per language (`utxos(addr)`, `protocol_params()`), ship at
     least one concrete impl (Blockfrost-style + Yaci DevKit, which the integration tests already
-    hit), and document a `buildWithProvider(yaml, provider, sender)` convenience that composes
+    hit), and document a `buildWith(yaml, provider, sender)` convenience that composes
     fetch → build.
   - Compose cleanly with §2b's exec-unit evaluators so a Plutus build is `fetch → evaluate → build`.
 - [ ] `P2` **Reconcile the WISHLIST vs Non-Goals tension.** Satya's wishlist wants provider-fetched

@@ -113,9 +113,33 @@ import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/cardano-c
 
 const bridge = new CclBridge();
 const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
-const result = await bridge.quicktx.buildWithProvider(yaml, provider, senderAddress);
+const result = await bridge.quicktx.buildWith(yaml, provider, senderAddress);
 ```
 
 Plug in any backend (Koios, Ogmios, …) by supplying an object with `utxos(address)` and
 `protocolParams()`. UTXO *selection* is handled inside the bridge — a provider only returns all
 UTXOs at the address.
+
+## Transaction evaluators (optional)
+
+A Plutus build needs each redeemer's execution units. The bridge computes them **offline** with
+Scalus when you supply none — so a script build just works, no evaluation step:
+
+```javascript
+const result = await bridge.quicktx.buildWith(yaml, provider, senderAddress); // Scalus computes the units
+```
+
+To use a **remote** evaluator instead (e.g. an authoritative fallback), pass a
+`TransactionEvaluator`; `buildWith` runs a two-pass (draft → evaluate → rebuild). libccl never makes
+HTTP calls ([ADR-0013](../../docs/adr/0013-transaction-evaluators.md)), so remote evaluation lives
+here in the wrapper:
+
+```javascript
+import { BlockfrostEvaluator } from "@bloxbean/cardano-client-bridge";
+
+const evaluator = new BlockfrostEvaluator(projectId, { network: "preprod" });
+const result = await bridge.quicktx.buildWith(yaml, provider, senderAddress, evaluator);
+```
+
+Plug in any evaluator (Ogmios, …) by supplying an object with `evaluate(txCbor, utxos)`. To supply
+units you computed yourself, call `build(…, execUnits)` directly. See `examples/evaluator.js`.

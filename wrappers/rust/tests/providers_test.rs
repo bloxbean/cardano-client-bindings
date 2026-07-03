@@ -1,7 +1,7 @@
 //! Tests for the optional chain-data provider helpers (the `providers` feature).
 //!
 //! Covers the HTTP-shaping logic (pagination, address injection, project_id header) against a local
-//! mock server, plus an offline build_with_provider round-trip using a stub provider and the real
+//! mock server, plus an offline build_with round-trip using a stub provider and the real
 //! offline build. The live Yaci round-trip is covered by the DevKit integration tests.
 #![cfg(feature = "providers")]
 
@@ -33,7 +33,7 @@ fn static_utxos() -> Value {
     }])
 }
 
-/// A provider with no network at all — proves the trait + build_with_provider composition and the
+/// A provider with no network at all — proves the trait + build_with composition and the
 /// real offline build work end to end.
 struct StubProvider;
 impl ChainDataProvider for StubProvider {
@@ -47,15 +47,15 @@ impl ChainDataProvider for StubProvider {
 }
 
 #[test]
-fn build_with_provider_offline() {
+fn build_with_offline() {
     let bridge = Bridge::new().expect("bridge");
     let yaml = format!(
         "version: 1.0\ntransaction:\n  - tx:\n      from: {SENDER}\n      intents:\n        - type: payment\n          address: {RECEIVER}\n          amounts:\n            - unit: lovelace\n              quantity: \"5000000\"\n"
     );
     let res = bridge
         .quicktx()
-        .build_with_provider(&yaml, &StubProvider, SENDER, None)
-        .expect("build_with_provider");
+        .build_with(&yaml, &StubProvider, SENDER, None)
+        .expect("build_with");
     assert_eq!(res.tx_hash.len(), 64);
     assert!(!res.tx_cbor.is_empty());
 }

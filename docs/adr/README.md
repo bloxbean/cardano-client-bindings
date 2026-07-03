@@ -34,3 +34,4 @@ undo them.
 | [0010](0010-go-isolate-thread-affinity.md) | Go wrapper isolate thread-affinity — all FFI on one dedicated OS thread | Accepted | 2026-06-10 |
 | [0011](0011-wrapper-side-chain-data-providers.md) | Wrapper-side chain-data provider helpers (UTxOs + protocol params) | Accepted | 2026-06-30 |
 | [0012](0012-native-lib-bundled-in-wrapper-packages.md) | Distribute the native library bundled in per-wrapper platform packages | Accepted | 2026-07-01 |
+| [0013](0013-transaction-evaluators.md) | Transaction evaluators — Scalus default in the core, pluggable remote evaluators in the wrappers | Accepted | 2026-07-03 |
