@@ -129,3 +129,28 @@ result = lib.quicktx.build_with(txplan_yaml, provider, sender_address)
 Plug in any backend (Koios, Ogmios, …) by supplying an object with `utxos(address)` and
 `protocol_params()`. UTXO *selection* is handled inside the bridge — a provider only returns all
 UTXOs at the address.
+
+## Transaction evaluators (optional)
+
+A Plutus build needs each redeemer's execution units. The bridge computes them **offline** with
+Scalus when you supply none — so a script build just works, no evaluation step:
+
+```python
+result = lib.quicktx.build_with(txplan_yaml, provider, sender_address)  # Scalus computes the units
+```
+
+To use a **remote** evaluator instead (e.g. an authoritative fallback), pass a
+`TransactionEvaluator`; `build_with` runs a two-pass (draft → evaluate → rebuild). libccl never
+makes HTTP calls ([ADR-0013](../../docs/adr/0013-transaction-evaluators.md)), so remote evaluation
+lives here in the wrapper:
+
+```python
+from ccl import BlockfrostEvaluator
+
+evaluator = BlockfrostEvaluator(project_id, network="preprod")
+result = lib.quicktx.build_with(txplan_yaml, provider, sender_address, evaluator=evaluator)
+```
+
+Plug in any evaluator (Ogmios, …) by supplying an object with `evaluate(tx_cbor, utxos)`. To supply
+units you computed yourself, call `build(..., exec_units=…)` directly. See
+`examples/04_plutus_evaluator.py`.

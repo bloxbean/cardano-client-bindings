@@ -27,3 +27,8 @@ providers = ["dep:ureq"]
 
 [dev-dependencies]
 ureq = { version = "2", features = ["json"] }
+
+# The evaluator example uses build_with + a provider, which live behind the `providers` feature.
+[[example]]
+name = "evaluator"
+required-features = ["providers"]
