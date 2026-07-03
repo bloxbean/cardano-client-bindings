@@ -50,6 +50,25 @@ jobs:
             "$RUNNER_TEMP/wheelvenv/bin/python" -c "import ccl; assert ccl.CclLib().version(); ccl.CclLib().account.create(ccl.CclLib.TESTNET); print('bundled wheel OK, no CCL_LIB_PATH')"
       - name: Run Go tests
         run: ./gradlew :wrappers:go:test
+      # Prove the Go wrapper is distributable: it builds as pure Go (CGO_ENABLED=0 — no cgo, no C
+      # toolchain), and resolves libccl at runtime with NO CCL_LIB_PATH. The lib is seeded into the
+      # per-version cache here (standing in for the release download, which needs a published
+      # release); the loader then finds it exactly as a `go get` consumer would. Mirrors the
+      # Python wheel / npm package / Rust crate verifies above.
+      - name: Build & verify the Go wrapper (pure Go, no library env vars)
+        run: |
+          set -eux
+          (cd wrappers/go && CGO_ENABLED=0 go build ./...)
+          case "$RUNNER_OS" in
+            Linux) CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ccl-bridge/v0.1.0-preview1"; LIB=libccl.so ;;
+            macOS) CACHE="$HOME/Library/Caches/ccl-bridge/v0.1.0-preview1"; LIB=libccl.dylib ;;
+          esac
+          mkdir -p "$CACHE"
+          cp "core/build/native/nativeCompile/$LIB" "$CACHE/$LIB"
+          cd wrappers/go
+          env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH CGO_ENABLED=0 \
+            go run ./examples/account | head -1
+          echo "Go wrapper OK — pure Go, resolved from cache, no CCL_LIB_PATH"
       - name: Run Rust tests
         run: ./gradlew :wrappers:rust:test
       # Prove the crate loads the native lib with NO library env vars: build.rs stages the lib
