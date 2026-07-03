@@ -2,8 +2,14 @@
 name = "cardano-client-bridge"
 version = "0.1.0"
 description = "Python bindings for Cardano Client Lib (CCL) via GraalVM native library"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.8"
 dependencies = ["pyyaml>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/bloxbean/ccl-bridge"
+Repository = "https://github.com/bloxbean/ccl-bridge"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
