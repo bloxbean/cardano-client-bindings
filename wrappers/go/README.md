@@ -1,16 +1,28 @@
 # CCL Bridge — Go
 
 Go bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
-via the CCL Bridge native library, using `cgo`.
+via the CCL Bridge native library. Pure Go — the library is loaded with
+[purego](https://github.com/ebitengine/purego), so there is **no cgo and no C toolchain**.
 
 > Part of the [CCL Bridge](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
 > [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
-## Requirements
+## Install
 
-- Go 1.21+ with `cgo` enabled (a C toolchain on `PATH`).
-- The native library `libccl.{dylib,so,dll}` for your platform.
+```bash
+go get github.com/bloxbean/ccl-bridge/wrappers/go
+```
+
+Requires Go 1.21+. No C toolchain, no `CGO_ENABLED`. On first use the native library
+`libccl.{dylib,so,dll}` for your platform is resolved automatically, in order:
+
+1. **`CCL_LIB_PATH`** — a directory or the library file, to supply your own build;
+2. a **per-version cache** (`os.UserCacheDir()/ccl-bridge/<version>/`);
+3. otherwise it is **downloaded once** from the matching GitHub release and cached.
+
+Override the downloaded version with `CCL_LIB_VERSION`. Resolution is fail-hard: a bad
+download errors rather than silently using a stale library.
 
 > **Threading:** all FFI calls run on a single dedicated OS thread that the `Bridge`
 > pins for its lifetime, so a `Bridge` is safe to share across goroutines and is immune
@@ -18,30 +30,13 @@ via the CCL Bridge native library, using `cgo`.
 > Linux x86_64). Calls are serialized; create multiple `Bridge` instances if you need
 > concurrent isolate work.
 
-## Getting the native library
-
-The `cgo` directives in `ccl/ccl.go` already point the compiler/linker at
-`core/build/native/nativeCompile` (relative to the package), so you only need to build
-or download the library there. From the repo root:
-
-```bash
-./gradlew :core:nativeCompile   # build from source (needs Oracle GraalVM 25.0.3)
-# or:
-make download-lib               # download a pre-built binary
-```
-
-At **runtime** the OS loader also needs to find the library, via `DYLD_LIBRARY_PATH`
-(macOS) / `LD_LIBRARY_PATH` (Linux).
-
 ## Running the examples
 
-From `wrappers/go`:
+From `wrappers/go` (the library is auto-resolved; set `CCL_LIB_PATH` to a local build to
+skip the download):
 
 ```bash
-LIB_DIR=../../core/build/native/nativeCompile
-
-DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
-  go run ./examples/account
+go run ./examples/account
 ```
 
 The [`examples/`](examples/) directory contains:

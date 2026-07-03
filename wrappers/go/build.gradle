@@ -13,10 +13,11 @@ task test(type: Exec) {
     workingDir file('ccl')
 
     def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
-    environment 'CGO_CFLAGS', "-I${nativeDir}"
-    environment 'CGO_LDFLAGS', "-L${nativeDir} -lccl"
-    environment 'DYLD_LIBRARY_PATH', nativeDir
-    environment 'LD_LIBRARY_PATH', nativeDir
+    // purego dlopens libccl at runtime — no cgo, no C toolchain. CCL_LIB_PATH points it at the
+    // freshly built library so tests use it instead of downloading from a release. CGO_ENABLED=0
+    // proves the wrapper builds as pure Go.
+    environment 'CCL_LIB_PATH', nativeDir
+    environment 'CGO_ENABLED', '0'
 
     def goArch = System.getProperty("os.arch") == "aarch64" ? "arm64" : "amd64"
     environment 'GOARCH', goArch
