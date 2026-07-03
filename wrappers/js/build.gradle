@@ -34,15 +34,28 @@ task integrationTest(type: Exec) {
     commandLine 'bash', '-c', 'bun install && bun test test/'
 }
 
+// Stage the platform's libccl.* into libs/ (pure Gradle — no shell — so it works on Windows).
+// Keeps the committed .gitkeep; only the binaries and stale tarballs are managed here.
+task stagePackLib {
+    dependsOn copyNativeLib
+    doLast {
+        delete fileTree('libs') { include 'libccl.*' }
+        delete fileTree(projectDir) { include '*.tgz' }
+        copy {
+            from layout.buildDirectory.dir('native')
+            into 'libs'
+            include 'libccl.so', 'libccl.dylib', 'libccl.dll'
+        }
+    }
+}
+
 // Build an npm package tarball that bundles the native library into libs/, so `npm install`
 // needs no CCL_LIB_PATH. Produces bloxbean-cardano-client-bridge-<version>.tgz in the project dir.
 task pack(type: Exec) {
-    dependsOn copyNativeLib
+    dependsOn stagePackLib
     workingDir projectDir
-
-    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
-    commandLine 'bash', '-c',
-        "set -eu; rm -rf libs *.tgz; mkdir -p libs; " +
-        "for f in libccl.so libccl.dylib libccl.dll; do cp \"${nativeDir}/\$f\" libs/ 2>/dev/null || true; done; " +
-        "npm pack"
+    // Invoke npm directly (Windows: npm.cmd) rather than via `bash` (a bare `bash` resolves to WSL
+    // on Windows runners, which has no distro).
+    def npm = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'npm.cmd' : 'npm'
+    commandLine npm, 'pack'
 }
