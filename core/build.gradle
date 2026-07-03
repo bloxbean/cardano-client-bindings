@@ -15,7 +15,9 @@ dependencies {
     implementation "com.bloxbean.cardano:cardano-client-governance:${cclVersion}"
     implementation "com.bloxbean.cardano:cardano-client-quicktx:${cclVersion}"
 
-    // POC: Scalus offline Plutus evaluator (Scala 3). Testing whether it survives native-image.
+    // Scalus offline Plutus evaluator (Scala 3): computes redeemer execution units in-process by
+    // running the UPLC engine — no network. Used as the fallback evaluator when the caller supplies
+    // none. (Compiles + runs inside the GraalVM native image.)
     implementation "org.scalus:scalus-bloxbean-cardano-client-lib_3:0.17.0"
 
     // CCL CIP modules
