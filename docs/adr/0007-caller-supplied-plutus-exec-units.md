@@ -1,8 +1,13 @@
 # ADR-0007: Plutus execution units are caller-supplied; the bridge stays evaluator-agnostic
 
-- **Status:** Accepted
+- **Status:** Accepted — evolved by [ADR-0013](0013-transaction-evaluators.md)
 - **Date:** 2026-06-11
 - **Deciders:** bloxbean maintainers
+
+> **Update:** [ADR-0013](0013-transaction-evaluators.md) evolves this decision — the bridge now also
+> ships a **default** evaluator (Scalus, offline in the native image) used when the caller supplies no
+> units, plus a wrapper-side pluggable `Evaluator` for remote evaluation. Caller-supplied units still
+> take precedence, so the contract described here remains valid; it is no longer the *only* path.
 
 ## Context
 
