@@ -1,13 +1,13 @@
 [package]
-name = "cardano-client-bridge"
+name = "cardano-client-lib"
 version = "0.1.0"
 edition = "2021"
 description = "Rust bindings for Cardano Client Lib (CCL) via GraalVM native library"
 license = "MIT"
-repository = "https://github.com/bloxbean/ccl-bridge"
+repository = "https://github.com/bloxbean/cardano-client-bindings"
 readme = "README.md"
 
-# Published as `cardano-client-bridge`, but imported as `ccl` (e.g. `use ccl::...`) — keep the short
+# Published as `cardano-client-lib`, but imported as `ccl` (e.g. `use ccl::...`) — keep the short
 # crate identifier stable while the registry/dist name is descriptive.
 [lib]
 name = "ccl"

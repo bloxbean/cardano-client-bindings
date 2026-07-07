@@ -60,8 +60,8 @@ jobs:
           set -eux
           (cd wrappers/go && CGO_ENABLED=0 go build ./...)
           case "$RUNNER_OS" in
-            Linux) CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/ccl-bridge/v0.1.0-preview1"; LIB=libccl.so ;;
-            macOS) CACHE="$HOME/Library/Caches/ccl-bridge/v0.1.0-preview1"; LIB=libccl.dylib ;;
+            Linux) CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/cardano-client-bindings/v0.1.0-preview1"; LIB=libccl.so ;;
+            macOS) CACHE="$HOME/Library/Caches/cardano-client-bindings/v0.1.0-preview1"; LIB=libccl.dylib ;;
           esac
           mkdir -p "$CACHE"
           cp "core/build/native/nativeCompile/$LIB" "$CACHE/$LIB"
@@ -93,7 +93,7 @@ jobs:
           echo '{"name":"verify","type":"module"}' > package.json
           bun add "$TGZ"
           env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
-            bun -e "import {CclBridge} from '@bloxbean/cardano-client-bridge'; const b=new CclBridge(); if(!b.version()) throw new Error('no version'); b.account.create(1); console.log('bundled npm package OK, no CCL_LIB_PATH')"
+            bun -e "import {CclBridge} from '@bloxbean/cardano-client-lib'; const b=new CclBridge(); if(!b.version()) throw new Error('no version'); b.account.create(1); console.log('bundled npm package OK, no CCL_LIB_PATH')"
 
   # Windows: verify the native library (libccl.dll) builds and core logic passes.
   # Wrapper test coverage on Windows (Go cgo, C Makefile, etc.) is tracked separately

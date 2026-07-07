@@ -1,9 +1,9 @@
-# CCL Bridge — JavaScript (Bun)
+# Cardano Client Bindings — JavaScript (Bun)
 
 JavaScript bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
-via the CCL Bridge native library, using Bun's built-in FFI.
+via the Cardano Client Bindings native library, using Bun's built-in FFI.
 
-> Part of the [CCL Bridge](../../README.md) project. See the
+> Part of the [Cardano Client Bindings](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
 > [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
@@ -23,16 +23,16 @@ The native library is **bundled inside the platform package** — no separate do
 **Recommended — a package that bundles the native library:**
 
 ```bash
-bun add @bloxbean/cardano-client-bridge                 # once published
+bun add @bloxbean/cardano-client-lib                 # once published
 # or, a locally built tarball:
-bun add ./bloxbean-cardano-client-bridge-0.1.0.tgz
+bun add ./bloxbean-cardano-client-lib-0.1.0.tgz
 ```
 
 The package ships the matching `libccl.*` under `libs/`, so `new CclBridge()` just works — nothing
 else to set. Build the tarball locally with:
 
 ```bash
-./gradlew :wrappers:js:pack           # -> wrappers/js/bloxbean-cardano-client-bridge-*.tgz
+./gradlew :wrappers:js:pack           # -> wrappers/js/bloxbean-cardano-client-lib-*.tgz
 ```
 
 At load time the bindings look for the library in this order: an explicit `new CclBridge(libPath)`,
@@ -109,7 +109,7 @@ those for you over HTTP (Bun's built-in `fetch`), so the native library stays of
 provider-free:
 
 ```js
-import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/cardano-client-bridge";
+import { CclBridge, YaciProvider, BlockfrostProvider } from "@bloxbean/cardano-client-lib";
 
 const bridge = new CclBridge();
 const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
@@ -135,7 +135,7 @@ HTTP calls ([ADR-0013](../../docs/adr/0013-transaction-evaluators.md)), so remot
 here in the wrapper:
 
 ```javascript
-import { BlockfrostEvaluator } from "@bloxbean/cardano-client-bridge";
+import { BlockfrostEvaluator } from "@bloxbean/cardano-client-lib";
 
 const evaluator = new BlockfrostEvaluator(projectId, { network: "preprod" });
 const result = await bridge.quicktx.buildWith(yaml, provider, senderAddress, evaluator);

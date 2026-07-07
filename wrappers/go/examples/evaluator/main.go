@@ -21,7 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/bloxbean/ccl-bridge/wrappers/go/ccl"
+	"github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
 )
 
 // localProvider returns fixed fixtures (stands in for Blockfrost/Yaci/…).

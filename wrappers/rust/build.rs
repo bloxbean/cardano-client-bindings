@@ -18,7 +18,7 @@ use std::process::Command;
 // Release tag the prebuilt native lib is fetched from when it isn't available locally. Kept separate
 // from the crate version (release tags may carry a preview suffix); override with CCL_LIB_VERSION.
 const DEFAULT_LIB_VERSION: &str = "v0.1.0-preview1";
-const REPO: &str = "bloxbean/ccl-bridge";
+const REPO: &str = "bloxbean/cardano-client-bindings";
 
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
@@ -77,7 +77,7 @@ fn resolve_source_lib(lib_file: &str, out_dir: &Path) -> PathBuf {
 fn download_lib(lib_file: &str, out_dir: &Path) -> PathBuf {
     let version = env::var("CCL_LIB_VERSION").unwrap_or_else(|_| DEFAULT_LIB_VERSION.to_string());
     let platform = platform_tag();
-    let tarball = format!("cardano-client-bridge-{version}-{platform}.tar.gz");
+    let tarball = format!("cardano-client-lib-{version}-{platform}.tar.gz");
     let url = format!("https://github.com/{REPO}/releases/download/{version}/{tarball}");
     let dl = out_dir.join(&tarball);
 

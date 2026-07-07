@@ -1,9 +1,9 @@
-# CCL Bridge — Python
+# Cardano Client Bindings — Python
 
 Python bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
-via the CCL Bridge native library. Pure `ctypes` — no JVM, no compiler, no C extension.
+via the Cardano Client Bindings native library. Pure `ctypes` — no JVM, no compiler, no C extension.
 
-> Part of the [CCL Bridge](../../README.md) project. See the
+> Part of the [Cardano Client Bindings](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
 > [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
@@ -19,12 +19,12 @@ The native library is **bundled inside the platform wheel** — no separate down
 **Recommended — a platform wheel that bundles the native library:**
 
 ```bash
-pip install cardano-client-bridge    # once published to PyPI
+pip install cardano-client-lib    # once published to PyPI
 # or, a locally built wheel:
 pip install path/to/cardano_client_bridge-*.whl
 ```
 
-The distribution is named `cardano-client-bridge`, but the import stays short: `import ccl`. The wheel
+The distribution is named `cardano-client-lib`, but the import stays short: `import ccl`. The wheel
 ships the matching `libccl.*` inside the package (`ccl/_libs/`), so `import ccl` just works — nothing
 else to set. Build one locally (needs `pip install build`):
 

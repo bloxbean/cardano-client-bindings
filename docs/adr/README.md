@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-This directory records the **significant architectural decisions** for CCL Bridge — the *why*
+This directory records the **significant architectural decisions** for Cardano Client Bindings — the *why*
 behind choices that aren't obvious from the code, so a future maintainer doesn't unknowingly
 undo them.
 

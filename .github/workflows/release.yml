@@ -35,12 +35,12 @@ jobs:
           # to link against the DLL; include it when present.
           EXTRA=""
           [ -f libccl.lib ] && EXTRA="libccl.lib"
-          tar czf cardano-client-bridge-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
+          tar czf cardano-client-lib-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
             libccl.${{ matrix.ext }} libccl.h graal_isolate.h $EXTRA
       - uses: actions/upload-artifact@v4
         with:
-          name: cardano-client-bridge-${{ matrix.platform }}
-          path: core/build/native/nativeCompile/cardano-client-bridge-*.tar.gz
+          name: cardano-client-lib-${{ matrix.platform }}
+          path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
 
   # Linux: built in an OLD-glibc container (manylinux_2_28) so the shipped libccl.so runs on
   # glibc >= 2.17 (RHEL/CentOS 7+, Amazon Linux 2, Ubuntu 18.04+, Debian 9+) instead of only the
@@ -90,12 +90,12 @@ jobs:
       - name: Package
         run: |
           cd core/build/native/nativeCompile
-          tar czf cardano-client-bridge-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
+          tar czf cardano-client-lib-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
             libccl.so libccl.h graal_isolate.h
       - uses: actions/upload-artifact@v4
         with:
-          name: cardano-client-bridge-${{ matrix.platform }}
-          path: core/build/native/nativeCompile/cardano-client-bridge-*.tar.gz
+          name: cardano-client-lib-${{ matrix.platform }}
+          path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
 
   release:
     needs: [build-native, build-linux]
@@ -107,10 +107,10 @@ jobs:
         with:
           merge-multiple: true
       - name: Generate checksums
-        run: sha256sum cardano-client-bridge-*.tar.gz > SHA256SUMS
+        run: sha256sum cardano-client-lib-*.tar.gz > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            cardano-client-bridge-*.tar.gz
+            cardano-client-lib-*.tar.gz
             SHA256SUMS
           generate_release_notes: true

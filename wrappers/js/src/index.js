@@ -59,7 +59,7 @@ function cstr(str) {
 // Yaci DevKit :10000 local-cluster proxy — returns numeric `cost_models` only (empirically verified:
 // no `cost_models_raw`), even though the DevKit's own yaci-store serves the ordered form on :8080.
 // Remove this whole function once every endpoint we fetch params from returns `cost_models_raw` —
-// tracked in bloxbean/ccl-bridge#11.
+// tracked in bloxbean/cardano-client-bindings#11.
 export function normalizeCostModels(protocolParams) {
   if (!protocolParams || typeof protocolParams !== 'object') return protocolParams;
 

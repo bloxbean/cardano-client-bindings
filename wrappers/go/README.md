@@ -1,24 +1,24 @@
-# CCL Bridge — Go
+# Cardano Client Bindings — Go
 
 Go bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
-via the CCL Bridge native library. Pure Go — the library is loaded with
+via the Cardano Client Bindings native library. Pure Go — the library is loaded with
 [purego](https://github.com/ebitengine/purego), so there is **no cgo and no C toolchain**.
 
-> Part of the [CCL Bridge](../../README.md) project. See the
+> Part of the [Cardano Client Bindings](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
 > [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
 ## Install
 
 ```bash
-go get github.com/bloxbean/ccl-bridge/wrappers/go
+go get github.com/bloxbean/cardano-client-bindings/wrappers/go
 ```
 
 Requires Go 1.21+. No C toolchain, no `CGO_ENABLED`. On first use the native library
 `libccl.{dylib,so,dll}` for your platform is resolved automatically, in order:
 
 1. **`CCL_LIB_PATH`** — a directory or the library file, to supply your own build;
-2. a **per-version cache** (`os.UserCacheDir()/ccl-bridge/<version>/`);
+2. a **per-version cache** (`os.UserCacheDir()/cardano-client-bindings/<version>/`);
 3. otherwise it is **downloaded once** from the matching GitHub release and cached.
 
 Override the downloaded version with `CCL_LIB_VERSION`. Resolution is fail-hard: a bad
@@ -56,7 +56,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/bloxbean/ccl-bridge/wrappers/go/ccl"
+	"github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
 )
 
 func main() {

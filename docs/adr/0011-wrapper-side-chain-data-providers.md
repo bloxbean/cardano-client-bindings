@@ -49,7 +49,7 @@ exec-unit evaluators (the §2b sibling, still planned).
   unlike Go/Python). Providers that already emit `cost_models_raw` (real Blockfrost, yaci-store's own
   API) pass through untouched; the DevKit `:10000` proxy currently emits the numeric form, so the
   conversion is still load-bearing. Removal once every endpoint we fetch from returns `cost_models_raw`
-  is tracked in [ccl-bridge#11](https://github.com/bloxbean/ccl-bridge/issues/11).
+  is tracked in [cardano-client-bindings#11](https://github.com/bloxbean/cardano-client-bindings/issues/11).
 - Rust consumers must opt in with `features = ["providers"]`; the helpers are absent otherwise.
 - `BlockfrostProvider` is validated against mocked responses, not live in CI (a Blockfrost key would
   be required); `YaciProvider` is exercised live by the DevKit integration suites.

@@ -3,7 +3,7 @@ plugins {
     id 'org.graalvm.buildtools.native'
 }
 
-base.archivesName = 'cardano-client-bridge-core'
+base.archivesName = 'cardano-client-lib-core'
 
 def cclVersion = '0.8.0-pre4'
 
@@ -97,8 +97,8 @@ tasks.register('downloadNativeLib') {
         }
 
         outDir.mkdirs()
-        def url = "https://github.com/bloxbean/ccl-bridge/releases/download/${libVersion}/cardano-client-bridge-${libVersion}-${platformInfo.platform}.tar.gz"
-        def tarball = new File(outDir, 'cardano-client-bridge.tar.gz')
+        def url = "https://github.com/bloxbean/cardano-client-bindings/releases/download/${libVersion}/cardano-client-lib-${libVersion}-${platformInfo.platform}.tar.gz"
+        def tarball = new File(outDir, 'cardano-client-lib.tar.gz')
 
         logger.lifecycle("Downloading pre-built library from ${url}")
         exec {

@@ -1,9 +1,9 @@
-# CCL Bridge — Rust
+# Cardano Client Bindings — Rust
 
 Rust bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
-via the CCL Bridge native library.
+via the Cardano Client Bindings native library.
 
-> Part of the [CCL Bridge](../../README.md) project. See the
+> Part of the [Cardano Client Bindings](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
 > [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
@@ -17,7 +17,7 @@ The native library is **fetched automatically at build time** — no separate do
 ## Installing
 
 ```bash
-cargo add cardano-client-bridge          # published as cardano-client-bridge, imported as `ccl`
+cargo add cardano-client-lib          # published as cardano-client-lib, imported as `ccl`
 ```
 
 `build.rs` sources `libccl.*` for your target — in priority order: `CCL_LIB_PATH` (a dir), the
@@ -98,8 +98,8 @@ optional HTTP helpers (via `ureq`) that fetch those for you, keeping the native 
 provider-free:
 
 ```toml
-# Published as `cardano-client-bridge`; imported as `ccl` (see below).
-cardano-client-bridge = { version = "0.1", features = ["providers"] }
+# Published as `cardano-client-lib`; imported as `ccl` (see below).
+cardano-client-lib = { version = "0.1", features = ["providers"] }
 ```
 
 ```rust
