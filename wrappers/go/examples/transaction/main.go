@@ -15,7 +15,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/bloxbean/ccl-bridge/wrappers/go/ccl"
+	"github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
 )
 
 // Minimal protocol parameters (CCL test-resource values), the CCL ProtocolParams model as a map.

@@ -21,7 +21,7 @@ import (
 // the Rust wrapper's build.rs).
 const defaultLibVersion = "v0.1.0-preview1"
 
-const releaseBaseURL = "https://github.com/bloxbean/ccl-bridge/releases/download"
+const releaseBaseURL = "https://github.com/bloxbean/cardano-client-bindings/releases/download"
 
 func libVersion() string {
 	if v := os.Getenv("CCL_LIB_VERSION"); v != "" {
@@ -86,7 +86,7 @@ func resolveLibPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate cache dir: %w", err)
 	}
-	dst := filepath.Join(cacheRoot, "ccl-bridge", libVersion(), name)
+	dst := filepath.Join(cacheRoot, "cardano-client-bindings", libVersion(), name)
 	if fileExists(dst) {
 		return dst, nil
 	}
@@ -109,7 +109,7 @@ func downloadLib(dst, name string) error {
 		return err
 	}
 	version := libVersion()
-	url := fmt.Sprintf("%s/%s/cardano-client-bridge-%s-%s.tar.gz",
+	url := fmt.Sprintf("%s/%s/cardano-client-lib-%s-%s.tar.gz",
 		releaseBaseURL, version, version, slug)
 
 	resp, err := http.Get(url)

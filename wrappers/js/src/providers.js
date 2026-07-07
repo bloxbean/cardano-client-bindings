@@ -12,7 +12,7 @@
 //
 // Use one directly, or via quicktx.buildWith:
 //
-//   import { CclBridge, BlockfrostProvider } from "@bloxbean/cardano-client-bridge";
+//   import { CclBridge, BlockfrostProvider } from "@bloxbean/cardano-client-lib";
 //   const bridge = new CclBridge();
 //   const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
 //   const result = await bridge.quicktx.buildWith(txplanYaml, provider, senderAddress);

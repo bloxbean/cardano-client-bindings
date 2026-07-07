@@ -1,4 +1,4 @@
-rootProject.name = 'ccl-bridge'
+rootProject.name = 'cardano-client-bindings'
 
 include 'core'
 include 'native-test'

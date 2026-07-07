@@ -11,7 +11,7 @@ Push a `v*` tag. This triggers [`release.yml`](.github/workflows/release.yml), w
 `libccl` on every platform and produces one tarball per platform:
 
 ```
-cardano-client-bridge-<tag>-<platform>.tar.gz     # contains libccl.{so,dylib,dll} + headers
+cardano-client-lib-<tag>-<platform>.tar.gz     # contains libccl.{so,dylib,dll} + headers
 ```
 
 Platforms (5): `linux-x86_64`, `linux-aarch64`, `macos-x86_64`, `macos-aarch64`, `windows-x86_64`.
@@ -64,7 +64,7 @@ git push origin wrappers/go/v0.2.0
 - The tag **must** be prefixed with the module's subdirectory (`wrappers/go/`) — that's Go's rule for
   a module that isn't at the repo root. This is a **different tag** from the native-library `v0.2.0`
   tag (they can point at the same commit).
-- After tagging, `go get github.com/bloxbean/ccl-bridge/wrappers/go@v0.2.0` just works — no cgo, no C
+- After tagging, `go get github.com/bloxbean/cardano-client-bindings/wrappers/go@v0.2.0` just works — no cgo, no C
   toolchain. On first use the loader downloads `libccl` for the platform from the native-library
   release (step 1) and caches it, so `defaultLibVersion` (step 2) **must** match a published release.
 
@@ -72,7 +72,7 @@ git push origin wrappers/go/v0.2.0
 
 1. [ ] Bump `DEFAULT_LIB_VERSION` (Rust) and `defaultLibVersion` (Go) to the new tag; open/merge that PR.
 2. [ ] Tag `vX.Y.Z` and push → `release.yml` builds + uploads the 5 platform tarballs + `SHA256SUMS`.
-3. [ ] Verify the release assets are named `cardano-client-bridge-vX.Y.Z-<platform>.tar.gz`.
+3. [ ] Verify the release assets are named `cardano-client-lib-vX.Y.Z-<platform>.tar.gz`.
 4. [ ] Publish Python (PyPI), JS (npm), Rust (`cargo publish`) via their gated workflows.
 5. [ ] Tag `wrappers/go/vX.Y.Z` and push (Go module release — no build step).
 6. [ ] Smoke-test each: a clean `pip install` / `npm install` / `cargo add` / `go get` with no

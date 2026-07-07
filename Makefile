@@ -1,4 +1,4 @@
-# CCL Bridge — convenience targets for wrapper developers
+# Cardano Client Bindings — convenience targets for wrapper developers
 #
 # Usage:
 #   make download-lib          Download pre-built library from GitHub Releases

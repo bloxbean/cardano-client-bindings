@@ -9,10 +9,10 @@ import org.graalvm.nativeimage.c.function.CEntryPoint;
 import org.graalvm.nativeimage.c.type.CCharPointer;
 
 /**
- * Core lifecycle and result-retrieval entry points of the CCL Bridge native library.
+ * Core lifecycle and result-retrieval entry points of the Cardano Client Bindings native library.
  *
  * <h2>What this library is</h2>
- * The CCL Bridge compiles <a href="https://github.com/bloxbean/cardano-client-lib">Cardano
+ * The Cardano Client Bindings compiles <a href="https://github.com/bloxbean/cardano-client-lib">Cardano
  * Client Lib</a> into a native shared library ({@code libccl.so} / {@code .dylib} / {@code .dll})
  * with GraalVM {@code native-image}, exposing CCL's <em>offline</em> Cardano operations through a
  * flat C ABI. Every public function in this package is a GraalVM {@link CEntryPoint}, i.e. an
@@ -64,7 +64,7 @@ public final class CclBridge {
     private CclBridge() {}
 
     /**
-     * Returns the CCL Bridge library version.
+     * Returns the Cardano Client Bindings library version.
      *
      * <p>Exported as {@code ccl_version}. On success the version string (e.g. {@code "0.1.0"}) is
      * placed in the thread-local result; retrieve it with

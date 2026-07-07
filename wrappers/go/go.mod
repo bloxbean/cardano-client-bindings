@@ -1,4 +1,4 @@
-module github.com/bloxbean/ccl-bridge/wrappers/go
+module github.com/bloxbean/cardano-client-bindings/wrappers/go
 
 go 1.21
 

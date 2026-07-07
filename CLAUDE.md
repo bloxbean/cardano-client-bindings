@@ -1,4 +1,4 @@
-# CCL Bridge
+# Cardano Client Bindings
 
 ## Reference
 

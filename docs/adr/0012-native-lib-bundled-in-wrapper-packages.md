@@ -6,7 +6,7 @@
 
 ## Context
 
-CCL Bridge ships a native shared library (`libccl.{so,dylib,dll}`, [ADR-0001](0001-native-shared-library-ffi.md))
+Cardano Client Bindings ships a native shared library (`libccl.{so,dylib,dll}`, [ADR-0001](0001-native-shared-library-ffi.md))
 that each language wrapper ([ADR-0003](0003-four-language-wrappers-uniform-ffi.md)) loads over FFI. Until
 now the wrappers only located that library through an environment variable (`CCL_LIB_PATH`, plus the OS
 loader's `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`): the user had to build or download the lib and point the

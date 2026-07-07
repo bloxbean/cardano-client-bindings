@@ -1,7 +1,7 @@
 package com.bloxbean.cardano.bridge;
 
 /**
- * Status codes returned by every CCL Bridge entry point.
+ * Status codes returned by every Cardano Client Bindings entry point.
  *
  * <p>{@link #CCL_SUCCESS} ({@code 0}) indicates success; all error codes are negative. On a
  * negative return, a human-readable message is available via {@code ccl_get_last_error}. The

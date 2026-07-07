@@ -126,7 +126,7 @@ class QuickTxApiTest {
                         - unit: lovelace
                           quantity: "2000000"
                     - type: metadata
-                      metadata: '{"674": {"msg": "Hello from CCL Bridge"}}'
+                      metadata: '{"674": {"msg": "Hello from Cardano Client Bindings"}}'
             """.formatted(sender, receiver1);
         JsonNode result = build(yaml);
         assertBuilt(result);
