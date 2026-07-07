@@ -1,8 +1,13 @@
 # ADR-0012: Distribute the native library bundled in per-wrapper platform packages
 
-- **Status:** Accepted
+- **Status:** Accepted — Go mechanism superseded by [ADR-0014](0014-go-distribution-purego-runtime-resolution.md)
 - **Date:** 2026-07-01
 - **Deciders:** bloxbean maintainers
+
+> **Update:** the question this ADR "left genuinely open for Go" (see Alternatives) is resolved by
+> [ADR-0014](0014-go-distribution-purego-runtime-resolution.md) — Go drops cgo for **purego** and
+> resolves the library at **runtime**. The "Go via cgo / build-time linking / Go-C-follow-the-same-
+> shape" descriptions below are superseded for Go; the bundling decision for Python/JS still stands.
 
 ## Context
 
@@ -106,3 +111,6 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
   well-tested bindings while still dropping the env-var requirement. **Left genuinely open for Go**, where
   cgo's build-time linking *plus* Go's no-install-hook constraint (a ~250 MB all-platforms module otherwise)
   may tip the balance toward `go:embed` + runtime `dlopen`.
+  → **Resolved by [ADR-0014](0014-go-distribution-purego-runtime-resolution.md):** Go drops cgo for
+  **purego** and resolves `libccl` at runtime (`CCL_LIB_PATH` → cache → one-time download) — not
+  `go:embed`, which would have shipped the ~250 MB.
