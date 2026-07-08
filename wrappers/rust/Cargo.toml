@@ -9,7 +9,7 @@ homepage = "https://github.com/bloxbean/cardano-client-bindings"
 documentation = "https://docs.rs/cardano-client-lib"
 readme = "README.md"
 authors = ["bloxbean"]
-keywords = ["cardano", "blockchain", "ffi", "graalvm", "cardano-client-lib"]
+keywords = ["cardano", "cardano-client", "cardano-client-lib", "blockchain"]
 categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
 # Published as `cardano-client-lib`, but imported as `ccl` (e.g. `use ccl::...`) — keep the short

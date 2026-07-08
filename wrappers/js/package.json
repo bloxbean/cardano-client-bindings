@@ -14,10 +14,9 @@
   "author": "bloxbean",
   "keywords": [
     "cardano",
-    "blockchain",
-    "ffi",
-    "graalvm",
-    "cardano-client-lib"
+    "cardano-client",
+    "cardano-client-lib",
+    "blockchain"
   ],
   "main": "src/index.js",
   "types": "src/index.d.ts",

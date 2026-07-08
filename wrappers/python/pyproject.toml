@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
 authors = [{ name = "bloxbean" }]
-keywords = ["cardano", "blockchain", "ffi", "graalvm", "cardano-client-lib"]
+keywords = ["cardano", "cardano-client", "cardano-client-lib", "blockchain"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
