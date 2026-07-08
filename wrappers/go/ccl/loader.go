@@ -45,10 +45,20 @@ func libFileName() string {
 func platformSlug() (string, error) {
 	switch runtime.GOOS {
 	case "linux":
+		// Go reports GOOS=linux for both glibc and musl, so detect musl (Alpine) at runtime and pick
+		// the musl artifact — the glibc .so can't load there.
+		musl := ""
+		if isMuslLinux() {
+			musl = "-musl"
+		}
 		switch runtime.GOARCH {
 		case "amd64":
-			return "linux-x86_64", nil
+			return "linux" + musl + "-x86_64", nil
 		case "arm64":
+			if musl != "" {
+				return "", fmt.Errorf("no prebuilt musl libccl for linux/arm64 " +
+					"(GraalVM's --libc=musl is x86_64-only); build from source or set CCL_LIB_PATH")
+			}
 			return "linux-aarch64", nil
 		}
 	case "darwin":
@@ -65,6 +75,31 @@ func platformSlug() (string, error) {
 	}
 	return "", fmt.Errorf("no prebuilt libccl for %s/%s; set CCL_LIB_PATH to a local build",
 		runtime.GOOS, runtime.GOARCH)
+}
+
+// muslLoaderPath returns the musl dynamic-loader path for this arch (empty if unmapped).
+func muslLoaderPath() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "/lib/ld-musl-x86_64.so.1"
+	case "arm64":
+		return "/lib/ld-musl-aarch64.so.1"
+	}
+	return ""
+}
+
+// isMuslLinux reports whether this is a musl-based Linux (e.g. Alpine). Go's GOOS is "linux" for both
+// glibc and musl, so detect musl by its dynamic loader — a file only musl systems ship.
+func isMuslLinux() bool {
+	if runtime.GOOS != "linux" {
+		return false
+	}
+	p := muslLoaderPath()
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // resolveLibPath finds libccl, in order: the CCL_LIB_PATH override (a directory or the file itself),
