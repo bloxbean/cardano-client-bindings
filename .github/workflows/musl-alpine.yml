@@ -94,3 +94,30 @@ jobs:
               gcc musl_smoke.c -o /tmp/musl_smoke -ldl
               /tmp/musl_smoke
             '
+
+      - name: Verify Go + Rust wrappers auto-select musl on Alpine
+        run: |
+          set -eux
+          # Proves the wrapper auto-selection end-to-end on a real musl system: the loaders must
+          # resolve slug=linux-musl-x86_64 and load the musl lib with NO CCL_LIB_PATH. The lib is
+          # seeded (Go cache) / in-tree (Rust) here, standing in for the release download.
+          docker run --rm -v "$PWD:/w" -w /w \
+            -v "$PWD/core/build/native/nativeCompile:/out" alpine:3.20 sh -c '
+              set -eux
+              apk add --no-cache build-base go cargo >/dev/null
+
+              # Go — runtime musl detection: the slug test asserts linux-musl-x86_64 on real musl, and
+              # the example loads the seeded musl lib with no env vars.
+              CACHE="$HOME/.cache/cardano-client-bindings/v0.1.0-preview1"
+              mkdir -p "$CACHE"; cp /out/libccl.so "$CACHE/libccl.so"
+              ( cd wrappers/go
+                env -u CCL_LIB_PATH go test -run "PlatformSlug|Musl" ./ccl/
+                env -u CCL_LIB_PATH CGO_ENABLED=0 go run ./examples/account | head -1 )
+
+              # Rust — build-time musl detection: Alpine targets x86_64-unknown-linux-musl, so build.rs
+              # picks linux-musl-x86_64; it uses the in-tree musl lib and the example runs.
+              ( cd wrappers/rust
+                env -u CCL_LIB_PATH cargo run --quiet --example account | head -1 )
+
+              echo "OK: Go + Rust auto-selected + ran the musl libccl on Alpine, no CCL_LIB_PATH"
+            '

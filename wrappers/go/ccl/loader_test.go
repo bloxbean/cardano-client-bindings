@@ -124,3 +124,18 @@ func TestPlatformSlugGlibcHasNoMuslInfix(t *testing.T) {
 		t.Fatalf("glibc Linux slug should not contain 'musl': %q", slug)
 	}
 }
+
+func TestPlatformSlugMuslSelectsMuslArtifact(t *testing.T) {
+	// On a real musl system (Alpine), the loader must auto-select the musl artifact. This is the
+	// meaningful half of the auto-selection; it only fires under the musl-alpine.yml Alpine job.
+	if runtime.GOOS != "linux" || !isMuslLinux() {
+		t.Skip("only meaningful on musl Linux (Alpine)")
+	}
+	slug, err := platformSlug()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slug != "linux-musl-x86_64" {
+		t.Fatalf("musl slug = %q, want linux-musl-x86_64", slug)
+	}
+}
