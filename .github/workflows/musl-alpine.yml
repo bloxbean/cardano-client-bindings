@@ -1,19 +1,23 @@
-name: musl / Alpine lib (PoC)
+name: musl / Alpine lib
 
-# Feasibility spike: can native-image build libccl.so linked against **musl** libc, so it loads on
-# Alpine / musl-based images (the common Docker base)? GraalVM's musl support is documented for
-# *static executables*; this tests whether a musl-linked *shared library* is possible.
+# Builds + guards the musl variant of libccl.so, so it loads and runs on Alpine / musl-based images
+# (the common Docker base) — the glibc-baseline .so (portable-linux-lib.yml) cannot load there.
 #
-# Built on ubuntu (glibc — so actions/node work) with a musl toolchain + `--libc=musl`, then the
-# result is dlopen'd inside an Alpine container to prove it actually loads on musl.
+# native-image's musl support is documented for static executables; it also works for our shared
+# library via `--libc=musl` (built with a musl toolchain: musl-gcc + a musl-linked zlib). Built on
+# ubuntu (glibc — so actions/node work), then loaded AND run inside a real Alpine container: create
+# the GraalVM isolate and call an entry point, proving musl works at runtime, not just that the file
+# opens. See docs/adr/0008-linux-glibc-baseline-portability.md.
 
 on:
   pull_request:
+  push:
+    branches: [develop, main]
   workflow_dispatch:
 
 jobs:
-  musl-poc:
-    name: Build libccl.so (musl) + load on Alpine
+  musl:
+    name: Build libccl.so (musl) + run on Alpine
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +37,6 @@ jobs:
           set -eux
           sudo apt-get update
           sudo apt-get install -y musl-tools musl-dev
-          musl-gcc --version | head -1
           # native-image --libc=musl needs a musl-linked static zlib (libz.a).
           ZV=1.3.1
           curl -fsSL -o /tmp/zlib.tar.gz \
@@ -43,10 +46,9 @@ jobs:
           CC=musl-gcc ./configure --static --prefix=/usr/local/musl
           make -j"$(nproc)"
           sudo make install
-          # Make libz.a discoverable by musl-gcc's default lib search path.
           sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
 
-      - name: Build libccl.so for musl (--libc=musl)
+      - name: Build libccl.so against musl (--libc=musl)
         run: ./gradlew :core:nativeCompile -PmuslBuild --no-daemon --stacktrace
 
       - name: Inspect the built .so
@@ -54,27 +56,37 @@ jobs:
           set -eux
           SO=core/build/native/nativeCompile/libccl.so
           file "$SO"
-          readelf -d "$SO" | grep -iE "NEEDED|SONAME" || true
+          # musl links libc.so (glibc would be libc.so.6); assert it's the musl variant.
+          readelf -d "$SO" | grep -E 'NEEDED'
+          readelf -d "$SO" | grep -q 'libc.so.6' && { echo "FAIL: glibc-linked, not musl"; exit 1; } || true
 
-      - name: Write dlopen smoke test
+      - name: Functional run test (create isolate + call an entry point) on Alpine
         run: |
-          cat > smoke.c <<'C'
+          set -eux
+          # A real run, not just dlopen: bring up the GraalVM isolate and call ccl_version.
+          cat > musl_smoke.c <<'C'
           #include <dlfcn.h>
           #include <stdio.h>
+          typedef int  (*create_isolate_t)(void*, void**, void**);
+          typedef int  (*ccl_version_t)(void*);
+          typedef char*(*ccl_get_result_t)(void*);
           int main(void) {
             void *h = dlopen("/out/libccl.so", RTLD_NOW);
-            if (!h) { printf("FAIL: %s\n", dlerror()); return 1; }
-            printf("OK: libccl.so loaded on Alpine/musl\n");
+            if (!h) { printf("FAIL dlopen: %s\n", dlerror()); return 1; }
+            create_isolate_t create = (create_isolate_t)dlsym(h, "graal_create_isolate");
+            ccl_version_t version   = (ccl_version_t)dlsym(h, "ccl_version");
+            ccl_get_result_t result = (ccl_get_result_t)dlsym(h, "ccl_get_result");
+            if (!create || !version || !result) { printf("FAIL dlsym\n"); return 1; }
+            void *iso = 0, *thr = 0;
+            if (create(0, &iso, &thr) != 0) { printf("FAIL create_isolate\n"); return 1; }
+            if (version(thr) != 0)          { printf("FAIL ccl_version\n"); return 1; }
+            printf("OK: libccl runs on Alpine/musl — version=%s\n", result(thr));
             return 0;
           }
           C
-
-      - name: Prove it loads on Alpine (musl runtime)
-        run: |
-          set -eux
           docker run --rm -v "$PWD:/w" -w /w \
             -v "$PWD/core/build/native/nativeCompile:/out" alpine:3.20 sh -c '
               apk add --no-cache build-base >/dev/null
-              gcc smoke.c -o /tmp/smoke -ldl
-              /tmp/smoke
+              gcc musl_smoke.c -o /tmp/musl_smoke -ldl
+              /tmp/musl_smoke
             '
