@@ -94,8 +94,53 @@ jobs:
           name: cardano-client-lib-${{ matrix.platform }}
           path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
 
+  # Linux/musl: a libccl.so linked against musl (via native-image --libc=musl + a musl toolchain), so
+  # it loads on Alpine / musl-based images that the glibc-baseline .so can't. Guarded on every PR by
+  # musl-alpine.yml (build + a functional run inside Alpine). See docs/adr/0008.
+  # x86_64 only: GraalVM's --libc=musl hardcodes the x86_64-linux-musl-gcc compiler name and doesn't
+  # support aarch64 musl (see ADR-0008), so there is no linux-musl-aarch64 artifact.
+  build-musl:
+    name: build (linux-musl-x86_64, Alpine)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz \
+            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+      - name: Install musl toolchain (musl-gcc + musl-linked zlib)
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+          ZV=1.3.1
+          curl -fsSL -o /tmp/zlib.tar.gz \
+            "https://github.com/madler/zlib/releases/download/v${ZV}/zlib-${ZV}.tar.gz"
+          tar xzf /tmp/zlib.tar.gz -C /tmp
+          cd "/tmp/zlib-${ZV}"
+          CC=musl-gcc ./configure --static --prefix=/usr/local/musl
+          make -j"$(nproc)"
+          sudo make install
+          sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
+      - name: Build native library (musl)
+        run: ./gradlew :core:nativeCompile -PmuslBuild --no-daemon --stacktrace
+      - name: Package
+        run: |
+          cd core/build/native/nativeCompile
+          tar czf cardano-client-lib-${{ github.ref_name }}-linux-musl-x86_64.tar.gz \
+            libccl.so libccl.h graal_isolate.h
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cardano-client-lib-linux-musl-x86_64
+          path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
+
   release:
-    needs: [build-native, build-linux]
+    needs: [build-native, build-linux, build-musl]
     runs-on: ubuntu-latest
     permissions:
       contents: write

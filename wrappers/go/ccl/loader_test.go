@@ -6,6 +6,8 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +82,60 @@ func TestPlatformSlugKnown(t *testing.T) {
 	// The current test platform must map to a known slug (so a download URL can be built).
 	if _, err := platformSlug(); err != nil {
 		t.Fatalf("platformSlug for current platform: %v", err)
+	}
+}
+
+func TestMuslLoaderPath(t *testing.T) {
+	// The musl loader path is arch-specific; verify the mapping for this host's arch.
+	got := muslLoaderPath()
+	want := map[string]string{
+		"amd64": "/lib/ld-musl-x86_64.so.1",
+		"arm64": "/lib/ld-musl-aarch64.so.1",
+	}[runtime.GOARCH] // "" for unmapped arches, which is what muslLoaderPath returns too
+	if got != want {
+		t.Fatalf("muslLoaderPath() = %q, want %q for %s", got, want, runtime.GOARCH)
+	}
+}
+
+func TestIsMuslLinuxMatchesLoaderFile(t *testing.T) {
+	// isMuslLinux must agree with the actual presence of the musl loader (false off Linux).
+	var want bool
+	if runtime.GOOS == "linux" {
+		if p := muslLoaderPath(); p != "" {
+			_, err := os.Stat(p)
+			want = err == nil
+		}
+	}
+	if got := isMuslLinux(); got != want {
+		t.Fatalf("isMuslLinux() = %v, want %v", got, want)
+	}
+}
+
+func TestPlatformSlugGlibcHasNoMuslInfix(t *testing.T) {
+	// On a glibc Linux (the CI runners), the slug must be the plain glibc variant, never "-musl".
+	if runtime.GOOS != "linux" || isMuslLinux() {
+		t.Skip("only meaningful on glibc Linux")
+	}
+	slug, err := platformSlug()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(slug, "musl") {
+		t.Fatalf("glibc Linux slug should not contain 'musl': %q", slug)
+	}
+}
+
+func TestPlatformSlugMuslSelectsMuslArtifact(t *testing.T) {
+	// On a real musl system (Alpine), the loader must auto-select the musl artifact. This is the
+	// meaningful half of the auto-selection; it only fires under the musl-alpine.yml Alpine job.
+	if runtime.GOOS != "linux" || !isMuslLinux() {
+		t.Skip("only meaningful on musl Linux (Alpine)")
+	}
+	slug, err := platformSlug()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slug != "linux-musl-x86_64" {
+		t.Fatalf("musl slug = %q, want linux-musl-x86_64", slug)
 	}
 }

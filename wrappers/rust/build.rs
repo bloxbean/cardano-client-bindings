@@ -115,6 +115,18 @@ fn platform_tag() -> String {
             "no prebuilt libccl for macOS x86_64 (Intel); build libccl from source and set CCL_LIB_PATH"
         );
     }
+    // Rust knows musl vs glibc from the target triple (…-linux-musl vs …-linux-gnu) via TARGET_ENV,
+    // so pick the musl artifact for Alpine / musl targets — the glibc .so can't load there.
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if os == "linux" && target_env == "musl" {
+        if arch != "x86_64" {
+            panic!(
+                "no prebuilt musl libccl for linux/{arch} (GraalVM's --libc=musl is x86_64-only); \
+                 build libccl from source and set CCL_LIB_PATH"
+            );
+        }
+        return "linux-musl-x86_64".to_string();
+    }
     let os = match os.as_str() {
         "macos" => "macos",
         "windows" => "windows",

@@ -14,10 +14,13 @@ Push a `v*` tag. This triggers [`release.yml`](.github/workflows/release.yml), w
 cardano-client-lib-<tag>-<platform>.tar.gz     # contains libccl.{so,dylib,dll} + headers
 ```
 
-Platforms (4): `linux-x86_64`, `linux-aarch64`, `macos-aarch64`, `windows-x86_64`. (macOS x86_64 /
-Intel is **not** built — Oracle GraalVM is dropping Intel-Mac support, and its 25.1 line ships no
-macOS-x86_64 build.) The Linux builds use a glibc 2.17 baseline for portability. Attach all four
-tarballs (and a `SHA256SUMS`) to the GitHub Release for the tag.
+Platforms (5): `linux-x86_64`, `linux-aarch64`, `linux-musl-x86_64`, `macos-aarch64`, `windows-x86_64`.
+(macOS x86_64 / Intel is **not** built — Oracle GraalVM is dropping Intel-Mac support, and its 25.1
+line ships no macOS-x86_64 build. `linux-musl-aarch64` is **not** built — GraalVM's `--libc=musl` is
+x86_64-only; see [ADR-0008](docs/adr/0008-linux-glibc-baseline-portability.md).) The standard Linux
+builds use a glibc 2.17 baseline for portability; `linux-musl-x86_64` is linked against musl for
+Alpine / musl-based images (`--libc=musl`). Attach all five tarballs (and a `SHA256SUMS`) to the
+GitHub Release for the tag.
 
 ```bash
 git tag v0.2.0
