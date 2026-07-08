@@ -3,6 +3,7 @@ package ccl
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -120,6 +121,11 @@ func New() (*Bridge, error) {
 		return nil, err
 	}
 
+	if err := b.checkVersion(); err != nil {
+		b.Close()
+		return nil, err
+	}
+
 	b.Account = &AccountApi{bridge: b}
 	b.Address = &AddressApi{bridge: b}
 	b.Crypto = &CryptoApi{bridge: b}
@@ -231,6 +237,36 @@ func (b *Bridge) getError() string {
 // Version returns the library version string.
 func (b *Bridge) Version() (string, error) {
 	return b.invoke(func() int32 { return cclVersion(b.thread) })
+}
+
+// expectedLibVersion is the native libccl version this wrapper expects, kept in lockstep with the
+// module release. baseVersion strips any pre-release / build suffix ("0.1.0-preview1" -> "0.1.0").
+const expectedLibVersion = "0.1.0"
+
+func baseVersion(v string) string {
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	return strings.TrimSpace(v)
+}
+
+// checkVersion fails fast on a native-lib / wrapper version skew rather than surfacing it later as a
+// confusing missing-symbol or wrong-result error. Bypass with CCL_SKIP_VERSION_CHECK.
+func (b *Bridge) checkVersion() error {
+	if os.Getenv("CCL_SKIP_VERSION_CHECK") != "" {
+		return nil
+	}
+	libVer, err := b.Version()
+	if err != nil {
+		return err
+	}
+	if baseVersion(libVer) != baseVersion(expectedLibVersion) {
+		return fmt.Errorf("libccl version %q is incompatible with the cardano-client-lib Go wrapper "+
+			"(expects %q); the native library and wrapper must be the same version — update the module "+
+			"or set CCL_LIB_PATH/CCL_LIB_VERSION to a matching libccl (set CCL_SKIP_VERSION_CHECK=1 to bypass)",
+			libVer, expectedLibVersion)
+	}
+	return nil
 }
 
 // --- AccountApi ---
