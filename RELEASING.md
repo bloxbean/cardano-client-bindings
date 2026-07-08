@@ -41,6 +41,20 @@ both to the new tag before (or as part of) the release**, or they will download 
 Both accept a `CCL_LIB_VERSION` environment override (build time for Rust, run time for Go) — useful
 for testing against a release before pinning it.
 
+**Version-skew check.** On init each wrapper calls `ccl_version` and fails fast if it doesn't match
+the wrapper's expected version (bypass with `CCL_SKIP_VERSION_CHECK`). The lib side is single-sourced —
+`ccl_version` is generated from `gradle.properties` `version` (base semver), so bumping that is enough
+for the native lib. The wrapper's *expected* version must be bumped in lockstep too:
+
+| Wrapper | Expected-version source | Bump needed? |
+|---|---|---|
+| Rust | `CARGO_PKG_VERSION` (`Cargo.toml` `version`) | automatic with the package version |
+| Python | `EXPECTED_LIB_VERSION` in [`wrappers/python/ccl/_ffi.py`](wrappers/python/ccl/_ffi.py) | **yes**, alongside `pyproject.toml` |
+| JS | `EXPECTED_LIB_VERSION` in [`wrappers/js/src/index.js`](wrappers/js/src/index.js) | **yes**, alongside `package.json` |
+| Go | `expectedLibVersion` in [`wrappers/go/ccl/ccl.go`](wrappers/go/ccl/ccl.go) | **yes** (Go has no package-version field) |
+
+(Only the base semver is compared, so a `-preview1`-style suffix on the release/tag doesn't matter.)
+
 ## 3. Publish the per-wrapper packages
 
 Each ecosystem has a different distribution model:

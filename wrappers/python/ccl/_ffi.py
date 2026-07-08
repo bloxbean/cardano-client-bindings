@@ -4,6 +4,15 @@ import sys
 import json
 from ctypes import c_int, c_char_p, c_void_p, POINTER, byref
 
+# Native libccl version this wrapper expects, kept in lockstep with the package version. On init the
+# wrapper compares it against ccl_version() and fails fast on a skew (see CclLib._check_version).
+EXPECTED_LIB_VERSION = "0.1.0"
+
+
+def _base_version(v):
+    """Strip any pre-release / build suffix: '0.1.0-preview1' -> '0.1.0'."""
+    return v.split("-", 1)[0].split("+", 1)[0].strip()
+
 
 class CclLib:
     """Low-level FFI wrapper around libccl shared library."""
@@ -70,6 +79,8 @@ class CclLib:
         rc = self._lib.graal_create_isolate(None, byref(self._isolate), byref(self._thread))
         if rc != 0:
             raise RuntimeError(f"Failed to create GraalVM isolate: {rc}")
+
+        self._check_version()
 
         # Namespace APIs
         from ccl.account import Account
@@ -272,6 +283,19 @@ class CclLib:
     def version(self):
         rc = self._lib.ccl_version(self._thread)
         return self._check(rc)
+
+    def _check_version(self):
+        """Fail fast on a native-lib / wrapper version skew (bypass with CCL_SKIP_VERSION_CHECK)."""
+        if os.environ.get("CCL_SKIP_VERSION_CHECK"):
+            return
+        lib_ver = self.version()
+        if _base_version(lib_ver) != _base_version(EXPECTED_LIB_VERSION):
+            raise RuntimeError(
+                f"libccl version {lib_ver!r} is incompatible with the cardano-client-lib Python "
+                f"wrapper (expects {EXPECTED_LIB_VERSION!r}). The native library and wrapper must be "
+                f"the same version — reinstall the package, or set CCL_LIB_PATH to a matching libccl. "
+                f"Set CCL_SKIP_VERSION_CHECK=1 to bypass."
+            )
 
 
 class CclError(Exception):

@@ -116,6 +116,15 @@ export function resolveLibFile(libPath) {
   return name;
 }
 
+// Native libccl version this wrapper expects, kept in lockstep with the package version. On
+// construction the wrapper compares it against ccl_version() and fails fast on a skew.
+const EXPECTED_LIB_VERSION = '0.1.0';
+
+// Strip any pre-release / build suffix: '0.1.0-preview1' -> '0.1.0'.
+function baseVersion(v) {
+  return v.split(/[-+]/, 1)[0].trim();
+}
+
 export class CclBridge {
   constructor(libPath) {
     const libFile = resolveLibFile(libPath);
@@ -206,6 +215,8 @@ export class CclBridge {
     }
     this._thread = Number(threadBuf[0]);
 
+    this._checkVersion();
+
     // Namespace APIs
     this.account = new AccountApi(this);
     this.address = new AddressApi(this);
@@ -252,6 +263,20 @@ export class CclBridge {
 
   version() {
     return this._check(this._lib.ccl_version(this._thread));
+  }
+
+  // Fail fast on a native-lib / wrapper version skew (bypass with CCL_SKIP_VERSION_CHECK).
+  _checkVersion() {
+    if (process.env.CCL_SKIP_VERSION_CHECK) return;
+    const libVer = this.version();
+    if (baseVersion(libVer) !== baseVersion(EXPECTED_LIB_VERSION)) {
+      throw new Error(
+        `libccl version '${libVer}' is incompatible with the @bloxbean/cardano-client-lib wrapper ` +
+        `(expects '${EXPECTED_LIB_VERSION}'). The native library and wrapper must be the same version ` +
+        `— reinstall the package, or set CCL_LIB_PATH to a matching libccl. ` +
+        `Set CCL_SKIP_VERSION_CHECK=1 to bypass.`
+      );
+    }
   }
 }
 
