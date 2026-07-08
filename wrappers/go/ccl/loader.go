@@ -52,10 +52,10 @@ func platformSlug() (string, error) {
 			return "linux-aarch64", nil
 		}
 	case "darwin":
-		switch runtime.GOARCH {
-		case "amd64":
-			return "macos-x86_64", nil
-		case "arm64":
+		// macOS x86_64 (Intel) has no prebuilt libccl: Oracle GraalVM is dropping Intel-Mac support
+		// (its 25.1 line ships no macOS-x86_64 build), so we don't release one. Intel-Mac users build
+		// from source or set CCL_LIB_PATH.
+		if runtime.GOARCH == "arm64" {
 			return "macos-aarch64", nil
 		}
 	case "windows":

@@ -78,7 +78,8 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
 - Packages get **large** (tens of MB) and are **per-platform**; releasing means a build matrix producing one
   artifact per OS/arch, and users on an unsupported platform fall back to source/`CCL_LIB_PATH`.
 - The set of shippable platforms is bounded by what we build: `linux-x86_64` + `linux-aarch64` (both
-  glibc-baseline), `macos-aarch64` + `macos-x86_64`, and `windows-x86_64`. `windows-arm64` and
+  glibc-baseline), `macos-aarch64`, and `windows-x86_64`. `macos-x86_64` (Intel) is **not** built —
+  Oracle GraalVM is dropping Intel-Mac support (its 25.1 line ships none). `windows-arm64` and
   musl/Alpine remain unbuilt, so wheels can't exist for those yet.
 - Each ecosystem needs its own bundling code and its own publishing story; the four will land incrementally,
   not atomically.
