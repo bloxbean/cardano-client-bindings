@@ -4,13 +4,18 @@
 - **Date:** 2026-06-25
 - **Deciders:** bloxbean maintainers (with Satya's review)
 
-> **Update (2026-07-08):** the deferred **musl/Alpine variant is now built** — this ADR called a musl
-> shared library "unproven for `--shared`", but native-image **does** produce a working musl `libccl.so`
-> via `--libc=musl` (with a musl toolchain: `musl-gcc` + a musl-linked `zlib`). It's built on ubuntu
-> and verified by **loading + running** it (create isolate → call an entry point) inside an Alpine
-> container in `musl-alpine.yml` (both x86_64 + aarch64), and shipped as `linux-musl-x86_64` +
-> `linux-musl-aarch64` by `release.yml`. The glibc baseline below is unchanged and remains the default
-> for non-musl Linux; musl is an additional artifact.
+> **Update (2026-07-08):** the deferred **musl/Alpine variant is now built (x86_64)** — this ADR called
+> a musl shared library "unproven for `--shared`", but native-image **does** produce a working musl
+> `libccl.so` via `--libc=musl` (with a musl toolchain: `musl-gcc` + a musl-linked `zlib`). It's built
+> on ubuntu and verified by **loading + running** it (create isolate → call an entry point) inside an
+> Alpine container in `musl-alpine.yml`, and shipped as `linux-musl-x86_64` by `release.yml`. The glibc
+> baseline below is unchanged and remains the default for non-musl Linux; musl is an additional artifact.
+>
+> **aarch64 musl is unsupported by GraalVM.** native-image's `--libc=musl` toolchain detection hardcodes
+> the `x86_64-linux-musl-gcc` compiler name and does not look for `aarch64-linux-musl-gcc`, so an
+> aarch64 build fails with *"Default native-compiler executable 'x86_64-linux-musl-gcc' not found"* on an
+> aarch64 host. `linux-musl-aarch64` is therefore **deferred** until GraalVM adds aarch64 musl support;
+> Alpine on ARM is not covered. (x86_64 is the vast majority of Alpine/Docker usage.)
 
 ## Context
 

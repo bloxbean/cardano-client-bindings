@@ -97,19 +97,11 @@ jobs:
   # Linux/musl: a libccl.so linked against musl (via native-image --libc=musl + a musl toolchain), so
   # it loads on Alpine / musl-based images that the glibc-baseline .so can't. Guarded on every PR by
   # musl-alpine.yml (build + a functional run inside Alpine). See docs/adr/0008.
+  # x86_64 only: GraalVM's --libc=musl hardcodes the x86_64-linux-musl-gcc compiler name and doesn't
+  # support aarch64 musl (see ADR-0008), so there is no linux-musl-aarch64 artifact.
   build-musl:
-    name: build (linux-musl-${{ matrix.arch }}, Alpine)
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: ubuntu-latest
-            graalvm_arch: x64
-          - arch: aarch64
-            runner: ubuntu-24.04-arm
-            graalvm_arch: aarch64
+    name: build (linux-musl-x86_64, Alpine)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Oracle GraalVM 25.0.3
@@ -117,7 +109,7 @@ jobs:
           set -eux
           mkdir -p /opt/graalvm
           curl -fsSL -o /tmp/graalvm.tar.gz \
-            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-${{ matrix.graalvm_arch }}_bin.tar.gz"
+            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz"
           tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
           echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
           echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
@@ -134,19 +126,17 @@ jobs:
           CC=musl-gcc ./configure --static --prefix=/usr/local/musl
           make -j"$(nproc)"
           sudo make install
-          MUSL_LIB="/usr/lib/$(uname -m)-linux-musl"
-          sudo mkdir -p "$MUSL_LIB"
-          sudo cp /usr/local/musl/lib/libz.a "$MUSL_LIB/"
+          sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
       - name: Build native library (musl)
         run: ./gradlew :core:nativeCompile -PmuslBuild --no-daemon --stacktrace
       - name: Package
         run: |
           cd core/build/native/nativeCompile
-          tar czf cardano-client-lib-${{ github.ref_name }}-linux-musl-${{ matrix.arch }}.tar.gz \
+          tar czf cardano-client-lib-${{ github.ref_name }}-linux-musl-x86_64.tar.gz \
             libccl.so libccl.h graal_isolate.h
       - uses: actions/upload-artifact@v4
         with:
-          name: cardano-client-lib-linux-musl-${{ matrix.arch }}
+          name: cardano-client-lib-linux-musl-x86_64
           path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
 
   release:
