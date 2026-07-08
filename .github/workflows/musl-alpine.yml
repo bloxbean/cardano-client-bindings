@@ -1,7 +1,8 @@
 name: musl / Alpine lib
 
-# Builds + guards the musl variant of libccl.so, so it loads and runs on Alpine / musl-based images
-# (the common Docker base) — the glibc-baseline .so (portable-linux-lib.yml) cannot load there.
+# Builds + guards the musl variant of libccl.so on both Linux arches, so it loads and runs on
+# Alpine / musl-based images (the common Docker base) — the glibc-baseline .so
+# (portable-linux-lib.yml) cannot load there.
 #
 # native-image's musl support is documented for static executables; it also works for our shared
 # library via `--libc=musl` (built with a musl toolchain: musl-gcc + a musl-linked zlib). Built on
@@ -17,8 +18,18 @@ on:
 
 jobs:
   musl:
-    name: Build libccl.so (musl) + run on Alpine
-    runs-on: ubuntu-latest
+    name: Build libccl.so (musl, ${{ matrix.arch }}) + run on Alpine
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            graalvm_arch: x64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            graalvm_arch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +38,7 @@ jobs:
           set -eux
           mkdir -p /opt/graalvm
           curl -fsSL -o /tmp/graalvm.tar.gz \
-            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz"
+            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-${{ matrix.graalvm_arch }}_bin.tar.gz"
           tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
           echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
           echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
@@ -46,7 +57,10 @@ jobs:
           CC=musl-gcc ./configure --static --prefix=/usr/local/musl
           make -j"$(nproc)"
           sudo make install
-          sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
+          # Put libz.a where musl-gcc searches, per this host's arch triple.
+          MUSL_LIB="/usr/lib/$(uname -m)-linux-musl"
+          sudo mkdir -p "$MUSL_LIB"
+          sudo cp /usr/local/musl/lib/libz.a "$MUSL_LIB/"
 
       - name: Build libccl.so against musl (--libc=musl)
         run: ./gradlew :core:nativeCompile -PmuslBuild --no-daemon --stacktrace

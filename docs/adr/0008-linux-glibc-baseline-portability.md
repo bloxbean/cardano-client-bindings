@@ -8,9 +8,9 @@
 > shared library "unproven for `--shared`", but native-image **does** produce a working musl `libccl.so`
 > via `--libc=musl` (with a musl toolchain: `musl-gcc` + a musl-linked `zlib`). It's built on ubuntu
 > and verified by **loading + running** it (create isolate → call an entry point) inside an Alpine
-> container in `musl-alpine.yml`, and shipped as `linux-musl-x86_64` by `release.yml`. The glibc
-> baseline below is unchanged and remains the default for non-musl Linux; musl is an additional
-> artifact. (linux-musl-**aarch64** is a follow-up.)
+> container in `musl-alpine.yml` (both x86_64 + aarch64), and shipped as `linux-musl-x86_64` +
+> `linux-musl-aarch64` by `release.yml`. The glibc baseline below is unchanged and remains the default
+> for non-musl Linux; musl is an additional artifact.
 
 ## Context
 
