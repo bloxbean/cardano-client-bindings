@@ -5,11 +5,24 @@ description = "Python bindings for Cardano Client Lib (CCL) via GraalVM native l
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
+authors = [{ name = "bloxbean" }]
+keywords = ["cardano", "cardano-client", "cardano-client-lib", "blockchain"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+]
 dependencies = ["pyyaml>=6.0"]
 
 [project.urls]
 Homepage = "https://github.com/bloxbean/cardano-client-bindings"
 Repository = "https://github.com/bloxbean/cardano-client-bindings"
+Documentation = "https://github.com/bloxbean/cardano-client-bindings#readme"
+Issues = "https://github.com/bloxbean/cardano-client-bindings/issues"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
