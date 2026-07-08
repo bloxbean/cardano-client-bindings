@@ -107,6 +107,14 @@ fn download_lib(lib_file: &str, out_dir: &Path) -> PathBuf {
 fn platform_tag() -> String {
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    // macOS x86_64 (Intel) has no prebuilt libccl: Oracle GraalVM is dropping Intel-Mac support (its
+    // 25.1 line ships no macOS-x86_64 build), so none is released. Fail clearly instead of downloading
+    // a tarball that doesn't exist.
+    if os == "macos" && arch == "x86_64" {
+        panic!(
+            "no prebuilt libccl for macOS x86_64 (Intel); build libccl from source and set CCL_LIB_PATH"
+        );
+    }
     let os = match os.as_str() {
         "macos" => "macos",
         "windows" => "windows",
