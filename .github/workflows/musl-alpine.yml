@@ -1,0 +1,79 @@
+name: musl / Alpine lib (PoC)
+
+# Feasibility spike: can native-image build libccl.so linked against **musl** libc, so it loads on
+# Alpine / musl-based images (the common Docker base)? GraalVM's musl support is documented for
+# *static executables*; this tests whether a musl-linked *shared library* is possible.
+#
+# Built on ubuntu (glibc — so actions/node work) with a musl toolchain + `--libc=musl`, then the
+# result is dlopen'd inside an Alpine container to prove it actually loads on musl.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  musl-poc:
+    name: Build libccl.so (musl) + load on Alpine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz \
+            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+
+      - name: Install musl toolchain (musl-gcc + musl-linked zlib)
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+          musl-gcc --version | head -1
+          # native-image --libc=musl needs a musl-linked static zlib (libz.a).
+          ZV=1.3.1
+          curl -fsSL -o /tmp/zlib.tar.gz "https://zlib.net/zlib-${ZV}.tar.gz"
+          tar xzf /tmp/zlib.tar.gz -C /tmp
+          cd "/tmp/zlib-${ZV}"
+          CC=musl-gcc ./configure --static --prefix=/usr/local/musl
+          make -j"$(nproc)"
+          sudo make install
+          # Make libz.a discoverable by musl-gcc's default lib search path.
+          sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
+
+      - name: Build libccl.so for musl (--libc=musl)
+        run: ./gradlew :core:nativeCompile -PmuslBuild --no-daemon --stacktrace
+
+      - name: Inspect the built .so
+        run: |
+          set -eux
+          SO=core/build/native/nativeCompile/libccl.so
+          file "$SO"
+          readelf -d "$SO" | grep -iE "NEEDED|SONAME" || true
+
+      - name: Write dlopen smoke test
+        run: |
+          cat > smoke.c <<'C'
+          #include <dlfcn.h>
+          #include <stdio.h>
+          int main(void) {
+            void *h = dlopen("/out/libccl.so", RTLD_NOW);
+            if (!h) { printf("FAIL: %s\n", dlerror()); return 1; }
+            printf("OK: libccl.so loaded on Alpine/musl\n");
+            return 0;
+          }
+          C
+
+      - name: Prove it loads on Alpine (musl runtime)
+        run: |
+          set -eux
+          docker run --rm -v "$PWD:/w" -w /w \
+            -v "$PWD/core/build/native/nativeCompile:/out" alpine:3.20 sh -c '
+              apk add --no-cache build-base >/dev/null
+              gcc smoke.c -o /tmp/smoke -ldl
+              /tmp/smoke
+            '

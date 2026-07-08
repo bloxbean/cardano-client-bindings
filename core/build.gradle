@@ -57,6 +57,12 @@ graalvmNative {
                 '--initialize-at-build-time=org.yaml.snakeyaml',
                 '--enable-url-protocols=http,https',
             )
+            // musl / Alpine variant (PoC, -PmuslBuild): link the shared lib against musl libc
+            // instead of glibc so it loads on Alpine/musl images. Requires a musl toolchain
+            // (musl-gcc + musl-linked zlib) on the build host.
+            if (project.hasProperty('muslBuild')) {
+                buildArgs.add('--libc=musl')
+            }
         }
     }
 }
