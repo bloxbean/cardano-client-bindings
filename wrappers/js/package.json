@@ -8,6 +8,17 @@
     "type": "git",
     "url": "https://github.com/bloxbean/cardano-client-bindings"
   },
+  "bugs": {
+    "url": "https://github.com/bloxbean/cardano-client-bindings/issues"
+  },
+  "author": "bloxbean",
+  "keywords": [
+    "cardano",
+    "blockchain",
+    "ffi",
+    "graalvm",
+    "cardano-client-lib"
+  ],
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "files": [

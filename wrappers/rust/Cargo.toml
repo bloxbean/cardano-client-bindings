@@ -5,7 +5,12 @@ edition = "2021"
 description = "Rust bindings for Cardano Client Lib (CCL) via GraalVM native library"
 license = "MIT"
 repository = "https://github.com/bloxbean/cardano-client-bindings"
+homepage = "https://github.com/bloxbean/cardano-client-bindings"
+documentation = "https://docs.rs/cardano-client-lib"
 readme = "README.md"
+authors = ["bloxbean"]
+keywords = ["cardano", "blockchain", "ffi", "graalvm", "cardano-client-lib"]
+categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
 # Published as `cardano-client-lib`, but imported as `ccl` (e.g. `use ccl::...`) — keep the short
 # crate identifier stable while the registry/dist name is descriptive.
