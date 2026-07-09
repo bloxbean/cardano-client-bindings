@@ -111,3 +111,12 @@ jobs:
         run: ./gradlew :core:nativeCompile
       - name: Run JVM tests
         run: ./gradlew :core:test
+
+  # Fast static guard (no native build): every wrapper must bind all core @CEntryPoint functions,
+  # so a newly added/renamed entry point can't silently be missing from one language.
+  entrypoint-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check @CEntryPoint parity across all wrappers
+        run: python3 scripts/check_entrypoint_parity.py
