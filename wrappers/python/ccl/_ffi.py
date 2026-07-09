@@ -65,6 +65,12 @@ class CclLib:
 
     def __init__(self, lib_path=None):
         lib_file = self._resolve_lib_file(lib_path)
+        # On Windows, register the library's directory so the loader can also find any sibling
+        # DLL dependencies next to libccl.dll (no-op / absent on Unix).
+        if sys.platform == 'win32' and hasattr(os, 'add_dll_directory'):
+            lib_dir = os.path.dirname(os.path.abspath(lib_file))
+            if os.path.isdir(lib_dir):
+                os.add_dll_directory(lib_dir)
         try:
             self._lib = ctypes.CDLL(lib_file)
         except OSError as e:

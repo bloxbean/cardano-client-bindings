@@ -40,6 +40,25 @@ fn main() {
             .status();
     }
 
+    if target_os == "windows" {
+        // GraalVM produces the import library as `libccl.lib`, but `cargo:rustc-link-lib=dylib=ccl`
+        // makes the MSVC linker look for `ccl.lib`. Stage a copy under that name into OUT_DIR (which
+        // is on the link search path) so linking resolves. The import lib sits next to the DLL.
+        if let Some(src_dir) = src.parent() {
+            let import_src = src_dir.join("libccl.lib");
+            if import_src.exists() {
+                let import_dst = out_dir.join("ccl.lib");
+                fs::copy(&import_src, &import_dst).unwrap_or_else(|e| {
+                    panic!(
+                        "staging {} -> {}: {e}",
+                        import_src.display(),
+                        import_dst.display()
+                    )
+                });
+            }
+        }
+    }
+
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=dylib=ccl");
     if target_os != "windows" {

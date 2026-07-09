@@ -18,8 +18,16 @@ task test(type: Exec) {
     environment 'LD_LIBRARY_PATH', nativeDir
     environment 'PYTHONPATH', projectDir.absolutePath
 
-    commandLine 'bash', '-c',
-        'python3 -m pytest tests/ -v --ignore=tests/test_quicktx_integration.py --ignore=tests/test_new_features_integration.py'
+    // Windows Python is `python`, not `python3`; invoke it directly rather than via `bash`
+    // (a bare `bash` resolves to WSL on Windows runners, which has no distro).
+    if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+        commandLine 'python', '-m', 'pytest', 'tests/', '-v',
+            '--ignore=tests/test_quicktx_integration.py',
+            '--ignore=tests/test_new_features_integration.py'
+    } else {
+        commandLine 'bash', '-c',
+            'python3 -m pytest tests/ -v --ignore=tests/test_quicktx_integration.py --ignore=tests/test_new_features_integration.py'
+    }
 }
 
 // Full suite including the DevKit integration tests. Requires a running Yaci DevKit
