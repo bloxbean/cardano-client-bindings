@@ -83,9 +83,11 @@ func ensureLoaded() error {
 			loadErr = err
 			return
 		}
-		lib, err := purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+		// dlopenLib is platform-specific: purego.Dlopen on Unix, syscall.LoadLibrary on Windows
+		// (purego.Dlopen / RTLD_* don't exist on Windows). See ffi_unix.go / ffi_windows.go.
+		lib, err := dlopenLib(path)
 		if err != nil {
-			loadErr = fmt.Errorf("dlopen %s: %w", path, err)
+			loadErr = fmt.Errorf("load %s: %w", path, err)
 			return
 		}
 		reg := func(fptr any, name string) { purego.RegisterLibFunc(fptr, lib, name) }
