@@ -102,17 +102,34 @@ function libFilename() {
   return 'libccl.so';
 }
 
+// The per-platform npm package suffix for the current runtime, e.g. "macos-aarch64". Mirrors the
+// native build/release matrix; used to locate the `@bloxbean/cardano-client-lib-<suffix>` optionalDependency.
+export function platformSuffix() {
+  const p = os.platform();
+  const a = os.arch();
+  if (p === 'darwin') return a === 'arm64' ? 'macos-aarch64' : 'macos-x86_64';
+  if (p === 'win32') return 'windows-x86_64';
+  return a === 'arm64' ? 'linux-aarch64' : 'linux-x86_64';
+}
+
 // Locate the native library, in priority order:
 //   1. an explicit `libPath` argument (a directory), if given;
 //   2. the CCL_LIB_PATH env var (a directory) — for development against a locally built lib;
-//   3. the copy bundled inside this package (`libs/`) — how an installed package ships it;
-//   4. the bare filename, letting the OS loader search its default paths.
+//   3. a copy bundled directly in this package (`libs/`) — a local `pack` or single-package install;
+//   4. the `@bloxbean/cardano-client-lib-<platform>` optionalDependency package — the published layout;
+//   5. the bare filename, letting the OS loader search its default paths.
 export function resolveLibFile(libPath) {
   const name = libFilename();
   if (libPath) return path.join(libPath, name);
   if (process.env.CCL_LIB_PATH) return path.join(process.env.CCL_LIB_PATH, name);
   const bundled = path.join(import.meta.dir, '..', 'libs', name);
   if (existsSync(bundled)) return bundled;
+  try {
+    const fromPkg = Bun.resolveSync(`@bloxbean/cardano-client-lib-${platformSuffix()}/${name}`, import.meta.dir);
+    if (fromPkg && existsSync(fromPkg)) return fromPkg;
+  } catch {
+    // platform package not installed — fall through to the bare filename
+  }
   return name;
 }
 
@@ -124,7 +141,6 @@ const EXPECTED_LIB_VERSION = '0.1.0';
 function baseVersion(v) {
   return v.split(/[-+]/, 1)[0].trim();
 }
-
 export class CclBridge {
   constructor(libPath) {
     const libFile = resolveLibFile(libPath);
