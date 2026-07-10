@@ -1,9 +1,9 @@
-# CCL Bridge — Python
+# Cardano Client Bindings — Python
 
 Python bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
-via the CCL Bridge native library. Pure `ctypes` — no JVM, no compiler, no C extension.
+via the Cardano Client Bindings native library. Pure `ctypes` — no JVM, no compiler, no C extension.
 
-> Part of the [CCL Bridge](../../README.md) project. See the
+> Part of the [Cardano Client Bindings](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
 > [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
@@ -19,16 +19,17 @@ The native library is **bundled inside the platform wheel** — no separate down
 **Recommended — a platform wheel that bundles the native library:**
 
 ```bash
-pip install ccl                      # once published to PyPI
+pip install cardano-client-lib    # once published to PyPI
 # or, a locally built wheel:
-pip install path/to/ccl-*.whl
+pip install path/to/cardano_client_bridge-*.whl
 ```
 
-The wheel ships the matching `libccl.*` inside the package (`ccl/_libs/`), so `import ccl` just
-works — nothing else to set. Build one locally (needs `pip install build`):
+The distribution is named `cardano-client-lib`, but the import stays short: `import ccl`. The wheel
+ships the matching `libccl.*` inside the package (`ccl/_libs/`), so `import ccl` just works — nothing
+else to set. Build one locally (needs `pip install build`):
 
 ```bash
-./gradlew :wrappers:python:wheel     # -> wrappers/python/dist/ccl-*.whl
+./gradlew :wrappers:python:wheel     # -> wrappers/python/dist/cardano_client_bridge-*.whl
 ```
 
 At load time the bindings look for the library in this order: an explicit `CclLib(lib_path=...)`,
@@ -122,9 +123,34 @@ from ccl import CclLib, YaciProvider, BlockfrostProvider
 
 lib = CclLib()
 provider = BlockfrostProvider(project_id, network="preprod")  # or YaciProvider()
-result = lib.quicktx.build_with_provider(txplan_yaml, provider, sender_address)
+result = lib.quicktx.build_with(txplan_yaml, provider, sender_address)
 ```
 
 Plug in any backend (Koios, Ogmios, …) by supplying an object with `utxos(address)` and
 `protocol_params()`. UTXO *selection* is handled inside the bridge — a provider only returns all
 UTXOs at the address.
+
+## Transaction evaluators (optional)
+
+A Plutus build needs each redeemer's execution units. The bridge computes them **offline** with
+Scalus when you supply none — so a script build just works, no evaluation step:
+
+```python
+result = lib.quicktx.build_with(txplan_yaml, provider, sender_address)  # Scalus computes the units
+```
+
+To use a **remote** evaluator instead (e.g. an authoritative fallback), pass a
+`TransactionEvaluator`; `build_with` runs a two-pass (draft → evaluate → rebuild). libccl never
+makes HTTP calls ([ADR-0013](../../docs/adr/0013-transaction-evaluators.md)), so remote evaluation
+lives here in the wrapper:
+
+```python
+from ccl import BlockfrostEvaluator
+
+evaluator = BlockfrostEvaluator(project_id, network="preprod")
+result = lib.quicktx.build_with(txplan_yaml, provider, sender_address, evaluator=evaluator)
+```
+
+Plug in any evaluator (Ogmios, …) by supplying an object with `evaluate(tx_cbor, utxos)`. To supply
+units you computed yourself, call `build(..., exec_units=…)` directly. See
+`examples/04_plutus_evaluator.py`.

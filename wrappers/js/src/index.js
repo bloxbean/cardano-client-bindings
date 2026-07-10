@@ -6,6 +6,7 @@ import { parse as parseYaml } from 'yaml';
 
 // Optional chain-data provider helpers (re-exported for convenience).
 export { ChainDataProvider, YaciProvider, BlockfrostProvider } from './providers.js';
+export { TransactionEvaluator, BlockfrostEvaluator } from './providers.js';
 
 // Error codes
 export const CCL_SUCCESS = 0;
@@ -58,7 +59,7 @@ function cstr(str) {
 // Yaci DevKit :10000 local-cluster proxy — returns numeric `cost_models` only (empirically verified:
 // no `cost_models_raw`), even though the DevKit's own yaci-store serves the ordered form on :8080.
 // Remove this whole function once every endpoint we fetch params from returns `cost_models_raw` —
-// tracked in bloxbean/ccl-bridge#11.
+// tracked in bloxbean/cardano-client-bindings#11.
 export function normalizeCostModels(protocolParams) {
   if (!protocolParams || typeof protocolParams !== 'object') return protocolParams;
 
@@ -132,6 +133,14 @@ export function resolveLibFile(libPath) {
   return name;
 }
 
+// Native libccl version this wrapper expects, kept in lockstep with the package version. On
+// construction the wrapper compares it against ccl_version() and fails fast on a skew.
+const EXPECTED_LIB_VERSION = '0.1.0';
+
+// Strip any pre-release / build suffix: '0.1.0-preview1' -> '0.1.0'.
+function baseVersion(v) {
+  return v.split(/[-+]/, 1)[0].trim();
+}
 export class CclBridge {
   constructor(libPath) {
     const libFile = resolveLibFile(libPath);
@@ -222,6 +231,8 @@ export class CclBridge {
     }
     this._thread = Number(threadBuf[0]);
 
+    this._checkVersion();
+
     // Namespace APIs
     this.account = new AccountApi(this);
     this.address = new AddressApi(this);
@@ -268,6 +279,20 @@ export class CclBridge {
 
   version() {
     return this._check(this._lib.ccl_version(this._thread));
+  }
+
+  // Fail fast on a native-lib / wrapper version skew (bypass with CCL_SKIP_VERSION_CHECK).
+  _checkVersion() {
+    if (process.env.CCL_SKIP_VERSION_CHECK) return;
+    const libVer = this.version();
+    if (baseVersion(libVer) !== baseVersion(EXPECTED_LIB_VERSION)) {
+      throw new Error(
+        `libccl version '${libVer}' is incompatible with the @bloxbean/cardano-client-lib wrapper ` +
+        `(expects '${EXPECTED_LIB_VERSION}'). The native library and wrapper must be the same version ` +
+        `— reinstall the package, or set CCL_LIB_PATH to a matching libccl. ` +
+        `Set CCL_SKIP_VERSION_CHECK=1 to bypass.`
+      );
+    }
   }
 }
 
@@ -495,9 +520,15 @@ export class QuickTxApi {
    * @param {Array<{mem: (number|string), steps: (number|string)}>} [execUnits]
    * @returns {Promise<{tx_cbor: string, tx_hash: string, fee: string}>}
    */
-  async buildWithProvider(txplanYaml, provider, sender, execUnits = null) {
+  async buildWith(txplanYaml, provider, sender, evaluator = null) {
     const utxos = await provider.utxos(sender);
     const protocolParams = await provider.protocolParams();
+    let execUnits = null;
+    if (evaluator != null) {
+      // Two-pass: draft (units computed offline by Scalus) -> remote evaluate -> rebuild.
+      const draft = this.build(txplanYaml, utxos, protocolParams);
+      execUnits = await evaluator.evaluate(draft.tx_cbor, utxos);
+    }
     return this.build(txplanYaml, utxos, protocolParams, execUnits);
   }
 }

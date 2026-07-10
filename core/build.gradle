@@ -3,7 +3,7 @@ plugins {
     id 'org.graalvm.buildtools.native'
 }
 
-base.archivesName = 'ccl-bridge-core'
+base.archivesName = 'cardano-client-lib-core'
 
 def cclVersion = '0.8.0-pre4'
 
@@ -14,6 +14,11 @@ dependencies {
     implementation "com.bloxbean.cardano:cardano-client-hd-wallet:${cclVersion}"
     implementation "com.bloxbean.cardano:cardano-client-governance:${cclVersion}"
     implementation "com.bloxbean.cardano:cardano-client-quicktx:${cclVersion}"
+
+    // Scalus offline Plutus evaluator (Scala 3): computes redeemer execution units in-process by
+    // running the UPLC engine — no network. Used as the fallback evaluator when the caller supplies
+    // none. (Compiles + runs inside the GraalVM native image.)
+    implementation "org.scalus:scalus-bloxbean-cardano-client-lib_3:0.17.0"
 
     // CCL CIP modules
     implementation "com.bloxbean.cardano:cardano-client-cip8:${cclVersion}"
@@ -34,6 +39,36 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// Single source of truth for the library version reported by `ccl_version`: generate a BuildInfo
+// class from the Gradle project version (its base, e.g. "0.1.0-preview1" -> "0.1.0") so the native
+// lib and the wrappers can never silently disagree. Generated source (not a resource) so it needs no
+// native-image resource config. Wrappers compare this against their own expected version on init.
+def cclLibVersion = project.version.toString().replaceAll(/[-+].*$/, '')
+def generatedSrcDir = layout.buildDirectory.dir('generated/sources/buildinfo/java/main')
+
+def generateBuildInfo = tasks.register('generateBuildInfo') {
+    inputs.property('version', cclLibVersion)
+    outputs.dir(generatedSrcDir)
+    doLast {
+        def pkgDir = generatedSrcDir.get().dir('com/bloxbean/cardano/bridge').asFile
+        pkgDir.mkdirs()
+        new File(pkgDir, 'BuildInfo.java').text = """\
+package com.bloxbean.cardano.bridge;
+
+/** Generated at build time from the Gradle project version. Do not edit. */
+public final class BuildInfo {
+    private BuildInfo() {}
+
+    /** Library version reported by {@code ccl_version} (base semver, no pre-release suffix). */
+    public static final String VERSION = "${cclLibVersion}";
+}
+"""
+    }
+}
+
+sourceSets.main.java.srcDir generatedSrcDir
+tasks.named('compileJava') { dependsOn generateBuildInfo }
+
 graalvmNative {
     binaries {
         main {
@@ -52,6 +87,12 @@ graalvmNative {
                 '--initialize-at-build-time=org.yaml.snakeyaml',
                 '--enable-url-protocols=http,https',
             )
+            // musl / Alpine variant (PoC, -PmuslBuild): link the shared lib against musl libc
+            // instead of glibc so it loads on Alpine/musl images. Requires a musl toolchain
+            // (musl-gcc + musl-linked zlib) on the build host.
+            if (project.hasProperty('muslBuild')) {
+                buildArgs.add('--libc=musl')
+            }
         }
     }
 }
@@ -92,8 +133,8 @@ tasks.register('downloadNativeLib') {
         }
 
         outDir.mkdirs()
-        def url = "https://github.com/bloxbean/ccl-bridge/releases/download/${libVersion}/ccl-bridge-${libVersion}-${platformInfo.platform}.tar.gz"
-        def tarball = new File(outDir, 'ccl-bridge.tar.gz')
+        def url = "https://github.com/bloxbean/cardano-client-bindings/releases/download/${libVersion}/cardano-client-lib-${libVersion}-${platformInfo.platform}.tar.gz"
+        def tarball = new File(outDir, 'cardano-client-lib.tar.gz')
 
         logger.lifecycle("Downloading pre-built library from ${url}")
         exec {

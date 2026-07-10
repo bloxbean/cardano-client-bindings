@@ -105,15 +105,17 @@ export declare class QuickTxApi {
     ): QuickTxResult;
 
     /**
-     * Convenience: fetch chain data from a provider and build, in one call. Composes
-     * `provider.utxos(sender)` + `provider.protocolParams()` with {@link build}. The bridge stays
-     * offline — this only moves the optional HTTP fetch into wrapper code.
+     * Fetch chain data from a provider (and, optionally, execution units from an evaluator), then
+     * build — in one call. Composes `provider.utxos(sender)` + `provider.protocolParams()` with
+     * {@link build}. With an `evaluator`, runs a two-pass (draft → evaluate → rebuild); without one,
+     * the native library's offline Scalus default computes any script units. To supply units
+     * yourself, call {@link build} directly with `execUnits`.
      */
-    buildWithProvider(
+    buildWith(
         txplanYaml: string,
         provider: ChainDataProvider,
         sender: string,
-        execUnits?: Array<{ mem: number | string; steps: number | string }>,
+        evaluator?: TransactionEvaluator,
     ): Promise<QuickTxResult>;
 }
 
@@ -137,6 +139,18 @@ export declare class BlockfrostProvider implements ChainDataProvider {
     constructor(projectId: string, opts?: { network?: 'mainnet' | 'preprod' | 'preview'; baseUrl?: string });
     utxos(address: string): Promise<object[]>;
     protocolParams(): Promise<object>;
+}
+
+/** Computes a Plutus transaction's redeemer execution units. Implement to plug in any evaluator. */
+export interface TransactionEvaluator {
+    /** `[{ mem, steps }]`, one per redeemer in transaction order, for the draft `txCbor` (hex). */
+    evaluate(txCbor: string, utxos?: object[]): Promise<Array<{ mem: number | string; steps: number | string }>>;
+}
+
+/** Remote evaluator via a Blockfrost-compatible `/utils/txs/evaluate` endpoint. */
+export declare class BlockfrostEvaluator implements TransactionEvaluator {
+    constructor(projectId: string, opts?: { network?: 'mainnet' | 'preprod' | 'preview'; baseUrl?: string });
+    evaluate(txCbor: string, utxos?: object[]): Promise<Array<{ mem: number | string; steps: number | string }>>;
 }
 
 export declare const MAINNET: number;

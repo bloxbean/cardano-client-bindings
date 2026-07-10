@@ -4,7 +4,7 @@ import { CclBridge, CclError, MAINNET, TESTNET, normalizeCostModels } from '../s
 // A known valid transaction CBOR hex (built from Java tests)
 const SAMPLE_TX_CBOR = '84a300d901028182582073198b7ad003862b9798106b88fbccfca464b1a38afb34958275c4a7d7d8d002010181825839009493315cd92eb5d8c4304e67b7e16ae36d61d34502694657811a2c8e32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc1a001e8480021a00029810a0f5f6';
 
-describe('CCL Bridge', () => {
+describe('Cardano Client Bindings', () => {
     let bridge;
 
     beforeAll(() => {

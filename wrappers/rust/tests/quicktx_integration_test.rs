@@ -261,7 +261,7 @@ fn test_integration_insufficient_funds() {
 }
 
 // The shipped YaciProvider fetches the devnet's real chain data and feeds build via
-// build_with_provider.
+// build_with.
 #[cfg(feature = "providers")]
 #[test]
 fn test_integration_build_with_yaci_provider() {
@@ -279,8 +279,8 @@ fn test_integration_build_with_yaci_provider() {
     let yaml = payment_yaml(&sender, &receiver, "5000000");
     let result = bridge
         .quicktx()
-        .build_with_provider(&yaml, &provider, &sender, None)
-        .expect("build_with_provider failed");
+        .build_with(&yaml, &provider, &sender, None)
+        .expect("build_with failed");
 
     assert!(!result.tx_cbor.is_empty());
     assert_eq!(result.tx_hash.len(), 64);

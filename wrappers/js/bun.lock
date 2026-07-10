@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@bloxbean/cardano-client-lib",
+      "name": "@bloxbean/cardano-client-bridge",
       "dependencies": {
         "yaml": "^2.3.0",
       },

@@ -37,15 +37,28 @@ task integrationTest(type: Exec) {
     commandLine 'bash', '-c', 'python3 -m pytest tests/ -v'
 }
 
+// Stage the platform's libccl.* into ccl/_libs/ (pure Gradle — no shell — so it works on Windows).
+// Keeps the committed .gitkeep; only the binaries are managed here.
+task stageWheelLib {
+    dependsOn copyNativeLib
+    doLast {
+        delete fileTree('ccl/_libs') { include 'libccl.*' }
+        delete 'dist'
+        copy {
+            from layout.buildDirectory.dir('native')
+            into 'ccl/_libs'
+            include 'libccl.so', 'libccl.dylib', 'libccl.dll'
+        }
+    }
+}
+
 // Build a platform-specific wheel that bundles the native library into ccl/_libs/, so
 // `pip install` needs no CCL_LIB_PATH. Requires the `build` package (`pip install build`).
 task wheel(type: Exec) {
-    dependsOn copyNativeLib
+    dependsOn stageWheelLib
     workingDir projectDir
-
-    def nativeDir = layout.buildDirectory.dir('native').get().asFile.absolutePath
-    commandLine 'bash', '-c',
-        "set -eu; rm -rf ccl/_libs dist; mkdir -p ccl/_libs; " +
-        "for f in libccl.so libccl.dylib libccl.dll; do cp \"${nativeDir}/\$f\" ccl/_libs/ 2>/dev/null || true; done; " +
-        "python3 -m build --wheel"
+    // Windows Python is `python`, not `python3`; invoke it directly rather than via `bash`
+    // (a bare `bash` resolves to WSL on Windows runners, which has no distro).
+    def python = org.gradle.internal.os.OperatingSystem.current().isWindows() ? 'python' : 'python3'
+    commandLine python, '-m', 'build', '--wheel'
 }

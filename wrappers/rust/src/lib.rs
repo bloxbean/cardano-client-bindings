@@ -50,6 +50,11 @@ impl std::error::Error for CclError {}
 
 pub type Result<T> = std::result::Result<T, CclError>;
 
+/// Strip any pre-release / build suffix: `"0.1.0-preview1"` -> `"0.1.0"`.
+fn base_version(v: &str) -> &str {
+    v.split(['-', '+']).next().unwrap_or(v).trim()
+}
+
 fn to_cstring(s: &str) -> Result<CString> {
     CString::new(s).map_err(|e| CclError {
         code: error_codes::CCL_ERROR_INVALID_ARGUMENT,
@@ -84,7 +89,33 @@ impl Bridge {
             });
         }
 
-        Ok(Bridge { isolate, thread })
+        let bridge = Bridge { isolate, thread };
+        bridge.check_version()?;
+        Ok(bridge)
+    }
+
+    /// Fail fast on a native-lib / wrapper version skew rather than surfacing it later as a confusing
+    /// error. The expected version is this crate's own version (`CARGO_PKG_VERSION`, kept in lockstep
+    /// with the native lib); compare base semver so pre-release suffixes don't matter. Bypass with
+    /// `CCL_SKIP_VERSION_CHECK`.
+    fn check_version(&self) -> Result<()> {
+        if std::env::var_os("CCL_SKIP_VERSION_CHECK").is_some() {
+            return Ok(());
+        }
+        let lib_ver = self.version()?;
+        let expected = env!("CARGO_PKG_VERSION");
+        if base_version(&lib_ver) != base_version(expected) {
+            return Err(CclError {
+                code: -1,
+                message: format!(
+                    "libccl version '{lib_ver}' is incompatible with the cardano-client-lib Rust \
+                     wrapper (expects '{expected}'). The native library and wrapper must be the same \
+                     version — rebuild against a matching libccl, or set CCL_LIB_PATH. Set \
+                     CCL_SKIP_VERSION_CHECK=1 to bypass."
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn get_result(&self) -> String {
@@ -670,5 +701,18 @@ impl<'a> QuickTxApi<'a> {
             code: error_codes::CCL_ERROR_SERIALIZATION,
             message: format!("Failed to parse tx result: {}", e),
         })
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::base_version;
+
+    #[test]
+    fn base_version_strips_suffix() {
+        assert_eq!(base_version("0.1.0"), "0.1.0");
+        assert_eq!(base_version("0.1.0-preview1"), "0.1.0");
+        assert_eq!(base_version("1.2.3+build.5"), "1.2.3");
+        assert_eq!(base_version("  0.1.0  "), "0.1.0");
     }
 }

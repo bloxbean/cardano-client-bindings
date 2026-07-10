@@ -22,7 +22,7 @@ extern "C" {
 
     pub fn graal_tear_down_isolate(thread: *mut graal_isolatethread_t) -> c_int;
 
-    // CCL Bridge lifecycle
+    // Cardano Client Bindings lifecycle
     pub fn ccl_version(thread: *mut graal_isolatethread_t) -> c_int;
     pub fn ccl_get_result(thread: *mut graal_isolatethread_t) -> *mut c_char;
     pub fn ccl_get_last_error(thread: *mut graal_isolatethread_t) -> *mut c_char;

@@ -213,7 +213,7 @@ transaction:
             - unit: lovelace
               quantity: "2000000"
         - type: metadata
-          metadata: '{"674": {"msg": "Hello from CCL Bridge"}}'
+          metadata: '{"674": {"msg": "Hello from Cardano Client Bindings"}}'
 ```
 
 ### 5. Plutus mint (with caller-supplied execution units)
@@ -302,7 +302,7 @@ signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], CclLib.TESTNET, 0, 0)
 ### JavaScript (Bun)
 
 ```javascript
-import { CclBridge, TESTNET } from '@bloxbean/ccl';
+import { CclBridge, TESTNET } from '@bloxbean/cardano-client-lib';
 
 const bridge = new CclBridge();
 const result = bridge.quicktx.build(txplanYaml, utxos, protocolParams);

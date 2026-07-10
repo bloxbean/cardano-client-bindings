@@ -1,16 +1,28 @@
-# CCL Bridge — Go
+# Cardano Client Bindings — Go
 
 Go bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
-via the CCL Bridge native library, using `cgo`.
+via the Cardano Client Bindings native library. Pure Go — the library is loaded with
+[purego](https://github.com/ebitengine/purego), so there is **no cgo and no C toolchain**.
 
-> Part of the [CCL Bridge](../../README.md) project. See the
+> Part of the [Cardano Client Bindings](../../README.md) project. See the
 > [top-level README](../../README.md) for the full API reference and
 > [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
 
-## Requirements
+## Install
 
-- Go 1.21+ with `cgo` enabled (a C toolchain on `PATH`).
-- The native library `libccl.{dylib,so,dll}` for your platform.
+```bash
+go get github.com/bloxbean/cardano-client-bindings/wrappers/go
+```
+
+Requires Go 1.21+. No C toolchain, no `CGO_ENABLED`. On first use the native library
+`libccl.{dylib,so,dll}` for your platform is resolved automatically, in order:
+
+1. **`CCL_LIB_PATH`** — a directory or the library file, to supply your own build;
+2. a **per-version cache** (`os.UserCacheDir()/cardano-client-bindings/<version>/`);
+3. otherwise it is **downloaded once** from the matching GitHub release and cached.
+
+Override the downloaded version with `CCL_LIB_VERSION`. Resolution is fail-hard: a bad
+download errors rather than silently using a stale library.
 
 > **Threading:** all FFI calls run on a single dedicated OS thread that the `Bridge`
 > pins for its lifetime, so a `Bridge` is safe to share across goroutines and is immune
@@ -18,30 +30,13 @@ via the CCL Bridge native library, using `cgo`.
 > Linux x86_64). Calls are serialized; create multiple `Bridge` instances if you need
 > concurrent isolate work.
 
-## Getting the native library
-
-The `cgo` directives in `ccl/ccl.go` already point the compiler/linker at
-`core/build/native/nativeCompile` (relative to the package), so you only need to build
-or download the library there. From the repo root:
-
-```bash
-./gradlew :core:nativeCompile   # build from source (needs Oracle GraalVM 25.0.3)
-# or:
-make download-lib               # download a pre-built binary
-```
-
-At **runtime** the OS loader also needs to find the library, via `DYLD_LIBRARY_PATH`
-(macOS) / `LD_LIBRARY_PATH` (Linux).
-
 ## Running the examples
 
-From `wrappers/go`:
+From `wrappers/go` (the library is auto-resolved; set `CCL_LIB_PATH` to a local build to
+skip the download):
 
 ```bash
-LIB_DIR=../../core/build/native/nativeCompile
-
-DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
-  go run ./examples/account
+go run ./examples/account
 ```
 
 The [`examples/`](examples/) directory contains:
@@ -61,7 +56,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/bloxbean/ccl-bridge/wrappers/go/ccl"
+	"github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
 )
 
 func main() {
@@ -101,9 +96,32 @@ for you over HTTP (stdlib `net/http`), so the native library stays offline and p
 
 ```go
 provider, _ := ccl.NewBlockfrostProvider(projectID, "preprod") // or ccl.NewYaciProvider("")
-result, err := bridge.QuickTx.BuildWithProvider(yaml, provider, senderAddress)
+result, err := bridge.QuickTx.BuildWith(yaml, provider, senderAddress)
 ```
 
 Plug in any backend (Koios, Ogmios, …) by implementing the `ccl.ChainDataProvider` interface
 (`Utxos(address)`, `ProtocolParams()`). UTXO *selection* is handled inside the bridge — a provider
 only returns all UTXOs at the address.
+
+## Transaction evaluators (optional)
+
+A Plutus build needs each redeemer's execution units. The bridge computes them **offline** with
+Scalus when you supply none — so a script build just works, no evaluation step:
+
+```go
+result, err := bridge.QuickTx.BuildWith(yaml, provider, senderAddress) // Scalus computes the units
+```
+
+To use a **remote** evaluator instead (e.g. an authoritative fallback), pass a
+`TransactionEvaluator`; `BuildWith` runs a two-pass (draft → evaluate → rebuild). libccl never makes
+HTTP calls ([ADR-0013](../../docs/adr/0013-transaction-evaluators.md)), so remote evaluation lives
+here in the wrapper:
+
+```go
+evaluator, _ := ccl.NewBlockfrostEvaluator(projectID, "preprod")
+result, err := bridge.QuickTx.BuildWith(yaml, provider, senderAddress, evaluator)
+```
+
+Plug in any evaluator (Ogmios, …) by implementing the `ccl.TransactionEvaluator` interface
+(`Evaluate`). To supply units you computed yourself, call `Build` directly. See
+`examples/evaluator`.

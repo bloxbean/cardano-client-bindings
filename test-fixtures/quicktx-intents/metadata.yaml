@@ -14,4 +14,4 @@ transaction:
     - type: metadata
       metadata: |
         "674":
-          msg: "Hello from CCL Bridge"
+          msg: "Hello from Cardano Client Bindings"

@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-This directory records the **significant architectural decisions** for CCL Bridge — the *why*
+This directory records the **significant architectural decisions** for Cardano Client Bindings — the *why*
 behind choices that aren't obvious from the code, so a future maintainer doesn't unknowingly
 undo them.
 
@@ -34,3 +34,5 @@ undo them.
 | [0010](0010-go-isolate-thread-affinity.md) | Go wrapper isolate thread-affinity — all FFI on one dedicated OS thread | Accepted | 2026-06-10 |
 | [0011](0011-wrapper-side-chain-data-providers.md) | Wrapper-side chain-data provider helpers (UTxOs + protocol params) | Accepted | 2026-06-30 |
 | [0012](0012-native-lib-bundled-in-wrapper-packages.md) | Distribute the native library bundled in per-wrapper platform packages | Accepted | 2026-07-01 |
+| [0013](0013-transaction-evaluators.md) | Transaction evaluators — Scalus default in the core, pluggable remote evaluators in the wrappers | Accepted | 2026-07-03 |
+| [0014](0014-go-distribution-purego-runtime-resolution.md) | Go distribution — purego + runtime library resolution (supersedes ADR-0012's Go mechanism) | Accepted | 2026-07-07 |

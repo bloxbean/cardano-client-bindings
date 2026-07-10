@@ -1,12 +1,17 @@
 # ADR-0012: Distribute the native library bundled in per-wrapper platform packages
 
-- **Status:** Accepted
+- **Status:** Accepted — Go mechanism superseded by [ADR-0014](0014-go-distribution-purego-runtime-resolution.md)
 - **Date:** 2026-07-01
 - **Deciders:** bloxbean maintainers
 
+> **Update:** the question this ADR "left genuinely open for Go" (see Alternatives) is resolved by
+> [ADR-0014](0014-go-distribution-purego-runtime-resolution.md) — Go drops cgo for **purego** and
+> resolves the library at **runtime**. The "Go via cgo / build-time linking / Go-C-follow-the-same-
+> shape" descriptions below are superseded for Go; the bundling decision for Python/JS still stands.
+
 ## Context
 
-CCL Bridge ships a native shared library (`libccl.{so,dylib,dll}`, [ADR-0001](0001-native-shared-library-ffi.md))
+Cardano Client Bindings ships a native shared library (`libccl.{so,dylib,dll}`, [ADR-0001](0001-native-shared-library-ffi.md))
 that each language wrapper ([ADR-0003](0003-four-language-wrappers-uniform-ffi.md)) loads over FFI. Until
 now the wrappers only located that library through an environment variable (`CCL_LIB_PATH`, plus the OS
 loader's `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`): the user had to build or download the lib and point the
@@ -49,12 +54,15 @@ Per-wrapper mechanism (each is a separate delivery, but all follow the rule abov
 - **JavaScript — npm (implemented).** `CclBridge` resolves the lib with the same priority order and loads a
   copy bundled under the package's `libs/`. `:wrappers:js:pack` stages the lib and runs `npm pack`; CI proves
   the tarball installs into a clean project and loads with no env vars. The binary is gitignored (staged at
-  pack time). For *publishing*, a single npm package can't be per-platform, so `publish-js.yml` ships
-  per-platform packages `@bloxbean/cardano-client-bridge-<platform>` via `optionalDependencies` (each carrying one platform's
-  lib, constrained by `os`/`cpu`); the loader resolves the lib from whichever one npm installed, so a plain
-  `npm install @bloxbean/cardano-client-bridge` needs no env vars. The npm upload is gated behind an admin-set repo variable.
-- **Rust — crates.io.** crates.io will not host a 50 MB binary, so a `build.rs` fetches the lib from the
-  release (or `include_bytes!` from a locally staged copy) at build time.
+  pack time). For *publishing*, a single npm package can't be per-platform, so the release step will ship
+  per-platform packages via `optionalDependencies` (each carrying one platform's lib) — the loader already
+  finds a bundled lib regardless of which package provides it.
+- **Rust — crates.io (implemented).** crates.io won't host the ~50 MB binary, so the crate carries only
+  source + `build.rs`; `build.rs` sources `libccl.*` (from `CCL_LIB_PATH`, the in-tree build, or the GitHub
+  release), stages a copy in `OUT_DIR`, rewrites the macOS install name to `@rpath`, and emits an `rpath` —
+  so linking *and* runtime work with no env vars. CI proves the crate loads with `CCL_LIB_PATH`/`DYLD`/`LD`
+  unset. Tradeoff vs. the wheel/npm: network is needed at the *first build* (not install), since Rust has no
+  install hook.
 - **Go — hardest.** Go modules run no install hooks, so bundling means `go:embed` of the platform lib +
   extract-to-temp at runtime, or a documented fetch step.
 
@@ -65,17 +73,25 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
 
 ## Consequences
 
-- `pip install cardano-client-bridge` (and eventually the npm/crates equivalents) works with **no
-  `CCL_LIB_PATH`**, on a fresh machine — the adoption blocker is removed, one wrapper at a time.
+- `pip install ccl` (and eventually the npm/crates equivalents) works with **no `CCL_LIB_PATH`**, on a fresh
+  machine — the adoption blocker is removed, one wrapper at a time.
 - Packages get **large** (tens of MB) and are **per-platform**; releasing means a build matrix producing one
   artifact per OS/arch, and users on an unsupported platform fall back to source/`CCL_LIB_PATH`.
 - The set of shippable platforms is bounded by what we build: `linux-x86_64` + `linux-aarch64` (both
-  glibc-baseline), `macos-aarch64` + `macos-x86_64`, and `windows-x86_64`. `windows-arm64` and
+  glibc-baseline), `macos-aarch64`, and `windows-x86_64`. `macos-x86_64` (Intel) is **not** built —
+  Oracle GraalVM is dropping Intel-Mac support (its 25.1 line ships none). `windows-arm64` and
   musl/Alpine remain unbuilt, so wheels can't exist for those yet.
 - Each ecosystem needs its own bundling code and its own publishing story; the four will land incrementally,
   not atomically.
 - A lib a version behind its wrapper still fails confusingly — bundling makes version-lock easier (same
   release builds both) but does not by itself add a runtime check (tracked separately).
+- **The two wrapper families resolve the lib differently.** Python (ctypes) and JS (`dlopen`) load a file
+  *by path* at runtime, so the lib's install name is irrelevant — they just point at the bundled copy. The
+  **native-linked** wrappers (Rust `extern "C"`, C, and Go via cgo) *link* against `libccl` at build time,
+  so removing the env-var requirement means making the runtime loader find it: stage the lib and reference
+  it via **`@rpath`** (macOS needs `install_name_tool -id @rpath/libccl.dylib` because GraalVM stamps an
+  absolute build path — exactly what forced `DYLD_LIBRARY_PATH` before; the Linux `.so`'s SONAME is already
+  the leaf name), plus emit an `rpath`. Rust does this in `build.rs`; Go/C will follow the same shape.
 
 ## Alternatives considered
 
@@ -89,3 +105,13 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
 - **One fat package carrying every platform's lib.** Simplest to publish (no matrix), but multiplies download
   size several-fold for everyone and fights each registry's platform-tag model. Rejected in favour of
   per-platform artifacts.
+- **Runtime `dlopen` for the native-linked wrappers, instead of build-time linking + `@rpath`.** Rust/C/Go
+  *could* drop `extern "C"`/cgo and load `libccl` at runtime (via `libloading` / `purego`, like Python and
+  JS), which sidesteps the install-name/`rpath` dance entirely. Rejected for Rust and taken as the default:
+  it's a full rewrite of each wrapper's FFI layer, whereas stage-`@rpath`-link keeps the existing,
+  well-tested bindings while still dropping the env-var requirement. **Left genuinely open for Go**, where
+  cgo's build-time linking *plus* Go's no-install-hook constraint (a ~250 MB all-platforms module otherwise)
+  may tip the balance toward `go:embed` + runtime `dlopen`.
+  → **Resolved by [ADR-0014](0014-go-distribution-purego-runtime-resolution.md):** Go drops cgo for
+  **purego** and resolves `libccl` at runtime (`CCL_LIB_PATH` → cache → one-time download) — not
+  `go:embed`, which would have shipped the ~250 MB.

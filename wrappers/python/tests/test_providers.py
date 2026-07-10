@@ -1,7 +1,7 @@
 """Unit tests for the optional chain-data provider helpers.
 
 These exercise the HTTP-shaping logic (URLs, headers, pagination, address injection) and the
-build_with_provider composition without a live backend — the actual Yaci round-trip is covered by
+build_with composition without a live backend — the actual Yaci round-trip is covered by
 the DevKit integration tests.
 """
 from unittest import mock
@@ -63,7 +63,7 @@ def test_blockfrost_utxos_paginate_and_inject_address():
     assert all(u["address"] == "addr_test1abc" for u in utxos)   # address injected on every UTXO
 
 
-def test_build_with_provider_composes_fetch_and_build():
+def test_build_with_composes_fetch_and_build():
     sentinel_utxos = [{"tx_hash": "a" * 64, "output_index": 0, "address": "addrX",
                        "amount": [{"unit": "lovelace", "quantity": "9"}]}]
     sentinel_pp = {"min_fee_a": 44}
@@ -77,11 +77,24 @@ def test_build_with_provider_composes_fetch_and_build():
             return sentinel_pp
 
     qt = QuickTx(bridge=None)
-    captured = {}
-    qt.build = lambda y, u, p, e=None: captured.update(yaml=y, utxos=u, pp=p, exec=e) or "RESULT"
+    calls = []
+    qt.build = lambda y, u, p, e=None: (calls.append((y, u, p, e)), {"tx_cbor": "DRAFT"})[1]
 
-    out = qt.build_with_provider("YAML", StubProvider(), "addrX", exec_units=[{"mem": 1, "steps": 2}])
+    # No evaluator → fetch chain data, then build once with no units (the offline Scalus default).
+    qt.build_with("YAML", StubProvider(), "addrX")
+    assert calls == [("YAML", sentinel_utxos, sentinel_pp, None)]
 
-    assert out == "RESULT"
-    assert captured == {"yaml": "YAML", "utxos": sentinel_utxos, "pp": sentinel_pp,
-                        "exec": [{"mem": 1, "steps": 2}]}
+    # With an evaluator → two-pass: draft build, evaluate(draft), rebuild with the returned units.
+    calls.clear()
+
+    class StubEvaluator:
+        def evaluate(self, tx_cbor, utxos=None):
+            assert tx_cbor == "DRAFT"
+            assert utxos == sentinel_utxos
+            return [{"mem": 1, "steps": 2}]
+
+    qt.build_with("YAML", StubProvider(), "addrX", evaluator=StubEvaluator())
+    assert calls == [
+        ("YAML", sentinel_utxos, sentinel_pp, None),                      # draft
+        ("YAML", sentinel_utxos, sentinel_pp, [{"mem": 1, "steps": 2}]),  # rebuild
+    ]

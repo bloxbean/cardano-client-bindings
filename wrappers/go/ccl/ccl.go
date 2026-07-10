@@ -1,20 +1,12 @@
 package ccl
 
-/*
-#cgo CFLAGS: -I${SRCDIR}/../../../core/build/native/nativeCompile
-#cgo LDFLAGS: -L${SRCDIR}/../../../core/build/native/nativeCompile -lccl
-
-#include "libccl.h"
-#include <stdlib.h>
-*/
-import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
-	"unsafe"
 
 	goyaml "gopkg.in/yaml.v3"
 )
@@ -92,13 +84,13 @@ type GovKeyInfo struct {
 // All FFI calls are funneled to a single, dedicated OS thread (see loop) for the
 // lifetime of the Bridge. A GraalVM IsolateThread is bound to the OS thread that
 // created it, but the Go runtime can migrate a goroutine across OS threads between
-// (or within) cgo calls. Calling the isolate from a different OS thread than the one
+// (or within) FFI calls. Calling the isolate from a different OS thread than the one
 // that created it makes GraalVM read the wrong thread's stack — which on Linux
 // x86_64 crashes with a "yellow zone" StackOverflowError. Pinning every call to one
 // locked OS thread keeps the isolate thread and the executing thread in sync.
 type Bridge struct {
-	isolate *C.graal_isolate_t
-	thread  *C.graal_isolatethread_t
+	isolate uintptr
+	thread  uintptr
 
 	mu    sync.Mutex
 	calls chan func()
@@ -114,13 +106,23 @@ type Bridge struct {
 	QuickTx *QuickTxApi
 }
 
-// New creates a new Bridge instance with a GraalVM isolate.
+// New creates a new Bridge instance with a GraalVM isolate. The native library is located and loaded
+// on first use (see resolveLibPath) — via CCL_LIB_PATH, a per-version cache, or a one-time download.
 func New() (*Bridge, error) {
+	if err := ensureLoaded(); err != nil {
+		return nil, err
+	}
+
 	b := &Bridge{calls: make(chan func())}
 
 	ready := make(chan error, 1)
 	go b.loop(ready)
 	if err := <-ready; err != nil {
+		return nil, err
+	}
+
+	if err := b.checkVersion(); err != nil {
+		b.Close()
 		return nil, err
 	}
 
@@ -143,7 +145,7 @@ func (b *Bridge) loop(ready chan<- error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	if rc := C.graal_create_isolate(nil, &b.isolate, &b.thread); rc != 0 {
+	if rc := graalCreateIsolate(0, &b.isolate, &b.thread); rc != 0 {
 		ready <- fmt.Errorf("failed to create GraalVM isolate: %d", int(rc))
 		return
 	}
@@ -169,7 +171,7 @@ func (b *Bridge) run(fn func()) {
 
 // invoke runs a result-returning FFI call on the isolate thread and reads the
 // per-thread result/error there, where the Java thread-local state lives.
-func (b *Bridge) invoke(call func() C.int) (string, error) {
+func (b *Bridge) invoke(call func() int32) (string, error) {
 	var s string
 	var err error
 	b.run(func() {
@@ -184,8 +186,8 @@ func (b *Bridge) invoke(call func() C.int) (string, error) {
 
 // invokeRC runs an FFI call on the isolate thread and returns its raw status code,
 // for calls (e.g. validate/verify) where the caller interprets the code directly.
-func (b *Bridge) invokeRC(call func() C.int) C.int {
-	var rc C.int
+func (b *Bridge) invokeRC(call func() int32) int32 {
+	var rc int32
 	b.run(func() { rc = call() })
 	return rc
 }
@@ -200,9 +202,9 @@ func (b *Bridge) Close() error {
 	}
 	done := make(chan struct{})
 	b.calls <- func() {
-		if b.thread != nil {
-			C.graal_tear_down_isolate(b.thread)
-			b.thread = nil
+		if b.thread != 0 {
+			graalTearDownIsolate(b.thread)
+			b.thread = 0
 		}
 		close(done)
 	}
@@ -213,32 +215,58 @@ func (b *Bridge) Close() error {
 }
 
 func (b *Bridge) getResult() string {
-	ptr := C.ccl_get_result(b.thread)
+	ptr := cclGetResult(b.thread)
 	if ptr == nil {
 		return ""
 	}
-	result := C.GoString((*C.char)(unsafe.Pointer(ptr)))
-	C.ccl_free_string(b.thread, ptr)
+	result := goString(ptr)
+	cclFreeString(b.thread, ptr)
 	return result
 }
 
 func (b *Bridge) getError() string {
-	ptr := C.ccl_get_last_error(b.thread)
+	ptr := cclGetLastError(b.thread)
 	if ptr == nil {
 		return ""
 	}
-	result := C.GoString((*C.char)(unsafe.Pointer(ptr)))
-	C.ccl_free_string(b.thread, ptr)
+	result := goString(ptr)
+	cclFreeString(b.thread, ptr)
 	return result
-}
-
-func cstr(s string) *C.char {
-	return C.CString(s)
 }
 
 // Version returns the library version string.
 func (b *Bridge) Version() (string, error) {
-	return b.invoke(func() C.int { return C.ccl_version(b.thread) })
+	return b.invoke(func() int32 { return cclVersion(b.thread) })
+}
+
+// expectedLibVersion is the native libccl version this wrapper expects, kept in lockstep with the
+// module release. baseVersion strips any pre-release / build suffix ("0.1.0-preview1" -> "0.1.0").
+const expectedLibVersion = "0.1.0"
+
+func baseVersion(v string) string {
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	return strings.TrimSpace(v)
+}
+
+// checkVersion fails fast on a native-lib / wrapper version skew rather than surfacing it later as a
+// confusing missing-symbol or wrong-result error. Bypass with CCL_SKIP_VERSION_CHECK.
+func (b *Bridge) checkVersion() error {
+	if os.Getenv("CCL_SKIP_VERSION_CHECK") != "" {
+		return nil
+	}
+	libVer, err := b.Version()
+	if err != nil {
+		return err
+	}
+	if baseVersion(libVer) != baseVersion(expectedLibVersion) {
+		return fmt.Errorf("libccl version %q is incompatible with the cardano-client-lib Go wrapper "+
+			"(expects %q); the native library and wrapper must be the same version — update the module "+
+			"or set CCL_LIB_PATH/CCL_LIB_VERSION to a matching libccl (set CCL_SKIP_VERSION_CHECK=1 to bypass)",
+			libVer, expectedLibVersion)
+	}
+	return nil
 }
 
 // --- AccountApi ---
@@ -248,7 +276,7 @@ type AccountApi struct {
 }
 
 func (a *AccountApi) Create(networkID int) (*AccountInfo, error) {
-	result, err := a.bridge.invoke(func() C.int { return C.ccl_account_create(a.bridge.thread, C.int(networkID)) })
+	result, err := a.bridge.invoke(func() int32 { return cclAccountCreate(a.bridge.thread, int32(networkID)) })
 	if err != nil {
 		return nil, err
 	}
@@ -260,11 +288,8 @@ func (a *AccountApi) Create(networkID int) (*AccountInfo, error) {
 }
 
 func (a *AccountApi) FromMnemonic(mnemonic string, networkID, accountIndex, addressIndex int) (*AccountInfo, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	result, err := a.bridge.invoke(func() C.int {
-		return C.ccl_account_from_mnemonic(a.bridge.thread, C.int(networkID), cs, C.int(accountIndex), C.int(addressIndex))
+	result, err := a.bridge.invoke(func() int32 {
+		return cclAccountFromMnemonic(a.bridge.thread, int32(networkID), mnemonic, int32(accountIndex), int32(addressIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -277,40 +302,26 @@ func (a *AccountApi) FromMnemonic(mnemonic string, networkID, accountIndex, addr
 }
 
 func (a *AccountApi) GetPublicKey(mnemonic string, networkID, accountIndex, addressIndex int) (string, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	return a.bridge.invoke(func() C.int {
-		return C.ccl_account_get_public_key(a.bridge.thread, cs, C.int(networkID), C.int(accountIndex), C.int(addressIndex))
+	return a.bridge.invoke(func() int32 {
+		return cclAccountGetPublicKey(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex))
 	})
 }
 
 func (a *AccountApi) GetPrivateKey(mnemonic string, networkID, accountIndex, addressIndex int) (string, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	return a.bridge.invoke(func() C.int {
-		return C.ccl_account_get_private_key(a.bridge.thread, cs, C.int(networkID), C.int(accountIndex), C.int(addressIndex))
+	return a.bridge.invoke(func() int32 {
+		return cclAccountGetPrivKey(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex))
 	})
 }
 
 func (a *AccountApi) GetDRepID(mnemonic string, networkID, accountIndex int) (string, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	return a.bridge.invoke(func() C.int {
-		return C.ccl_account_get_drep_id(a.bridge.thread, cs, C.int(networkID), C.int(accountIndex))
+	return a.bridge.invoke(func() int32 {
+		return cclAccountGetDRepID(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
 	})
 }
 
 func (a *AccountApi) SignTx(mnemonic string, networkID, accountIndex, addressIndex int, txCborHex string) (string, error) {
-	csMnemonic := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(csMnemonic))
-	csTx := cstr(txCborHex)
-	defer C.free(unsafe.Pointer(csTx))
-
-	return a.bridge.invoke(func() C.int {
-		return C.ccl_account_sign_tx(a.bridge.thread, csMnemonic, C.int(networkID), C.int(accountIndex), C.int(addressIndex), csTx)
+	return a.bridge.invoke(func() int32 {
+		return cclAccountSignTx(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex), txCborHex)
 	})
 }
 
@@ -319,15 +330,8 @@ func (a *AccountApi) SignTx(mnemonic string, networkID, accountIndex, addressInd
 // transactions whose certificates also need the stake or DRep key — stake registration/delegation/
 // withdrawal and DRep/vote operations — which the payment key alone cannot witness.
 func (a *AccountApi) SignTxWithKeys(mnemonic string, networkID, accountIndex, addressIndex int, txCborHex string, keys ...string) (string, error) {
-	csMnemonic := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(csMnemonic))
-	csTx := cstr(txCborHex)
-	defer C.free(unsafe.Pointer(csTx))
-	csKeys := cstr(strings.Join(keys, ","))
-	defer C.free(unsafe.Pointer(csKeys))
-
-	return a.bridge.invoke(func() C.int {
-		return C.ccl_account_sign_tx_multi(a.bridge.thread, csMnemonic, C.int(networkID), C.int(accountIndex), C.int(addressIndex), csTx, csKeys)
+	return a.bridge.invoke(func() int32 {
+		return cclAccountSignTxMulti(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex), txCborHex, strings.Join(keys, ","))
 	})
 }
 
@@ -338,10 +342,7 @@ type AddressApi struct {
 }
 
 func (a *AddressApi) Info(bech32 string) (*AddressInfo, error) {
-	cs := cstr(bech32)
-	defer C.free(unsafe.Pointer(cs))
-
-	result, err := a.bridge.invoke(func() C.int { return C.ccl_address_info(a.bridge.thread, cs) })
+	result, err := a.bridge.invoke(func() int32 { return cclAddressInfo(a.bridge.thread, bech32) })
 	if err != nil {
 		return nil, err
 	}
@@ -353,24 +354,15 @@ func (a *AddressApi) Info(bech32 string) (*AddressInfo, error) {
 }
 
 func (a *AddressApi) Validate(bech32 string) bool {
-	cs := cstr(bech32)
-	defer C.free(unsafe.Pointer(cs))
-
-	return a.bridge.invokeRC(func() C.int { return C.ccl_address_validate(a.bridge.thread, cs) }) == Success
+	return a.bridge.invokeRC(func() int32 { return cclAddressValidate(a.bridge.thread, bech32) }) == Success
 }
 
 func (a *AddressApi) ToBytes(bech32 string) (string, error) {
-	cs := cstr(bech32)
-	defer C.free(unsafe.Pointer(cs))
-
-	return a.bridge.invoke(func() C.int { return C.ccl_address_to_bytes(a.bridge.thread, cs) })
+	return a.bridge.invoke(func() int32 { return cclAddressToBytes(a.bridge.thread, bech32) })
 }
 
 func (a *AddressApi) FromBytes(hexBytes string) (string, error) {
-	cs := cstr(hexBytes)
-	defer C.free(unsafe.Pointer(cs))
-
-	return a.bridge.invoke(func() C.int { return C.ccl_address_from_bytes(a.bridge.thread, cs) })
+	return a.bridge.invoke(func() int32 { return cclAddressFromBytes(a.bridge.thread, hexBytes) })
 }
 
 // --- CryptoApi ---
@@ -380,48 +372,27 @@ type CryptoApi struct {
 }
 
 func (c *CryptoApi) Blake2b256(dataHex string) (string, error) {
-	cs := cstr(dataHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return c.bridge.invoke(func() C.int { return C.ccl_crypto_blake2b_256(c.bridge.thread, cs) })
+	return c.bridge.invoke(func() int32 { return cclCryptoBlake2b256(c.bridge.thread, dataHex) })
 }
 
 func (c *CryptoApi) Blake2b224(dataHex string) (string, error) {
-	cs := cstr(dataHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return c.bridge.invoke(func() C.int { return C.ccl_crypto_blake2b_224(c.bridge.thread, cs) })
+	return c.bridge.invoke(func() int32 { return cclCryptoBlake2b224(c.bridge.thread, dataHex) })
 }
 
 func (c *CryptoApi) GenerateMnemonic(wordCount int) (string, error) {
-	return c.bridge.invoke(func() C.int { return C.ccl_crypto_generate_mnemonic(c.bridge.thread, C.int(wordCount)) })
+	return c.bridge.invoke(func() int32 { return cclCryptoGenerateMnemon(c.bridge.thread, int32(wordCount)) })
 }
 
 func (c *CryptoApi) ValidateMnemonic(mnemonic string) bool {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	return c.bridge.invokeRC(func() C.int { return C.ccl_crypto_validate_mnemonic(c.bridge.thread, cs) }) == Success
+	return c.bridge.invokeRC(func() int32 { return cclCryptoValidateMnemon(c.bridge.thread, mnemonic) }) == Success
 }
 
 func (c *CryptoApi) Sign(messageHex, skHex string) (string, error) {
-	csMsg := cstr(messageHex)
-	defer C.free(unsafe.Pointer(csMsg))
-	csSk := cstr(skHex)
-	defer C.free(unsafe.Pointer(csSk))
-
-	return c.bridge.invoke(func() C.int { return C.ccl_crypto_sign(c.bridge.thread, csMsg, csSk) })
+	return c.bridge.invoke(func() int32 { return cclCryptoSign(c.bridge.thread, messageHex, skHex) })
 }
 
 func (c *CryptoApi) Verify(signatureHex, messageHex, pkHex string) bool {
-	csSig := cstr(signatureHex)
-	defer C.free(unsafe.Pointer(csSig))
-	csMsg := cstr(messageHex)
-	defer C.free(unsafe.Pointer(csMsg))
-	csPk := cstr(pkHex)
-	defer C.free(unsafe.Pointer(csPk))
-
-	return c.bridge.invokeRC(func() C.int { return C.ccl_crypto_verify(c.bridge.thread, csSig, csMsg, csPk) }) == Success
+	return c.bridge.invokeRC(func() int32 { return cclCryptoVerify(c.bridge.thread, signatureHex, messageHex, pkHex) }) == Success
 }
 
 // --- TxApi ---
@@ -431,40 +402,23 @@ type TxApi struct {
 }
 
 func (t *TxApi) Hash(txCborHex string) (string, error) {
-	cs := cstr(txCborHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return t.bridge.invoke(func() C.int { return C.ccl_tx_hash(t.bridge.thread, cs) })
+	return t.bridge.invoke(func() int32 { return cclTxHash(t.bridge.thread, txCborHex) })
 }
 
 func (t *TxApi) SignWithSecretKey(txCborHex, skCborHex string) (string, error) {
-	csTx := cstr(txCborHex)
-	defer C.free(unsafe.Pointer(csTx))
-	csSk := cstr(skCborHex)
-	defer C.free(unsafe.Pointer(csSk))
-
-	return t.bridge.invoke(func() C.int { return C.ccl_tx_sign_with_secret_key(t.bridge.thread, csTx, csSk) })
+	return t.bridge.invoke(func() int32 { return cclTxSignSecretKey(t.bridge.thread, txCborHex, skCborHex) })
 }
 
 func (t *TxApi) ToJson(txCborHex string) (string, error) {
-	cs := cstr(txCborHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return t.bridge.invoke(func() C.int { return C.ccl_tx_to_json(t.bridge.thread, cs) })
+	return t.bridge.invoke(func() int32 { return cclTxToJSON(t.bridge.thread, txCborHex) })
 }
 
 func (t *TxApi) FromJson(txJson string) (string, error) {
-	cs := cstr(txJson)
-	defer C.free(unsafe.Pointer(cs))
-
-	return t.bridge.invoke(func() C.int { return C.ccl_tx_from_json(t.bridge.thread, cs) })
+	return t.bridge.invoke(func() int32 { return cclTxFromJSON(t.bridge.thread, txJson) })
 }
 
 func (t *TxApi) Deserialize(txCborHex string) (string, error) {
-	cs := cstr(txCborHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return t.bridge.invoke(func() C.int { return C.ccl_tx_deserialize(t.bridge.thread, cs) })
+	return t.bridge.invoke(func() int32 { return cclTxDeserialize(t.bridge.thread, txCborHex) })
 }
 
 // --- PlutusApi ---
@@ -474,24 +428,15 @@ type PlutusApi struct {
 }
 
 func (p *PlutusApi) DataHash(datumCborHex string) (string, error) {
-	cs := cstr(datumCborHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return p.bridge.invoke(func() C.int { return C.ccl_plutus_data_hash(p.bridge.thread, cs) })
+	return p.bridge.invoke(func() int32 { return cclPlutusDataHash(p.bridge.thread, datumCborHex) })
 }
 
 func (p *PlutusApi) DataToJson(cborHex string) (string, error) {
-	cs := cstr(cborHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return p.bridge.invoke(func() C.int { return C.ccl_plutus_data_to_json(p.bridge.thread, cs) })
+	return p.bridge.invoke(func() int32 { return cclPlutusDataToJSON(p.bridge.thread, cborHex) })
 }
 
 func (p *PlutusApi) DataFromJson(jsonStr string) (string, error) {
-	cs := cstr(jsonStr)
-	defer C.free(unsafe.Pointer(cs))
-
-	return p.bridge.invoke(func() C.int { return C.ccl_plutus_data_from_json(p.bridge.thread, cs) })
+	return p.bridge.invoke(func() int32 { return cclPlutusDataFromJSON(p.bridge.thread, jsonStr) })
 }
 
 // --- ScriptApi ---
@@ -501,17 +446,11 @@ type ScriptApi struct {
 }
 
 func (s *ScriptApi) NativeFromJson(jsonStr string) (string, error) {
-	cs := cstr(jsonStr)
-	defer C.free(unsafe.Pointer(cs))
-
-	return s.bridge.invoke(func() C.int { return C.ccl_script_native_from_json(s.bridge.thread, cs) })
+	return s.bridge.invoke(func() int32 { return cclScriptNativeFromJSON(s.bridge.thread, jsonStr) })
 }
 
 func (s *ScriptApi) Hash(scriptCborHex string, scriptType int) (string, error) {
-	cs := cstr(scriptCborHex)
-	defer C.free(unsafe.Pointer(cs))
-
-	return s.bridge.invoke(func() C.int { return C.ccl_script_hash(s.bridge.thread, cs, C.int(scriptType)) })
+	return s.bridge.invoke(func() int32 { return cclScriptHash(s.bridge.thread, scriptCborHex, int32(scriptType)) })
 }
 
 // --- GovApi ---
@@ -521,11 +460,8 @@ type GovApi struct {
 }
 
 func (g *GovApi) DrepKeyFromMnemonic(mnemonic string, networkID, accountIndex int) (*GovKeyInfo, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	result, err := g.bridge.invoke(func() C.int {
-		return C.ccl_gov_drep_key_from_mnemonic(g.bridge.thread, cs, C.int(networkID), C.int(accountIndex))
+	result, err := g.bridge.invoke(func() int32 {
+		return cclGovDRepKey(g.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -538,11 +474,8 @@ func (g *GovApi) DrepKeyFromMnemonic(mnemonic string, networkID, accountIndex in
 }
 
 func (g *GovApi) CommitteeColdKeyFromMnemonic(mnemonic string, networkID, accountIndex int) (*GovKeyInfo, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	result, err := g.bridge.invoke(func() C.int {
-		return C.ccl_gov_committee_cold_key_from_mnemonic(g.bridge.thread, cs, C.int(networkID), C.int(accountIndex))
+	result, err := g.bridge.invoke(func() int32 {
+		return cclGovCommitteeColdKey(g.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -555,11 +488,8 @@ func (g *GovApi) CommitteeColdKeyFromMnemonic(mnemonic string, networkID, accoun
 }
 
 func (g *GovApi) CommitteeHotKeyFromMnemonic(mnemonic string, networkID, accountIndex int) (*GovKeyInfo, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	result, err := g.bridge.invoke(func() C.int {
-		return C.ccl_gov_committee_hot_key_from_mnemonic(g.bridge.thread, cs, C.int(networkID), C.int(accountIndex))
+	result, err := g.bridge.invoke(func() int32 {
+		return cclGovCommitteeHotKey(g.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -578,7 +508,7 @@ type WalletApi struct {
 }
 
 func (w *WalletApi) Create(networkID int) (*WalletInfo, error) {
-	result, err := w.bridge.invoke(func() C.int { return C.ccl_wallet_create(w.bridge.thread, C.int(networkID)) })
+	result, err := w.bridge.invoke(func() int32 { return cclWalletCreate(w.bridge.thread, int32(networkID)) })
 	if err != nil {
 		return nil, err
 	}
@@ -590,10 +520,7 @@ func (w *WalletApi) Create(networkID int) (*WalletInfo, error) {
 }
 
 func (w *WalletApi) FromMnemonic(mnemonic string, networkID int) (*WalletInfo, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	result, err := w.bridge.invoke(func() C.int { return C.ccl_wallet_from_mnemonic(w.bridge.thread, cs, C.int(networkID)) })
+	result, err := w.bridge.invoke(func() int32 { return cclWalletFromMnemonic(w.bridge.thread, mnemonic, int32(networkID)) })
 	if err != nil {
 		return nil, err
 	}
@@ -605,10 +532,7 @@ func (w *WalletApi) FromMnemonic(mnemonic string, networkID int) (*WalletInfo, e
 }
 
 func (w *WalletApi) GetAddress(mnemonic string, networkID, index int) (string, error) {
-	cs := cstr(mnemonic)
-	defer C.free(unsafe.Pointer(cs))
-
-	return w.bridge.invoke(func() C.int { return C.ccl_wallet_get_address(w.bridge.thread, cs, C.int(networkID), C.int(index)) })
+	return w.bridge.invoke(func() int32 { return cclWalletGetAddress(w.bridge.thread, mnemonic, int32(networkID), int32(index)) })
 }
 
 // --- QuickTx API ---
@@ -631,8 +555,8 @@ type QuickTxApi struct {
 // sign the returned TxCbor and submit it yourself.
 //
 // For Plutus script transactions, pass the redeemers' execution units as the optional execUnits
-// argument: a slice of {mem, steps} (one per redeemer, in transaction order). Compute them with any
-// evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run the script.
+// argument: a slice of {mem, steps} (one per redeemer, in transaction order). Omit them to have the
+// bridge compute them offline with Scalus.
 func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}, execUnits ...interface{}) (*TxResult, error) {
 	utxosJSON, err := json.Marshal(utxos)
 	if err != nil {
@@ -643,26 +567,18 @@ func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interf
 		return nil, fmt.Errorf("failed to marshal protocol params: %w", err)
 	}
 
-	yamlCs := cstr(yaml)
-	defer C.free(unsafe.Pointer(yamlCs))
-	utxosCs := cstr(string(utxosJSON))
-	defer C.free(unsafe.Pointer(utxosCs))
-	ppCs := cstr(string(ppJSON))
-	defer C.free(unsafe.Pointer(ppCs))
-
-	// nil *C.char marshals to a NULL pointer (no execution units).
-	var execCs *C.char
+	// An empty string means "no execution units" (the native side treats blank as absent).
+	execStr := ""
 	if len(execUnits) > 0 && execUnits[0] != nil {
 		execJSON, err := json.Marshal(execUnits[0])
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal exec units: %w", err)
 		}
-		execCs = cstr(string(execJSON))
-		defer C.free(unsafe.Pointer(execCs))
+		execStr = string(execJSON)
 	}
 
-	result, err := q.bridge.invoke(func() C.int {
-		return C.ccl_quicktx_build(q.bridge.thread, yamlCs, utxosCs, ppCs, execCs)
+	result, err := q.bridge.invoke(func() int32 {
+		return cclQuicktxBuild(q.bridge.thread, yaml, string(utxosJSON), string(ppJSON), execStr)
 	})
 	if err != nil {
 		return nil, err
