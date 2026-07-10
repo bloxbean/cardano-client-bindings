@@ -1,0 +1,17 @@
+name: npm packages dry run
+
+# PR validation of the npm publish pipeline: runs the shared build workflow with no publish step
+# anywhere. Triggers only on PRs targeting develop that touch the pipeline, so develop -> main
+# promotion PRs carrying these changes don't re-run it.
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/publish-js.yml'
+      - '.github/workflows/build-js-packages.yml'
+      - '.github/workflows/publish-js-dry-run.yml'
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-js-packages.yml
