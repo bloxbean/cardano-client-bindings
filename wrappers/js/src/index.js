@@ -102,7 +102,7 @@ function libFilename() {
 }
 
 // The per-platform npm package suffix for the current runtime, e.g. "macos-aarch64". Mirrors the
-// native build/release matrix; used to locate the `@bloxbean/cardano-client-bridge-<suffix>` optionalDependency.
+// native build/release matrix; used to locate the `@bloxbean/cardano-client-lib-<suffix>` optionalDependency.
 export function platformSuffix() {
   const p = os.platform();
   const a = os.arch();
@@ -115,7 +115,7 @@ export function platformSuffix() {
 //   1. an explicit `libPath` argument (a directory), if given;
 //   2. the CCL_LIB_PATH env var (a directory) — for development against a locally built lib;
 //   3. a copy bundled directly in this package (`libs/`) — a local `pack` or single-package install;
-//   4. the `@bloxbean/cardano-client-bridge-<platform>` optionalDependency package — the published layout;
+//   4. the `@bloxbean/cardano-client-lib-<platform>` optionalDependency package — the published layout;
 //   5. the bare filename, letting the OS loader search its default paths.
 export function resolveLibFile(libPath) {
   const name = libFilename();
@@ -124,7 +124,7 @@ export function resolveLibFile(libPath) {
   const bundled = path.join(import.meta.dir, '..', 'libs', name);
   if (existsSync(bundled)) return bundled;
   try {
-    const fromPkg = Bun.resolveSync(`@bloxbean/cardano-client-bridge-${platformSuffix()}/${name}`, import.meta.dir);
+    const fromPkg = Bun.resolveSync(`@bloxbean/cardano-client-lib-${platformSuffix()}/${name}`, import.meta.dir);
     if (fromPkg && existsSync(fromPkg)) return fromPkg;
   } catch {
     // platform package not installed — fall through to the bare filename

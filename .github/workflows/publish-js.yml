@@ -1,8 +1,8 @@
 name: Publish npm packages
 
-# Builds one per-platform npm package (@bloxbean/cardano-client-bridge-<platform>, each carrying that platform's
-# libccl.*) plus the main @bloxbean/cardano-client-bridge package, and — when enabled by an admin — publishes them to
-# npm. Consumers install @bloxbean/cardano-client-bridge; its optionalDependencies pull in only the package matching
+# Builds one per-platform npm package (@bloxbean/cardano-client-lib-<platform>, each carrying that platform's
+# libccl.*) plus the main @bloxbean/cardano-client-lib package, and — when enabled by an admin — publishes them to
+# npm. Consumers install @bloxbean/cardano-client-lib; its optionalDependencies pull in only the package matching
 # their os/cpu, and the loader finds the bundled lib there. See
 # docs/adr/0012-native-lib-bundled-in-wrapper-packages.md.
 #
@@ -70,7 +70,7 @@ jobs:
           cp "$ND/libccl.${{ matrix.libext }}" package/
           cat > package/package.json <<JSON
           {
-            "name": "@bloxbean/cardano-client-bridge-${{ matrix.platform }}",
+            "name": "@bloxbean/cardano-client-lib-${{ matrix.platform }}",
             "version": "${PKG_VERSION}",
             "description": "CCL Bridge native library for ${{ matrix.platform }}",
             "os": ["${{ matrix.npm_os }}"],
@@ -79,7 +79,7 @@ jobs:
             "license": "MIT"
           }
           JSON
-          echo "CCL Bridge native library for \`${{ matrix.platform }}\`. Installed automatically as an optionalDependency of \`@bloxbean/cardano-client-bridge\`." > package/README.md
+          echo "CCL Bridge native library for \`${{ matrix.platform }}\`. Installed automatically as an optionalDependency of \`@bloxbean/cardano-client-lib\`." > package/README.md
           tar czf "platform-${{ matrix.platform }}.tgz" package
       - uses: actions/upload-artifact@v4
         with:
@@ -129,7 +129,7 @@ jobs:
           cp "$ND/libccl.so" package/
           cat > package/package.json <<JSON
           {
-            "name": "@bloxbean/cardano-client-bridge-${{ matrix.platform }}",
+            "name": "@bloxbean/cardano-client-lib-${{ matrix.platform }}",
             "version": "${PKG_VERSION}",
             "description": "CCL Bridge native library for ${{ matrix.platform }}",
             "os": ["linux"],
@@ -138,7 +138,7 @@ jobs:
             "license": "MIT"
           }
           JSON
-          echo "CCL Bridge native library for ${{ matrix.platform }}. Installed automatically as an optionalDependency of @bloxbean/cardano-client-bridge." > package/README.md
+          echo "CCL Bridge native library for ${{ matrix.platform }}. Installed automatically as an optionalDependency of @bloxbean/cardano-client-lib." > package/README.md
           tar czf "platform-${{ matrix.platform }}.tgz" package
       - uses: actions/upload-artifact@v4
         with:
