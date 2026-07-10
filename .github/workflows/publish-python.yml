@@ -19,14 +19,14 @@ on:
     tags: ['v*']
   # Build-only validation when the workflow itself changes (publish steps are tag-gated, so a PR
   # build never publishes). workflow_dispatch is unavailable until this file lands on the default
-  # branch, so this path filter is how the 5-wheel matrix gets exercised pre-merge.
+  # branch, so this path filter is how the 4-wheel matrix gets exercised pre-merge.
   pull_request:
     paths:
       - '.github/workflows/publish-python.yml'
   workflow_dispatch:
 
 jobs:
-  # macOS (arm64 + Intel) and Windows: wheels tag correctly from the build platform, no retag needed.
+  # macOS (arm64) and Windows: wheels tag correctly from the build platform, no retag needed.
   wheels-native:
     name: wheel (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
@@ -36,8 +36,6 @@ jobs:
         include:
           - os: macos-14
             platform: macos-aarch64
-          - os: macos-13
-            platform: macos-x86_64
           - os: windows-latest
             platform: windows-x86_64
     steps:
