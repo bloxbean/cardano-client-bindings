@@ -3,8 +3,9 @@ name: Build npm packages
 # Reusable (workflow_call) build + validation of the npm packages — everything except publishing.
 # Called by publish-js.yml (release) and publish-js-dry-run.yml (PR validation).
 #
-# The version comes from `version` in gradle.properties; on a v* tag the tag must match it, and
-# wrappers/js/package.json (version + optionalDependencies pins) must be in lockstep.
+# The version comes from `version` in gradle.properties (single source of truth); on a v* tag the
+# tag must match it. The version and optionalDependencies pins in wrappers/js/package.json are
+# stamped from it at build time (scripts/set-package-version.mjs) — never hand-maintained.
 
 on:
   workflow_call:
@@ -183,23 +184,10 @@ jobs:
             mkdir -p "$d"
             tar xzf "$t" -C "$d" --strip-components=1
           done
-      # The main package and its optionalDependencies pins must carry the same version as
-      # gradle.properties, or the published platform packages would never be resolved.
-      - name: Check package.json is in lockstep with gradle.properties
-        run: |
-          node -e '
-            const pkg = require("./wrappers/js/package.json");
-            const v = process.env.PKG_VERSION;
-            const bad = [];
-            if (pkg.version !== v) bad.push(`version is ${pkg.version}`);
-            for (const [name, range] of Object.entries(pkg.optionalDependencies ?? {}))
-              if (range !== v) bad.push(`optionalDependencies[${name}] is ${range}`);
-            if (bad.length) {
-              console.error(`wrappers/js/package.json out of lockstep with gradle.properties version ${v}:\n  ` + bad.join("\n  "));
-              process.exit(1);
-            }
-            console.log(`package.json in lockstep at ${v}`);
-          '
+      # Stamp the gradle.properties version into package.json (version + optionalDependencies
+      # pins) so it is never hand-maintained there.
+      - name: Set package version from gradle.properties
+        run: node wrappers/js/scripts/set-package-version.mjs "$PKG_VERSION"
       - name: Pack the main package
         run: |
           set -eux

@@ -47,6 +47,10 @@ jobs:
             mkdir -p "$d"
             tar xzf "$t" -C "$d" --strip-components=1
           done
+      # This job publishes from its own checkout, so stamp the version here too (the build
+      # workflow stamped its own copy only).
+      - name: Set package version from gradle.properties
+        run: node wrappers/js/scripts/set-package-version.mjs "$PKG_VERSION"
 
       # Publish only on a tag (workflow_dispatch stays a dry run). Platform packages first, then
       # the main package (so its optionalDependencies already exist). Pre-release versions get a
