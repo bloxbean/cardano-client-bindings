@@ -1,12 +1,13 @@
 {
   "name": "@bloxbean/cardano-client-lib",
-  "version": "0.1.0",
+  "version": "0.1.0-pre2",
   "description": "JavaScript bindings for Cardano Client Lib (CCL) via GraalVM native library",
   "license": "MIT",
   "homepage": "https://github.com/bloxbean/cardano-client-bindings",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bloxbean/cardano-client-bindings"
+    "url": "git+https://github.com/bloxbean/cardano-client-bindings.git",
+    "directory": "wrappers/js"
   },
   "bugs": {
     "url": "https://github.com/bloxbean/cardano-client-bindings/issues"
@@ -32,10 +33,10 @@
     "yaml": "^2.3.0"
   },
   "optionalDependencies": {
-    "@bloxbean/cardano-client-lib-linux-x86_64": "0.1.0",
-    "@bloxbean/cardano-client-lib-linux-aarch64": "0.1.0",
-    "@bloxbean/cardano-client-lib-macos-aarch64": "0.1.0",
-    "@bloxbean/cardano-client-lib-windows-x86_64": "0.1.0"
+    "@bloxbean/cardano-client-lib-linux-x86_64": "0.1.0-pre2",
+    "@bloxbean/cardano-client-lib-linux-aarch64": "0.1.0-pre2",
+    "@bloxbean/cardano-client-lib-macos-aarch64": "0.1.0-pre2",
+    "@bloxbean/cardano-client-lib-windows-x86_64": "0.1.0-pre2"
   },
   "engines": {
     "bun": ">=1.0.0"
