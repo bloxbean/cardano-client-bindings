@@ -123,7 +123,11 @@ jobs:
       - name: Run Go tests
         run: ./gradlew :wrappers:go:test
       - name: Run Rust tests
-        run: ./gradlew :wrappers:rust:test
+        # Run under PowerShell, not the job's default git-bash: git-bash puts its /usr/bin (which has
+        # a GNU coreutils `link.exe`) on PATH ahead of the MSVC linker, so rustc's link step invokes
+        # the wrong `link.exe` and fails. PowerShell's PATH has no git /usr/bin, so rustc finds MSVC's.
+        shell: pwsh
+        run: .\gradlew.bat :wrappers:rust:test
       - name: Run JS tests
         run: ./gradlew :wrappers:js:test
 
