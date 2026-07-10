@@ -42,11 +42,6 @@ jobs:
             libext: dylib
             npm_os: darwin
             npm_cpu: arm64
-          - os: macos-13
-            platform: macos-x86_64
-            libext: dylib
-            npm_os: darwin
-            npm_cpu: x64
           - os: windows-latest
             platform: windows-x86_64
             libext: dll

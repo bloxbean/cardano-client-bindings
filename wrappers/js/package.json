@@ -35,7 +35,6 @@
     "@bloxbean/cardano-client-lib-linux-x86_64": "0.1.0",
     "@bloxbean/cardano-client-lib-linux-aarch64": "0.1.0",
     "@bloxbean/cardano-client-lib-macos-aarch64": "0.1.0",
-    "@bloxbean/cardano-client-lib-macos-x86_64": "0.1.0",
     "@bloxbean/cardano-client-lib-windows-x86_64": "0.1.0"
   },
   "engines": {

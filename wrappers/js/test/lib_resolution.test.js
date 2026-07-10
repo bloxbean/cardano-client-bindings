@@ -37,7 +37,6 @@ test("platformSuffix matches one of the published per-platform package names", (
     "linux-x86_64",
     "linux-aarch64",
     "macos-aarch64",
-    "macos-x86_64",
     "windows-x86_64",
   ];
   expect(valid).toContain(platformSuffix());
