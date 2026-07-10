@@ -352,4 +352,20 @@ mod evaluator_tests {
     fn blockfrost_evaluator_rejects_unknown_network() {
         assert!(BlockfrostEvaluator::new("proj", "does-not-exist").is_err());
     }
+
+    #[test]
+    fn blockfrost_evaluator_setup_uses_network_url_and_project_id() {
+        // Mirrors Python's test_blockfrost_evaluator_setup: a known network resolves to the right
+        // base URL and carries the project_id.
+        let ev = BlockfrostEvaluator::new("proj_id", "preprod").expect("known network");
+        assert!(ev.base_url.ends_with("cardano-preprod.blockfrost.io/api/v0"));
+        assert_eq!(ev.project_id, "proj_id");
+    }
+
+    #[test]
+    fn parse_evaluation_rejects_unrecognized_shape() {
+        // A scalar result is neither the map form nor the list form -> error.
+        let resp = json!({"result": 42});
+        assert!(parse_evaluation(&resp).is_err());
+    }
 }
