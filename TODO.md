@@ -23,16 +23,18 @@ off items freely as the project evolves.
 C is test-only (smoke tests in `native-test/`); C headers ship for raw FFI consumers,
 but there is no standalone "C wrapper" product.
 
-> **Coverage note:** All four wrappers expose all 38 `@CEntryPoint` functions. Python
-> is currently the most complete and best-tested wrapper (the de-facto reference);
-> Go and Rust trail on test breadth; **JavaScript is the laggard** on QuickTx features.
+> **Coverage note:** All four wrappers are first-class — the aim is *equal* completeness, not a
+> hierarchy (see [ADR-0015](docs/adr/0015-no-reference-wrapper-parity.md)). All four bind the same 38
+> `@CEntryPoint` functions (CI-enforced) and cover the same on-chain use cases. The one gap left is
+> **unit-test breadth**: Python currently has the most per-module unit tests; Go and Rust trail there
+> (a gap to close — see §3), while JS is feature-complete on QuickTx.
 
 ---
 
 ## 1. Development — Wrapper Parity & Features
 
 - [x] `P0` ~~Audit & confirm JS QuickTx/ScriptTx/compose parity vs Python.~~ **Done (verified against source):** JS is feature-complete — `mintPlutusAssets`, `collectFromScript`, `readFrom`, the full `ScriptTxBuilder`, and `compose()`/`ComposeTxBuilder` all exist in `wrappers/js/src/index.js`. No feature gap. The real gap is test coverage — see §3.
-- [ ] `P1` Designate Python as the documented "reference wrapper" and write a parity checklist so all four wrappers stay in lockstep as the API grows.
+- [x] `P1` ~~Designate Python as the documented "reference wrapper" and write a parity checklist~~ **Done, reframed:** the "reference wrapper" framing was **dropped** — all four wrappers are first-class and the aim is *equal* completeness, not a hierarchy. [ADR-0015](docs/adr/0015-no-reference-wrapper-parity.md) instead documents the language-neutral **parity principle** (a change isn't done until all four wrappers have it) + the **operational checklist** for keeping them in lockstep on any FFI/API change, backed by CI-enforced binding parity (`check_entrypoint_parity.py`) + use-case parity (`integration-tests.yml`). _(Closing the remaining unit-test-breadth gap so all four are equally complete is tracked separately in §3.)_
 - [ ] `P2` Split the monolithic Go `wrappers/go/ccl/ccl.go` (~2k LOC) and Rust `wrappers/rust/src/lib.rs` into focused modules for maintainability.
 - [ ] `P2` Cross-wrapper error-handling review for consistent `CclError` semantics (codes, messages, idiomatic types).
 - [x] `P2` ~~Give the Go wrapper a clear build-time message when `CGO_ENABLED=0`~~ **Obsolete** — the Go wrapper no longer uses cgo. It was migrated to **purego** (pure-Go `dlopen`, builds with `CGO_ENABLED=0`; see [ADR-0014](docs/adr/0014-go-distribution-purego-runtime-resolution.md)), so cgo is *not* required and there is no cgo linker error to guard against. The item's premise no longer holds.
