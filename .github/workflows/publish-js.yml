@@ -1,11 +1,10 @@
 name: Publish npm packages
 
 # Publishes the per-platform npm packages (@bloxbean/cardano-client-lib-<platform>) plus the main
-# @bloxbean/cardano-client-lib package (see docs/adr/0012) on a v* tag — when repo variable
-# NPM_PUBLISH=true — via npm trusted publishing (OIDC, no token secret). The build/validation
-# jobs live in build-js-packages.yml (run on PRs by publish-js-dry-run.yml); workflow_dispatch
-# runs them here as a manual dry run (artifacts only, publish skipped).
-# One-time npm trusted-publisher setup: see wrappers/js/scripts/bootstrap-npm-trusted-publishing.sh.
+# @bloxbean/cardano-client-lib package (see docs/adr/0012) on a v* tag via npm trusted publishing
+# (OIDC, no token secret). The build/validation jobs live in build-js-packages.yml (run on PRs by
+# publish-js-dry-run.yml); workflow_dispatch runs them here as a manual dry run (artifacts only,
+# publish skipped).
 
 on:
   push:
@@ -49,11 +48,11 @@ jobs:
             tar xzf "$t" -C "$d" --strip-components=1
           done
 
-      # Publish only on a tag AND when an admin has enabled it. Platform packages first, then the
-      # main package (so its optionalDependencies already exist). Pre-release versions get a
+      # Publish only on a tag (workflow_dispatch stays a dry run). Platform packages first, then
+      # the main package (so its optionalDependencies already exist). Pre-release versions get a
       # matching npm dist-tag so they never become `latest`.
       - name: Publish to npm
-        if: startsWith(github.ref, 'refs/tags/') && vars.NPM_PUBLISH == 'true'
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           set -eux
           rm -f wrappers/js/libs/libccl.*
