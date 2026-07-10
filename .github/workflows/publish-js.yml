@@ -1,21 +1,13 @@
 name: Publish npm packages
 
-# Builds one per-platform npm package (@bloxbean/cardano-client-lib-<platform>, each carrying that platform's
-# libccl.*) plus the main @bloxbean/cardano-client-lib package, and — when enabled by an admin — publishes them to
-# npm. Consumers install @bloxbean/cardano-client-lib; its optionalDependencies pull in only the package matching
-# their os/cpu, and the loader finds the bundled lib there. See
-# docs/adr/0012-native-lib-bundled-in-wrapper-packages.md.
+# Builds the per-platform npm packages (@bloxbean/cardano-client-lib-<platform>) plus the main
+# @bloxbean/cardano-client-lib package (see docs/adr/0012), and on a v* tag — when repo variable
+# NPM_PUBLISH=true — publishes them to npm via trusted publishing (OIDC, no token secret).
+# PRs touching this file and workflow_dispatch build the packages as artifacts only.
 #
-# Triggers:
-#   - a version tag (v*)   -> build + (gated) publish to npm
-#   - pull_request touching this file -> build the packages as artifacts only (validation)
-#   - workflow_dispatch    -> build the packages as artifacts only
-#
-# Enabling npm publish (admin, one-time):
-#   1. Create an npm automation token with publish rights to the @bloxbean scope; add it as the
-#      `NPM_TOKEN` repository secret.
-#   2. Set repository variable `NPM_PUBLISH=true`.
-#   Until then the publish step is skipped; the package tarballs are still produced as artifacts.
+# The version comes from `version` in gradle.properties; the v* tag and wrappers/js/package.json
+# must match it (CI fails otherwise). One-time npm trusted-publisher setup: see
+# wrappers/js/scripts/bootstrap-npm-trusted-publishing.sh.
 
 on:
   push:
@@ -25,14 +17,38 @@ on:
       - '.github/workflows/publish-js.yml'
   workflow_dispatch:
 
-env:
-  PKG_VERSION: "0.1.0"
-
 jobs:
+  # Single source of truth for the package version: `version` in gradle.properties (the same
+  # value the native lib's ccl_version is generated from — see RELEASING.md). On a tag push the
+  # tag must be exactly v<version>, so a mistyped tag can never publish a mismatched version.
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from gradle.properties
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "No version found in gradle.properties" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Git tag $GITHUB_REF_NAME does not match gradle.properties version $VERSION (expected tag v$VERSION)" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   # macOS (arm64 + Intel) and Windows: build the lib on the native runner, assemble the platform pkg.
   pkg-native:
     name: npm pkg (${{ matrix.platform }})
+    needs: validate
     runs-on: ${{ matrix.os }}
+    env:
+      PKG_VERSION: ${{ needs.validate.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -71,7 +87,11 @@ jobs:
             "os": ["${{ matrix.npm_os }}"],
             "cpu": ["${{ matrix.npm_cpu }}"],
             "files": ["libccl.${{ matrix.libext }}"],
-            "license": "MIT"
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/bloxbean/cardano-client-bindings.git"
+            }
           }
           JSON
           echo "CCL Bridge native library for \`${{ matrix.platform }}\`. Installed automatically as an optionalDependency of \`@bloxbean/cardano-client-lib\`." > package/README.md
@@ -85,7 +105,10 @@ jobs:
   # assemble the platform pkg with tar (no node needed in the container).
   pkg-linux:
     name: npm pkg (${{ matrix.platform }})
+    needs: validate
     runs-on: ${{ matrix.runner }}
+    env:
+      PKG_VERSION: ${{ needs.validate.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -130,7 +153,11 @@ jobs:
             "os": ["linux"],
             "cpu": ["${{ matrix.npm_cpu }}"],
             "files": ["libccl.so"],
-            "license": "MIT"
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/bloxbean/cardano-client-bindings.git"
+            }
           }
           JSON
           echo "CCL Bridge native library for ${{ matrix.platform }}. Installed automatically as an optionalDependency of @bloxbean/cardano-client-lib." > package/README.md
@@ -141,19 +168,55 @@ jobs:
           path: platform-${{ matrix.platform }}.tgz
 
   publish:
-    needs: [pkg-native, pkg-linux]
+    needs: [validate, pkg-native, pkg-linux]
     runs-on: ubuntu-latest
+    # Trusted publishing: npm exchanges the GitHub OIDC token for publish credentials — no
+    # npm token secret. Requires npm >= 11.5.1 and node >= 22.14.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PKG_VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@latest
       - uses: actions/download-artifact@v4
         with:
           pattern: npmpkg-*
           merge-multiple: true
           path: dist
+      - name: Unpack platform packages
+        run: |
+          set -eux
+          for t in dist/platform-*.tgz; do
+            d="pkgs/$(basename "$t" .tgz)"
+            mkdir -p "$d"
+            tar xzf "$t" -C "$d" --strip-components=1
+          done
+      # The main package and its optionalDependencies pins must carry the same version as
+      # gradle.properties, or the platform packages published above would never be resolved
+      # (and the dist-tag below could misclassify). Runs on PR builds too, so drift is caught
+      # before a release tag.
+      - name: Check package.json is in lockstep with gradle.properties
+        run: |
+          node -e '
+            const pkg = require("./wrappers/js/package.json");
+            const v = process.env.PKG_VERSION;
+            const bad = [];
+            if (pkg.version !== v) bad.push(`version is ${pkg.version}`);
+            for (const [name, range] of Object.entries(pkg.optionalDependencies ?? {}))
+              if (range !== v) bad.push(`optionalDependencies[${name}] is ${range}`);
+            if (bad.length) {
+              console.error(`wrappers/js/package.json out of lockstep with gradle.properties version ${v}:\n  ` + bad.join("\n  "));
+              process.exit(1);
+            }
+            console.log(`package.json in lockstep at ${v}`);
+          '
       - name: Pack the main package
         run: |
           set -eux
@@ -161,15 +224,22 @@ jobs:
           rm -f wrappers/js/libs/libccl.*
           npm pack --pack-destination "$PWD/dist" ./wrappers/js
       - name: List packages to publish
-        run: ls -la dist
+        run: ls -la dist pkgs
 
       # Publish only on a tag AND when an admin has enabled it. Platform packages first, then the
-      # main package (so its optionalDependencies already exist).
+      # main package (so its optionalDependencies already exist). Package directories (not
+      # tarballs) are published — the pattern proven with trusted publishing in bloxbean/yano.
+      # Pre-release versions get a matching npm dist-tag (same rules as bloxbean/yano) so they
+      # never become `latest`.
       - name: Publish to npm
         if: startsWith(github.ref, 'refs/tags/') && vars.NPM_PUBLISH == 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -eux
-          for t in dist/platform-*.tgz; do npm publish "$t" --access public; done
-          npm publish dist/bloxbean-*.tgz --access public
+          NPM_TAG=latest
+          case "$PKG_VERSION" in
+            *-preview*|*-pre*|*-alpha*) NPM_TAG=preview ;;
+            *-beta*)                    NPM_TAG=beta ;;
+            *-rc*)                      NPM_TAG=next ;;
+          esac
+          for d in pkgs/platform-*; do npm publish "$d" --access public --provenance --tag "$NPM_TAG"; done
+          npm publish ./wrappers/js --access public --provenance --tag "$NPM_TAG"
