@@ -32,11 +32,12 @@ cardano-client-bindings/
 ├── native-test/             # C smoke tests
 ├── wrappers/
 │   ├── python/              # Python bindings (ctypes)
-│   ├── go/                  # Go bindings (cgo)
+│   ├── go/                  # Go bindings (purego)
 │   ├── rust/                # Rust bindings (FFI)
 │   └── js/                  # JavaScript bindings (Bun FFI)
 ├── docs/                    # Documentation
-│   └── quicktx.md           # QuickTx transaction builder reference
+│   ├── quicktx.md           # QuickTx transaction builder reference
+│   └── adr/                 # Architecture Decision Records (incl. wrapper parity — ADR-0015)
 ├── build.gradle
 └── settings.gradle
 ```
