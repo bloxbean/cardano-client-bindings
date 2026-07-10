@@ -22,5 +22,11 @@ task test(type: Exec) {
     def goArch = System.getProperty("os.arch") == "aarch64" ? "arm64" : "amd64"
     environment 'GOARCH', goArch
 
-    commandLine 'bash', '-c', 'go test -v ./...'
+    // Invoke `go` directly on Windows rather than via `bash` (a bare `bash` resolves to WSL on
+    // Windows runners, which has no distro).
+    if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+        commandLine 'go', 'test', '-v', './...'
+    } else {
+        commandLine 'bash', '-c', 'go test -v ./...'
+    }
 }
