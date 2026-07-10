@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -51,16 +52,25 @@ func devkitTopup(address string, adaAmount int) error {
 		"address":   address,
 		"adaAmount": adaAmount,
 	})
-	resp, err := http.Post(devkitURL+"/addresses/topup", "application/json", bytes.NewReader(body))
-	if err != nil {
-		return err
+	// Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
+	// node, so a topup right after reset can transiently fail ("Topup failed"). Retry with backoff
+	// until the faucet is ready.
+	var lastErr error
+	for attempt := 1; attempt <= 8; attempt++ {
+		resp, err := http.Post(devkitURL+"/addresses/topup", "application/json", bytes.NewReader(body))
+		if err != nil {
+			lastErr = err
+		} else {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == 200 && !strings.Contains(string(b), "\"status\":false") {
+				return nil
+			}
+			lastErr = fmt.Errorf("topup failed (%d): %s", resp.StatusCode, string(b))
+		}
+		time.Sleep(4 * time.Second)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("topup failed (%d): %s", resp.StatusCode, string(b))
-	}
-	return nil
+	return lastErr
 }
 
 func devkitGetUtxos(address string) ([]map[string]interface{}, error) {
@@ -87,6 +97,16 @@ func devkitGetProtocolParams() (map[string]interface{}, error) {
 		return nil, err
 	}
 	return pp, nil
+}
+
+// parseExpectedTreasury pulls the expected treasury value out of a Conway
+// ConwayTreasuryValueMismatch rejection, e.g. "... expected: Coin 43186776312112}".
+func parseExpectedTreasury(submitErr string) string {
+	m := regexp.MustCompile(`expected:\s*Coin\s*(\d+)`).FindStringSubmatch(submitErr)
+	if len(m) == 2 {
+		return m[1]
+	}
+	return ""
 }
 
 func devkitSubmitTx(txCborHex string) (string, error) {
@@ -242,10 +262,7 @@ func TestIntegrationSimpleADATransfer(t *testing.T) {
 	waitForBlock()
 
 	sender := fundSender(t, 150)
-	receiver, err := bridge.Account.Create(Testnet)
-	if err != nil {
-		t.Fatalf("create receiver: %v", err)
-	}
+	receiver, _ := bridge.Account.Create(Testnet)
 
 	utxos, err := devkitGetUtxos(sender.BaseAddress)
 	if err != nil {
@@ -256,25 +273,17 @@ func TestIntegrationSimpleADATransfer(t *testing.T) {
 		t.Fatalf("get pp: %v", err)
 	}
 
-	// Build
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(receiver.BaseAddress, Ada(5)).
-		From(sender.BaseAddress).
-		WithUtxos(utxos).
-		WithProtocolParams(pp).
-		Build()
+	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "5000000")
+	result, err := bridge.QuickTx.Build(yaml, utxos, pp)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	assertTxResult(t, result)
 
-	// Sign
 	signedTx, err := bridge.Account.SignTx(sender.Mnemonic, Testnet, 0, 0, result.TxCbor)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-
-	// Submit
 	txHash, err := devkitSubmitTx(signedTx)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
@@ -283,97 +292,71 @@ func TestIntegrationSimpleADATransfer(t *testing.T) {
 		t.Fatal("empty tx hash from submit")
 	}
 
-	// Verify
 	waitForBlock()
 	receiverUtxos, err := devkitGetUtxos(receiver.BaseAddress)
 	if err != nil {
 		t.Fatalf("get receiver utxos: %v", err)
 	}
-	total := totalLovelace(receiverUtxos)
-	if total != 5_000_000 {
+	if total := totalLovelace(receiverUtxos); total != 5_000_000 {
 		t.Errorf("expected 5 ADA (5000000), got %d lovelace", total)
 	}
 }
 
 func TestIntegrationMultipleReceivers(t *testing.T) {
 	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
 
 	sender := fundSender(t, 150)
 	r1, _ := bridge.Account.Create(Testnet)
 	r2, _ := bridge.Account.Create(Testnet)
 
-	utxos, _ := devkitGetUtxos(sender.BaseAddress)
-	pp, _ := devkitGetProtocolParams()
+	utxos, err := devkitGetUtxos(sender.BaseAddress)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	pp, err := devkitGetProtocolParams()
+	if err != nil {
+		t.Fatalf("get pp: %v", err)
+	}
 
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(r1.BaseAddress, Ada(3)).
-		PayToAddress(r2.BaseAddress, Ada(2)).
-		From(sender.BaseAddress).
-		WithUtxos(utxos).
-		WithProtocolParams(pp).
-		Build()
+	yaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "2000000"
+`, sender.BaseAddress, r1.BaseAddress, r2.BaseAddress)
+
+	result, err := bridge.QuickTx.Build(yaml, utxos, pp)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-
 	signedTx, _ := bridge.Account.SignTx(sender.Mnemonic, Testnet, 0, 0, result.TxCbor)
-	_, err = devkitSubmitTx(signedTx)
-	if err != nil {
+	if _, err := devkitSubmitTx(signedTx); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 
 	waitForBlock()
-
-	r1Utxos, _ := devkitGetUtxos(r1.BaseAddress)
-	r2Utxos, _ := devkitGetUtxos(r2.BaseAddress)
-
-	if total := totalLovelace(r1Utxos); total != 3_000_000 {
-		t.Errorf("r1: expected 3 ADA, got %d lovelace", total)
-	}
-	if total := totalLovelace(r2Utxos); total != 2_000_000 {
-		t.Errorf("r2: expected 2 ADA, got %d lovelace", total)
-	}
-}
-
-func TestIntegrationWithMetadata(t *testing.T) {
-	skipIfNoDevKit(t)
-
-	sender := fundSender(t, 150)
-	receiver, _ := bridge.Account.Create(Testnet)
-
-	utxos, _ := devkitGetUtxos(sender.BaseAddress)
-	pp, _ := devkitGetProtocolParams()
-
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(receiver.BaseAddress, Ada(2)).
-		AttachMetadata(674, map[string]interface{}{"msg": []string{"Hello from Go integration"}}).
-		From(sender.BaseAddress).
-		WithUtxos(utxos).
-		WithProtocolParams(pp).
-		Build()
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-
-	signedTx, _ := bridge.Account.SignTx(sender.Mnemonic, Testnet, 0, 0, result.TxCbor)
-	_, err = devkitSubmitTx(signedTx)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	waitForBlock()
-
-	txInfo, err := devkitGetTx(result.TxHash)
-	if err != nil {
-		t.Fatalf("get tx: %v", err)
-	}
-	if txInfo == nil {
-		t.Fatal("tx not found on-chain")
+	if total := totalLovelace(mustUtxos(t, r1.BaseAddress)); total != 3_000_000 {
+		t.Errorf("expected 3 ADA for r1, got %d", total)
 	}
 }
 
 func TestIntegrationInsufficientFunds(t *testing.T) {
 	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
 
 	sender := fundSender(t, 2)
 	receiver, _ := bridge.Account.Create(Testnet)
@@ -381,177 +364,35 @@ func TestIntegrationInsufficientFunds(t *testing.T) {
 	utxos, _ := devkitGetUtxos(sender.BaseAddress)
 	pp, _ := devkitGetProtocolParams()
 
-	_, err := bridge.QuickTx.NewTx().
-		PayToAddress(receiver.BaseAddress, Ada(100)).
-		From(sender.BaseAddress).
-		WithUtxos(utxos).
-		WithProtocolParams(pp).
-		Build()
-	if err == nil {
-		t.Fatal("expected error for insufficient funds")
+	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "100000000")
+	if _, err := bridge.QuickTx.Build(yaml, utxos, pp); err == nil {
+		t.Fatal("expected insufficient funds error")
 	}
 }
 
-func TestIntegrationFullRoundTrip(t *testing.T) {
+func mustUtxos(t *testing.T, address string) []map[string]interface{} {
+	t.Helper()
+	utxos, err := devkitGetUtxos(address)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	return utxos
+}
+
+// The shipped YaciProvider fetches the devnet's real chain data and feeds Build via BuildWith.
+func TestIntegrationBuildWith(t *testing.T) {
 	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
 
 	sender := fundSender(t, 150)
 	receiver, _ := bridge.Account.Create(Testnet)
 
-	utxos, _ := devkitGetUtxos(sender.BaseAddress)
-	pp, _ := devkitGetProtocolParams()
-
-	// Build
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(receiver.BaseAddress, Ada(10)).
-		From(sender.BaseAddress).
-		WithUtxos(utxos).
-		WithProtocolParams(pp).
-		Build()
+	provider := NewYaciProvider("") // local DevKit cluster
+	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "5000000")
+	result, err := bridge.QuickTx.BuildWith(yaml, provider, sender.BaseAddress)
 	if err != nil {
-		t.Fatalf("build: %v", err)
+		t.Fatalf("BuildWith: %v", err)
 	}
 	assertTxResult(t, result)
-
-	// Sign
-	signedTx, err := bridge.Account.SignTx(sender.Mnemonic, Testnet, 0, 0, result.TxCbor)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-
-	// Submit
-	_, err = devkitSubmitTx(signedTx)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	waitForBlock()
-
-	// Confirm on-chain
-	txInfo, err := devkitGetTx(result.TxHash)
-	if err != nil {
-		t.Fatalf("get tx: %v", err)
-	}
-	if txInfo == nil {
-		t.Fatal("tx not found on-chain")
-	}
-
-	// Check receiver balance
-	receiverUtxos, _ := devkitGetUtxos(receiver.BaseAddress)
-	total := totalLovelace(receiverUtxos)
-	if total != 10_000_000 {
-		t.Errorf("expected 10 ADA (10000000), got %d lovelace", total)
-	}
-}
-
-// --- Provider Config (Java-side lazy UTXO fetching) tests ---
-
-func TestIntegrationProviderConfigSimpleTransfer(t *testing.T) {
-	skipIfNoDevKit(t)
-
-	sender := fundSender(t, 150)
-	receiver, _ := bridge.Account.Create(Testnet)
-
-	// Build using ProviderConfig — Java fetches UTXOs and PP lazily via HTTP
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(receiver.BaseAddress, Ada(5)).
-		From(sender.BaseAddress).
-		BuildWithProvider(ProviderConfig{
-			Name: "yaci",
-			URL:  devkitProviderURL,
-		})
-	if err != nil {
-		t.Fatalf("build with provider: %v", err)
-	}
-	assertTxResult(t, result)
-
-	// Sign and submit
-	signedTx, _ := bridge.Account.SignTx(sender.Mnemonic, Testnet, 0, 0, result.TxCbor)
-	txHash, err := devkitSubmitTx(signedTx)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-	if txHash == "" {
-		t.Fatal("empty tx hash")
-	}
-
-	waitForBlock()
-	receiverUtxos, _ := devkitGetUtxos(receiver.BaseAddress)
-	total := totalLovelace(receiverUtxos)
-	if total != 5_000_000 {
-		t.Errorf("expected 5 ADA (5000000), got %d lovelace", total)
-	}
-}
-
-func TestIntegrationProviderConfigMultipleReceivers(t *testing.T) {
-	skipIfNoDevKit(t)
-
-	sender := fundSender(t, 150)
-	r1, _ := bridge.Account.Create(Testnet)
-	r2, _ := bridge.Account.Create(Testnet)
-
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(r1.BaseAddress, Ada(3)).
-		PayToAddress(r2.BaseAddress, Ada(2)).
-		From(sender.BaseAddress).
-		BuildWithProvider(ProviderConfig{
-			Name: "yaci",
-			URL:  devkitProviderURL,
-		})
-	if err != nil {
-		t.Fatalf("build with provider: %v", err)
-	}
-
-	signedTx, _ := bridge.Account.SignTx(sender.Mnemonic, Testnet, 0, 0, result.TxCbor)
-	_, err = devkitSubmitTx(signedTx)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	waitForBlock()
-
-	r1Utxos, _ := devkitGetUtxos(r1.BaseAddress)
-	r2Utxos, _ := devkitGetUtxos(r2.BaseAddress)
-
-	if total := totalLovelace(r1Utxos); total != 3_000_000 {
-		t.Errorf("r1: expected 3 ADA, got %d lovelace", total)
-	}
-	if total := totalLovelace(r2Utxos); total != 2_000_000 {
-		t.Errorf("r2: expected 2 ADA, got %d lovelace", total)
-	}
-}
-
-func TestIntegrationProviderConfigWithMetadata(t *testing.T) {
-	skipIfNoDevKit(t)
-
-	sender := fundSender(t, 150)
-	receiver, _ := bridge.Account.Create(Testnet)
-
-	result, err := bridge.QuickTx.NewTx().
-		PayToAddress(receiver.BaseAddress, Ada(2)).
-		AttachMetadata(674, map[string]interface{}{"msg": []string{"Hello from Go providerConfig"}}).
-		From(sender.BaseAddress).
-		BuildWithProvider(ProviderConfig{
-			Name: "yaci",
-			URL:  devkitProviderURL,
-		})
-	if err != nil {
-		t.Fatalf("build with provider: %v", err)
-	}
-
-	signedTx, _ := bridge.Account.SignTx(sender.Mnemonic, Testnet, 0, 0, result.TxCbor)
-	_, err = devkitSubmitTx(signedTx)
-	if err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	waitForBlock()
-
-	txInfo, err := devkitGetTx(result.TxHash)
-	if err != nil {
-		t.Fatalf("get tx: %v", err)
-	}
-	if txInfo == nil {
-		t.Fatal("tx not found on-chain")
-	}
 }

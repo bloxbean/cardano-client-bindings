@@ -1,10 +1,10 @@
-# CCL Bridge - Cardano Client Lib Native Bindings
+# Cardano Client Bindings — Cardano Client Lib as a native shared library
 
-CCL Bridge compiles [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib) into a native shared library (`libccl.so` / `libccl.dylib` / `libccl.dll`) using GraalVM native-image. This lets any language call CCL's offline Cardano operations via FFI — no JVM required at runtime.
+Cardano Client Bindings compiles [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib) into a native shared library (`libccl.so` / `libccl.dylib` / `libccl.dll`) using GraalVM native-image. This lets any language call CCL's offline Cardano operations via FFI — no JVM required at runtime.
 
 ## Why?
 
-[Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib) is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. CCL Bridge makes selected CCL modules available as a **native shared library with a C ABI**, so languages like Python, Go, Rust, and JavaScript can use it directly — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
+[Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib) is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. Cardano Client Bindings makes selected CCL modules available as a **native shared library with a C ABI**, so languages like Python, Go, Rust, and JavaScript can use it directly — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
 
 ## What's Included
 
@@ -25,18 +25,19 @@ Backend/HTTP modules (Blockfrost, Koios, Ogmios) are intentionally excluded — 
 ## Project Structure
 
 ```
-ccl-bridge/
+cardano-client-bindings/
 ├── core/                    # Java bridge + GraalVM native-image → libccl
 │   ├── src/main/java/       # @CEntryPoint API classes
 │   └── src/test/java/       # JVM unit tests (72+ tests)
 ├── native-test/             # C smoke tests
 ├── wrappers/
 │   ├── python/              # Python bindings (ctypes)
-│   ├── go/                  # Go bindings (cgo)
+│   ├── go/                  # Go bindings (purego)
 │   ├── rust/                # Rust bindings (FFI)
 │   └── js/                  # JavaScript bindings (Bun FFI)
 ├── docs/                    # Documentation
-│   └── quicktx.md           # QuickTx transaction builder reference
+│   ├── quicktx.md           # QuickTx transaction builder reference
+│   └── adr/                 # Architecture Decision Records (incl. wrapper parity — ADR-0015)
 ├── build.gradle
 └── settings.gradle
 ```
@@ -50,7 +51,7 @@ ccl-bridge/
 **For core developers** (building from source):
 - **[GraalVM 25+](https://www.graalvm.org/)** (includes `native-image`)
   ```bash
-  sdk install java 25.0.2-graal   # via SDKMAN
+  sdk install java 25.0.3-graal   # Oracle GraalVM, via SDKMAN
   ```
 
 **Language runtimes (install whichever you need):**
@@ -124,19 +125,24 @@ The native library is produced at `core/build/native/nativeCompile/libccl.dylib`
 ### Download Pre-built Native Library
 
 Download the native library for your platform from
-[GitHub Releases](https://github.com/bloxbean/ccl-bridge/releases):
+[GitHub Releases](https://github.com/bloxbean/cardano-client-bindings/releases):
 
 **macOS (Apple Silicon):**
 
 ```bash
-curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-bridge-v0.1.0-macos-aarch64.tar.gz | tar xz -C /usr/local/lib/
+curl -L https://github.com/bloxbean/cardano-client-bindings/releases/latest/download/cardano-client-lib-v0.1.0-macos-aarch64.tar.gz | tar xz -C /usr/local/lib/
 ```
 
 **Linux (x86_64):**
 
 ```bash
-curl -L https://github.com/bloxbean/ccl-bridge/releases/latest/download/ccl-bridge-v0.1.0-linux-x86_64.tar.gz | tar xz -C /usr/local/lib/
+curl -L https://github.com/bloxbean/cardano-client-bindings/releases/latest/download/cardano-client-lib-v0.1.0-linux-x86_64.tar.gz | tar xz -C /usr/local/lib/
 ```
+
+> The Linux `libccl.so` is built against an old **glibc 2.17** baseline (in a `manylinux_2_28`
+> container), so it runs on any glibc ≥ 2.17 — RHEL/CentOS 7+, Amazon Linux 2, Ubuntu 18.04+,
+> Debian 9+, and all newer distros. (It does **not** run on musl-only systems such as Alpine; a
+> musl variant is a possible future addition.) See [ADR-0008](docs/adr/0008-linux-glibc-baseline-portability.md) for the why.
 
 Then set the library path:
 
@@ -149,6 +155,9 @@ export LD_LIBRARY_PATH=/usr/local/lib
 # macOS
 export DYLD_LIBRARY_PATH=/usr/local/lib
 ```
+
+> **Maintainers:** see [RELEASING.md](RELEASING.md) for how a release goes out — the native-library
+> tag comes first, then the per-wrapper packages (and why Go needs only a git tag, not a registry push).
 
 ## Running Tests Without Gradle
 
@@ -273,7 +282,7 @@ let datum_hash = bridge.plutus().data_hash("182a").unwrap();
 ### Usage Pattern (Go)
 
 ```go
-import "github.com/bloxbean/ccl-bridge/wrappers/go/ccl"
+import "github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
 
 bridge, _ := ccl.New()
 defer bridge.Close()
@@ -290,7 +299,7 @@ wallet, _ := bridge.Wallet.Create(ccl.Mainnet)
 ### Usage Pattern (JavaScript / Bun)
 
 ```javascript
-import { CclBridge, MAINNET } from '@bloxbean/ccl';
+import { CclBridge, MAINNET } from '@bloxbean/cardano-client-lib';
 
 const bridge = new CclBridge();
 
@@ -396,8 +405,8 @@ bridge.close();
 
 ## Upstream
 
-- **Cardano Client Lib**: [bloxbean/cardano-client-lib](https://github.com/bloxbean/cardano-client-lib) v0.7.1
-- **GraalVM**: 25.0.2 (`native-image --shared`)
+- **Cardano Client Lib**: [bloxbean/cardano-client-lib](https://github.com/bloxbean/cardano-client-lib) v0.8.0-pre4
+- **GraalVM**: Oracle GraalVM 25.0.3 (`native-image --shared`)
 
 ## License
 

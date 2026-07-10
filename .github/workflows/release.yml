@@ -4,37 +4,143 @@ on:
     tags: ['v*']
 
 jobs:
-  build:
+  # macOS + Windows: stable ABIs, no glibc-portability concern. Built on the native runner.
+  build-native:
     strategy:
       matrix:
         include:
           - os: macos-14
             platform: macos-aarch64
             ext: dylib
-          - os: ubuntu-latest
-            platform: linux-x86_64
-            ext: so
+          - os: windows-latest
+            platform: windows-x86_64
+            ext: dll
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: graalvm/setup-graalvm@v1
         with:
-          java-version: '25'
+          java-version: '25.0.3'
           distribution: 'graalvm'
       - name: Build native library
         run: ./gradlew :core:nativeCompile
       - name: Package
+        shell: bash
         run: |
           cd core/build/native/nativeCompile
-          tar czf ccl-bridge-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
-            libccl.${{ matrix.ext }} libccl.h graal_isolate.h
+          # On Windows native-image also emits an import library (libccl.lib) needed
+          # to link against the DLL; include it when present.
+          EXTRA=""
+          [ -f libccl.lib ] && EXTRA="libccl.lib"
+          tar czf cardano-client-lib-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
+            libccl.${{ matrix.ext }} libccl.h graal_isolate.h $EXTRA
       - uses: actions/upload-artifact@v4
         with:
-          name: ccl-bridge-${{ matrix.platform }}
-          path: core/build/native/nativeCompile/ccl-bridge-*.tar.gz
+          name: cardano-client-lib-${{ matrix.platform }}
+          path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
+
+  # Linux: built in an OLD-glibc container (manylinux_2_28) so the shipped libccl.so runs on
+  # glibc >= 2.17 (RHEL/CentOS 7+, Amazon Linux 2, Ubuntu 18.04+, Debian 9+) instead of only the
+  # very newest distros. Portability is verified continuously by portable-linux-lib.yml; here we
+  # re-assert the floor before shipping. See docs/adr/0008-linux-glibc-baseline-portability.md.
+  build-linux:
+    name: build (${{ matrix.platform }}, glibc 2.17 baseline)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+            image: quay.io/pypa/manylinux_2_28_x86_64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-aarch64_bin.tar.gz
+    container:
+      image: ${{ matrix.image }}
+    env:
+      GRAALVM_URL: ${{ matrix.graalvm_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure build prerequisites
+        run: dnf install -y zlib-devel || true
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz "$GRAALVM_URL"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+      - name: Build native library
+        run: ./gradlew :core:nativeCompile --no-daemon --stacktrace
+      - name: Assert glibc floor (<= 2.28)
+        run: |
+          set -eux
+          SO=core/build/native/nativeCompile/libccl.so
+          MAX=$(objdump -T "$SO" | grep -oE 'GLIBC_[0-9]+\.[0-9]+(\.[0-9]+)?' | sed 's/GLIBC_//' | sort -V | tail -1)
+          echo "libccl.so max required: GLIBC_$MAX"
+          HIGHER=$(printf '%s\n2.28\n' "$MAX" | sort -V | tail -1)
+          [ "$HIGHER" = "2.28" ] || { echo "FAIL: requires GLIBC_$MAX > 2.28"; exit 1; }
+      - name: Package
+        run: |
+          cd core/build/native/nativeCompile
+          tar czf cardano-client-lib-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz \
+            libccl.so libccl.h graal_isolate.h
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cardano-client-lib-${{ matrix.platform }}
+          path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
+
+  # Linux/musl: a libccl.so linked against musl (via native-image --libc=musl + a musl toolchain), so
+  # it loads on Alpine / musl-based images that the glibc-baseline .so can't. Guarded on every PR by
+  # musl-alpine.yml (build + a functional run inside Alpine). See docs/adr/0008.
+  # x86_64 only: GraalVM's --libc=musl hardcodes the x86_64-linux-musl-gcc compiler name and doesn't
+  # support aarch64 musl (see ADR-0008), so there is no linux-musl-aarch64 artifact.
+  build-musl:
+    name: build (linux-musl-x86_64, Alpine)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz \
+            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+      - name: Install musl toolchain (musl-gcc + musl-linked zlib)
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+          ZV=1.3.1
+          curl -fsSL -o /tmp/zlib.tar.gz \
+            "https://github.com/madler/zlib/releases/download/v${ZV}/zlib-${ZV}.tar.gz"
+          tar xzf /tmp/zlib.tar.gz -C /tmp
+          cd "/tmp/zlib-${ZV}"
+          CC=musl-gcc ./configure --static --prefix=/usr/local/musl
+          make -j"$(nproc)"
+          sudo make install
+          sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
+      - name: Build native library (musl)
+        run: ./gradlew :core:nativeCompile -PmuslBuild --no-daemon --stacktrace
+      - name: Package
+        run: |
+          cd core/build/native/nativeCompile
+          tar czf cardano-client-lib-${{ github.ref_name }}-linux-musl-x86_64.tar.gz \
+            libccl.so libccl.h graal_isolate.h
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cardano-client-lib-linux-musl-x86_64
+          path: core/build/native/nativeCompile/cardano-client-lib-*.tar.gz
 
   release:
-    needs: build
+    needs: [build-native, build-linux, build-musl]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -43,10 +149,10 @@ jobs:
         with:
           merge-multiple: true
       - name: Generate checksums
-        run: sha256sum ccl-bridge-*.tar.gz > SHA256SUMS
+        run: sha256sum cardano-client-lib-*.tar.gz > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            ccl-bridge-*.tar.gz
+            cardano-client-lib-*.tar.gz
             SHA256SUMS
           generate_release_notes: true

@@ -4,6 +4,15 @@ import sys
 import json
 from ctypes import c_int, c_char_p, c_void_p, POINTER, byref
 
+# Native libccl version this wrapper expects, kept in lockstep with the package version. On init the
+# wrapper compares it against ccl_version() and fails fast on a skew (see CclLib._check_version).
+EXPECTED_LIB_VERSION = "0.1.0"
+
+
+def _base_version(v):
+    """Strip any pre-release / build suffix: '0.1.0-preview1' -> '0.1.0'."""
+    return v.split("-", 1)[0].split("+", 1)[0].strip()
+
 
 class CclLib:
     """Low-level FFI wrapper around libccl shared library."""
@@ -26,24 +35,58 @@ class CclLib:
     PREPROD = 2
     PREVIEW = 3
 
-    def __init__(self, lib_path=None):
-        if lib_path is None:
-            lib_path = os.environ.get('CCL_LIB_PATH', '.')
-
+    @staticmethod
+    def _lib_filename():
         if sys.platform == 'darwin':
-            lib_file = os.path.join(lib_path, 'libccl.dylib')
-        elif sys.platform == 'win32':
-            lib_file = os.path.join(lib_path, 'libccl.dll')
-        else:
-            lib_file = os.path.join(lib_path, 'libccl.so')
+            return 'libccl.dylib'
+        if sys.platform == 'win32':
+            return 'libccl.dll'
+        return 'libccl.so'
 
-        self._lib = ctypes.CDLL(lib_file)
+    @classmethod
+    def _resolve_lib_file(cls, lib_path=None):
+        """Locate the native library, in priority order:
+
+        1. an explicit ``lib_path`` argument (a directory), if given;
+        2. the ``CCL_LIB_PATH`` env var (a directory) — for development against a locally built lib;
+        3. the copy bundled inside this package (``ccl/_libs/``) — how an installed wheel ships it;
+        4. the bare filename, letting the system loader search its default paths.
+        """
+        name = cls._lib_filename()
+        if lib_path:
+            return os.path.join(lib_path, name)
+        env = os.environ.get('CCL_LIB_PATH')
+        if env:
+            return os.path.join(env, name)
+        bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_libs', name)
+        if os.path.exists(bundled):
+            return bundled
+        return name
+
+    def __init__(self, lib_path=None):
+        lib_file = self._resolve_lib_file(lib_path)
+        # On Windows, register the library's directory so the loader can also find any sibling
+        # DLL dependencies next to libccl.dll (no-op / absent on Unix).
+        if sys.platform == 'win32' and hasattr(os, 'add_dll_directory'):
+            lib_dir = os.path.dirname(os.path.abspath(lib_file))
+            if os.path.isdir(lib_dir):
+                os.add_dll_directory(lib_dir)
+        try:
+            self._lib = ctypes.CDLL(lib_file)
+        except OSError as e:
+            raise OSError(
+                f"Failed to load the CCL native library ({lib_file}): {e}\n"
+                f"Install a platform wheel that bundles it, or set CCL_LIB_PATH to the "
+                f"directory containing {self._lib_filename()}."
+            ) from None
         self._setup_functions()
         self._isolate = c_void_p()
         self._thread = c_void_p()
         rc = self._lib.graal_create_isolate(None, byref(self._isolate), byref(self._thread))
         if rc != 0:
             raise RuntimeError(f"Failed to create GraalVM isolate: {rc}")
+
+        self._check_version()
 
         # Namespace APIs
         from ccl.account import Account
@@ -103,6 +146,8 @@ class CclLib:
 
         lib.ccl_account_sign_tx.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int, c_char_p]
         lib.ccl_account_sign_tx.restype = c_int
+        lib.ccl_account_sign_tx_multi.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int, c_char_p, c_char_p]
+        lib.ccl_account_sign_tx_multi.restype = c_int
 
         lib.ccl_account_get_drep_id.argtypes = [c_void_p, c_char_p, c_int, c_int]
         lib.ccl_account_get_drep_id.restype = c_int
@@ -193,7 +238,7 @@ class CclLib:
         lib.ccl_script_hash.restype = c_int
 
         # QuickTx API
-        lib.ccl_quicktx_build.argtypes = [c_void_p, c_char_p]
+        lib.ccl_quicktx_build.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p]
         lib.ccl_quicktx_build.restype = c_int
 
     def _get_result(self):
@@ -244,6 +289,19 @@ class CclLib:
     def version(self):
         rc = self._lib.ccl_version(self._thread)
         return self._check(rc)
+
+    def _check_version(self):
+        """Fail fast on a native-lib / wrapper version skew (bypass with CCL_SKIP_VERSION_CHECK)."""
+        if os.environ.get("CCL_SKIP_VERSION_CHECK"):
+            return
+        lib_ver = self.version()
+        if _base_version(lib_ver) != _base_version(EXPECTED_LIB_VERSION):
+            raise RuntimeError(
+                f"libccl version {lib_ver!r} is incompatible with the cardano-client-lib Python "
+                f"wrapper (expects {EXPECTED_LIB_VERSION!r}). The native library and wrapper must be "
+                f"the same version — reinstall the package, or set CCL_LIB_PATH to a matching libccl. "
+                f"Set CCL_SKIP_VERSION_CHECK=1 to bypass."
+            )
 
 
 class CclError(Exception):

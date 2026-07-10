@@ -3,8 +3,19 @@ package com.bloxbean.cardano.bridge.api;
 import com.bloxbean.cardano.bridge.api.quicktx.QuickTxService;
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.common.model.Networks;
+import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
+import com.bloxbean.cardano.client.plutus.spec.PlutusData;
+import com.bloxbean.cardano.client.plutus.spec.PlutusScript;
+import com.bloxbean.cardano.client.plutus.spec.PlutusV2Script;
+import com.bloxbean.cardano.client.quicktx.Tx;
+import com.bloxbean.cardano.client.quicktx.serialization.TxPlan;
+import com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer;
+import com.bloxbean.cardano.client.transaction.spec.Asset;
+import com.bloxbean.cardano.client.transaction.spec.Transaction;
+import com.bloxbean.cardano.client.util.HexUtil;
+
+import java.math.BigInteger;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -14,1686 +25,213 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+/**
+ * Builds unsigned transactions from TxPlan YAML, fully offline, with static UTXOs + protocol params.
+ */
 class QuickTxApiTest {
 
     private static final String TEST_MNEMONIC =
             "test walk nut penalty hip pave soap entry language right filter choice";
+    private static final String FAKE_TX_HASH = "a".repeat(64);
 
-    private final ObjectMapper mapper = new ObjectMapper();
     private final QuickTxService service = new QuickTxService();
-    private String protocolParamsJson;
 
-    // Generate deterministic addresses from test mnemonic
+    private String protocolParamsJson;
     private String sender;
-    private String sender2;
     private String receiver1;
     private String receiver2;
 
     @BeforeEach
     void setUp() throws IOException {
-        InputStream is = getClass().getClassLoader().getResourceAsStream("protocol-params.json");
-        protocolParamsJson = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        sender = senderAccount.baseAddress();
-        sender2 = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 1).baseAddress();
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream("protocol-params.json")) {
+            protocolParamsJson = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        sender = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0).baseAddress();
         receiver1 = new Account(Networks.testnet()).baseAddress();
         receiver2 = new Account(Networks.testnet()).baseAddress();
     }
 
-    @Test
-    void testSimpleAdaPayment() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-            ]
-            """.formatted(receiver1));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-
-        assertNotNull(json.get("tx_cbor").asText());
-        assertFalse(json.get("tx_cbor").asText().isEmpty());
-        assertNotNull(json.get("tx_hash").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-        assertTrue(Long.parseLong(json.get("fee").asText()) > 0);
-    }
-
-    @Test
-    void testMultiplePayments() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "5000000"}]},
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "3000000"}]}
-            ]
-            """.formatted(receiver1, receiver2));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testWithMetadata() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "2000000"}]},
-                {"type": "attach_metadata", "label": 674,
-                 "metadata": {"msg": ["Hello from CCL Bridge"]}}
-            ]
-            """.formatted(receiver1));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-
-        assertNotNull(json.get("tx_cbor").asText());
-        // Fee should be slightly higher with metadata
-        assertTrue(Long.parseLong(json.get("fee").asText()) > 0);
-    }
-
-    @Test
-    void testWithChangeAddress() throws Exception {
-        // change_address = sender is the typical case; change goes back to sender
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-                ],
-                "from": "%s",
-                "change_address": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-    }
-
-    @Test
-    void testWithValidityInterval() throws Exception {
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "validity": {"valid_from": 1000, "valid_to": 50000},
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-    }
-
-    @Test
-    void testInsufficientFunds() {
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "200000000"}]}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "1000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, sender, protocolParamsJson);
-
-        assertThrows(Exception.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testMissingOperations() {
-        String spec = """
-            {
-                "operations": [],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaa", "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "1000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(sender, sender, protocolParamsJson);
-
-        assertThrows(IllegalArgumentException.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testMissingFrom() {
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "utxos": [
-                    {"tx_hash": "aaaa", "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "1000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(receiver1, sender, protocolParamsJson);
-
-        assertThrows(IllegalArgumentException.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testMissingUtxos() {
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "from": "%s",
-                "protocol_params": %s
-            }
-            """.formatted(receiver1, sender, protocolParamsJson);
-
-        assertThrows(IllegalArgumentException.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testProviderModeSkipsUtxoValidation() {
-        // Provider mode should not require utxos or protocol_params in the spec
-        // (it will fail at HTTP fetch, not at validation)
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "from": "%s",
-                "provider": {"name": "yaci", "url": "http://localhost:9999/api/v1"}
-            }
-            """.formatted(receiver1, sender);
-
-        // Should fail with connection error, NOT IllegalArgumentException
-        Exception ex = assertThrows(Exception.class, () -> service.buildTransaction(spec));
-        assertFalse(ex instanceof IllegalArgumentException,
-                "Should not fail validation — expected HTTP error, got: " + ex.getMessage());
-    }
-
-    @Test
-    void testProviderModeInvalidProviderName() {
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "from": "%s",
-                "provider": {"name": "unknown", "url": "http://localhost:9999/api/v1"}
-            }
-            """.formatted(receiver1, sender);
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> service.buildTransaction(spec));
-        assertTrue(ex.getMessage().contains("Unsupported provider"));
-    }
-
-    @Test
-    void testProviderModeMissingName() {
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "from": "%s",
-                "provider": {"url": "http://localhost:9999/api/v1"}
-            }
-            """.formatted(receiver1, sender);
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> service.buildTransaction(spec));
-        assertTrue(ex.getMessage().contains("'name' is required"));
-    }
-
-    @Test
-    void testMissingProtocolParams() {
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaa", "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "1000000"}]}
-                ]
-            }
-            """.formatted(receiver1, sender, sender);
-
-        assertThrows(IllegalArgumentException.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testMultiAssetPayment() throws Exception {
-        String policyId = "a".repeat(56);
-        String unit = policyId + "546f6b656e"; // "Token" hex
-        String spec = """
-            {
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [
-                         {"unit": "lovelace", "quantity": "2000000"},
-                         {"unit": "%s", "quantity": "100"}
-                     ]}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [
-                         {"unit": "lovelace", "quantity": "100000000"},
-                         {"unit": "%s", "quantity": "500"}
-                     ]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, unit, sender, sender, unit, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Compose (multi-Tx) tests ---
-
-    @Test
-    void testComposeTwoSenders() throws Exception {
-        String spec = """
-            {
-                "transactions": [
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-                        ]
-                    },
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "3000000"}]}
-                        ]
-                    }
-                ],
-                "fee_payer": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]},
-                    {"tx_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(sender, receiver1, sender2, receiver2,
-                          sender, sender, sender2, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-
-        assertNotNull(json.get("tx_cbor").asText());
-        assertFalse(json.get("tx_cbor").asText().isEmpty());
-        assertEquals(64, json.get("tx_hash").asText().length());
-        assertTrue(Long.parseLong(json.get("fee").asText()) > 0);
-    }
-
-    @Test
-    void testComposeMissingFeePayer() {
-        String spec = """
-            {
-                "transactions": [
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-                        ]
-                    },
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "3000000"}]}
-                        ]
-                    }
-                ],
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(sender, receiver1, sender2, receiver2,
-                          sender, protocolParamsJson);
-
-        assertThrows(IllegalArgumentException.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testComposeMissingFromInItem() {
-        String spec = """
-            {
-                "transactions": [
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-                        ]
-                    },
-                    {
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "3000000"}]}
-                        ]
-                    }
-                ],
-                "fee_payer": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(sender, receiver1, receiver2,
-                          sender, sender, protocolParamsJson);
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> service.buildTransaction(spec));
-        assertTrue(ex.getMessage().contains("transactions[1]"));
-    }
-
-    @Test
-    void testComposeWithMetadata() throws Exception {
-        String spec = """
-            {
-                "transactions": [
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "5000000"}]},
-                            {"type": "attach_metadata", "label": 674,
-                             "metadata": {"msg": ["Compose test"]}}
-                        ]
-                    },
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "3000000"}]}
-                        ]
-                    }
-                ],
-                "fee_payer": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]},
-                    {"tx_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(sender, receiver1, sender2, receiver2,
-                          sender, sender, sender2, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertTrue(Long.parseLong(json.get("fee").asText()) > 0);
-    }
-
-    @Test
-    void testComposeSignerCountDefault() throws Exception {
-        // When signer_count is omitted in compose mode, it defaults to number of transactions
-        String spec = """
-            {
-                "transactions": [
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-                        ]
-                    },
-                    {
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "3000000"}]}
-                        ]
-                    }
-                ],
-                "fee_payer": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]},
-                    {"tx_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(sender, receiver1, sender2, receiver2,
-                          sender, sender, sender2, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        // Should build successfully with default signer count = 2
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Staking tests ---
-
-    @Test
-    void testRegisterStakeAddress() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "register_stake_address", "address": "%s"}
-            ]
-            """.formatted(sender));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertFalse(json.get("tx_cbor").asText().isEmpty());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testDeregisterStakeAddress() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "deregister_stake_address", "address": "%s"}
-            ]
-            """.formatted(sender));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testDeregisterStakeAddressWithRefund() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "deregister_stake_address", "address": "%s",
-                 "refund_address": "%s"}
-            ]
-            """.formatted(sender, receiver1));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testDelegateTo() throws Exception {
-        // pool1... bech32 format; using a fake but valid-looking pool ID
-        String poolId = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy";
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "delegate_to", "address": "%s",
-                 "pool_id": "%s"}
-            ]
-            """.formatted(sender, poolId));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testWithdraw() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "withdraw", "reward_address": "%s",
-                 "amount": "5000000"}
-            ]
-            """.formatted(stakeAddr));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testWithdrawWithReceiver() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "withdraw", "reward_address": "%s",
-                 "amount": "5000000", "receiver": "%s"}
-            ]
-            """.formatted(stakeAddr, receiver1));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- DRep tests ---
-
-    @Test
-    void testRegisterDRep() throws Exception {
-        String credentialHash = "ab".repeat(28);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "register_drep", "credential_hash": "%s",
-                 "credential_type": "key"}
-            ]
-            """.formatted(credentialHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testRegisterDRepWithAnchor() throws Exception {
-        String credentialHash = "ab".repeat(28);
-        String dataHash = "cd".repeat(32);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "register_drep", "credential_hash": "%s",
-                 "credential_type": "key",
-                 "anchor_url": "https://example.com/drep.json",
-                 "anchor_data_hash": "%s"}
-            ]
-            """.formatted(credentialHash, dataHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testUnregisterDRep() throws Exception {
-        String credentialHash = "ab".repeat(28);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "unregister_drep", "credential_hash": "%s",
-                 "credential_type": "key"}
-            ]
-            """.formatted(credentialHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testUpdateDRep() throws Exception {
-        String credentialHash = "ab".repeat(28);
-        String dataHash = "cd".repeat(32);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "update_drep", "credential_hash": "%s",
-                 "credential_type": "key",
-                 "anchor_url": "https://example.com/drep-v2.json",
-                 "anchor_data_hash": "%s"}
-            ]
-            """.formatted(credentialHash, dataHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Voting tests ---
-
-    @Test
-    void testDelegateVotingPowerToKeyHash() throws Exception {
-        String drepHash = "ab".repeat(28);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "delegate_voting_power_to", "address": "%s",
-                 "drep_type": "key_hash", "drep_hash": "%s"}
-            ]
-            """.formatted(sender, drepHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testDelegateVotingPowerToAbstain() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "delegate_voting_power_to", "address": "%s",
-                 "drep_type": "abstain"}
-            ]
-            """.formatted(sender));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateVote() throws Exception {
-        String voterHash = "ab".repeat(28);
-        String govTxHash = "cd".repeat(32);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "create_vote", "voter_type": "drep_key_hash",
-                 "voter_hash": "%s",
-                 "gov_action_tx_hash": "%s",
-                 "gov_action_index": 0, "vote": "yes"}
-            ]
-            """.formatted(voterHash, govTxHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateVoteWithAnchor() throws Exception {
-        String voterHash = "ab".repeat(28);
-        String govTxHash = "cd".repeat(32);
-        String anchorDataHash = "ef".repeat(32);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "create_vote", "voter_type": "drep_key_hash",
-                 "voter_hash": "%s",
-                 "gov_action_tx_hash": "%s",
-                 "gov_action_index": 0, "vote": "no",
-                 "anchor_url": "https://example.com/rationale.json",
-                 "anchor_data_hash": "%s"}
-            ]
-            """.formatted(voterHash, govTxHash, anchorDataHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Governance proposal tests ---
-
-    @Test
-    void testCreateInfoActionProposal() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-
-        // gov_action_deposit = 1000 ADA, so we need a large UTXO
-        String spec = """
-            {
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "info_action",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/proposal.json",
-                     "anchor_data_hash": "%s"}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateTreasuryWithdrawalsProposal() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-
-        // gov_action_deposit = 1000 ADA, so we need a large UTXO
-        String spec = """
-            {
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "treasury_withdrawals",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/proposal.json",
-                     "anchor_data_hash": "%s",
-                     "withdrawals": [
-                         {"reward_address": "%s", "amount": "1000000"}
-                     ]}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, stakeAddr, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateVoteInvalidVoteValue() {
-        String voterHash = "ab".repeat(28);
-        String govTxHash = "cd".repeat(32);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "create_vote", "voter_type": "drep_key_hash",
-                 "voter_hash": "%s",
-                 "gov_action_tx_hash": "%s",
-                 "gov_action_index": 0, "vote": "maybe"}
-            ]
-            """.formatted(voterHash, govTxHash));
-
-        assertThrows(Exception.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testUnsupportedGovActionType() {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "create_proposal", "gov_action_type": "unsupported_action",
-                 "return_address": "%s",
-                 "anchor_url": "https://example.com/proposal.json",
-                 "anchor_data_hash": "abcdef"}
-            ]
-            """.formatted(stakeAddr));
-
-        assertThrows(Exception.class, () -> service.buildTransaction(spec));
-    }
-
-    // --- Gap 1: Reference Script on Outputs ---
-
-    @Test
-    void testPayToAddressWithRefScript() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "5000000"}],
-                 "script_ref_cbor_hex": "%s",
-                 "script_ref_type": "plutus_v3"}
-            ]
-            """.formatted(receiver1, ALWAYS_SUCCEEDS_SCRIPT_CBOR));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertFalse(json.get("tx_cbor").asText().isEmpty());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testPayToContractWithRefScript() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_contract", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "5000000"}],
-                 "datum_cbor_hex": "%s",
-                 "script_ref_cbor_hex": "%s",
-                 "script_ref_type": "plutus_v3"}
-            ]
-            """.formatted(receiver1, SIMPLE_DATUM, ALWAYS_SUCCEEDS_SCRIPT_CBOR));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testPayToAddressRefScriptMissingType() {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "5000000"}],
-                 "script_ref_cbor_hex": "%s"}
-            ]
-            """.formatted(receiver1, ALWAYS_SUCCEEDS_SCRIPT_CBOR));
-
-        assertThrows(Exception.class, () -> service.buildTransaction(spec));
-    }
-
-    // --- Gap 2: Additional Governance Actions ---
-
-    @Test
-    void testCreateNoConfidenceProposal() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-
-        String spec = """
-            {
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "no_confidence",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/no-confidence.json",
-                     "anchor_data_hash": "%s"}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateNoConfidenceWithPrevAction() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-        String prevTxHash = "cc".repeat(32);
-
-        String spec = """
-            {
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "no_confidence",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/no-confidence.json",
-                     "anchor_data_hash": "%s",
-                     "gov_action_tx_hash": "%s",
-                     "gov_action_index": 0}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, prevTxHash, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateUpdateCommitteeProposal() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-        String memberHash = "cd".repeat(28);
-
-        String spec = """
-            {
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "update_committee",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/committee.json",
-                     "anchor_data_hash": "%s",
-                     "members_to_remove": [{"hash": "%s", "type": "key"}],
-                     "new_members": [{"hash": "%s", "type": "key", "epoch": 500}],
-                     "quorum_numerator": "2",
-                     "quorum_denominator": "3"}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, memberHash, memberHash, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateNewConstitutionProposal() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-        String constitutionDataHash = "ef".repeat(32);
-
-        String spec = """
-            {
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "new_constitution",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/proposal.json",
-                     "anchor_data_hash": "%s",
-                     "constitution_anchor_url": "https://example.com/constitution.json",
-                     "constitution_anchor_data_hash": "%s"}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, constitutionDataHash, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testCreateHardForkInitiationProposal() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-
-        String spec = """
-            {
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "hard_fork_initiation",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/hardfork.json",
-                     "anchor_data_hash": "%s",
-                     "protocol_version_major": 10,
-                     "protocol_version_minor": 0}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Gap 3: Pool Operations ---
-
-    @Test
-    void testRegisterPool() throws Exception {
-        String operatorHash = "ab".repeat(28);
-        String vrfKeyHash = "cd".repeat(32);
-        String ownerHash = "ab".repeat(28);
-        // rewardAccount must be hex-encoded reward address bytes (not bech32)
-        // e0 prefix = reward address type on testnet, then 28 bytes key hash
-        String rewardAccountHex = "e0" + "ab".repeat(28);
-
-        String spec = """
-            {
-                "operations": [
-                    {"type": "register_pool",
-                     "operator": "%s",
-                     "vrf_key_hash": "%s",
-                     "pledge": "100000000",
-                     "cost": "340000000",
-                     "margin_numerator": "1",
-                     "margin_denominator": "100",
-                     "reward_address": "%s",
-                     "pool_owners": ["%s"],
-                     "relays": [{"type": "single_host_addr", "port": 6000, "ipv4": "127.0.0.1"}],
-                     "pool_metadata_url": "https://example.com/pool.json",
-                     "pool_metadata_hash": "%s"}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "1000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(operatorHash, vrfKeyHash, rewardAccountHex, ownerHash,
-                "ef".repeat(32), sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testRetirePool() throws Exception {
-        String poolId = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy";
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "retire_pool", "pool_id": "%s", "epoch": 500}
-            ]
-            """.formatted(poolId));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Gap 4: Treasury Donation ---
-
-    @Test
-    void testDonateToTreasury() throws Exception {
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "donate_to_treasury",
-                 "treasury_value": "10000000000",
-                 "donation_amount": "5000000"}
-            ]
-            """);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Gap 5: Attach Native Script ---
-
-    @Test
-    void testAttachNativeScript() throws Exception {
-        String keyHash = "ab".repeat(28);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "2000000"}]},
-                {"type": "attach_native_script", "script_json": "{\\"type\\": \\"sig\\", \\"keyHash\\": \\"%s\\"}"}
-            ]
-            """.formatted(receiver1, keyHash));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- Gap 6: unregisterDRep with refundAmount ---
-
-    @Test
-    void testUnregisterDRepWithRefundAmount() throws Exception {
-        String credentialHash = "ab".repeat(28);
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "unregister_drep", "credential_hash": "%s",
-                 "credential_type": "key",
-                 "refund_address": "%s",
-                 "refund_amount": "500000000"}
-            ]
-            """.formatted(credentialHash, receiver1));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- ScriptTx variants of new features ---
-
-    @Test
-    void testScriptTxPayToAddressWithRefScript() throws Exception {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "5000000"}],
-                     "script_ref_cbor_hex": "%s",
-                     "script_ref_type": "plutus_v3"}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, ALWAYS_SUCCEEDS_SCRIPT_CBOR, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testScriptTxDonateToTreasury() throws Exception {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {"type": "donate_to_treasury",
-                     "treasury_value": "10000000000",
-                     "donation_amount": "5000000"},
-                    {"type": "pay_to_address", "address": "%s",
-                     "amounts": [{"unit": "lovelace", "quantity": "2000000"}]}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testScriptTxNoConfidenceProposal() throws Exception {
-        Account senderAccount = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
-        String stakeAddr = senderAccount.stakeAddress();
-        String anchorDataHash = "ab".repeat(32);
-
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {"type": "create_proposal", "gov_action_type": "no_confidence",
-                     "return_address": "%s",
-                     "anchor_url": "https://example.com/no-confidence.json",
-                     "anchor_data_hash": "%s",
-                     "redeemer_cbor_hex": "%s"}
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(stakeAddr, anchorDataHash, SIMPLE_REDEEMER, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    // --- ScriptTx tests ---
-
-    // Always-succeeds PlutusV3 script CBOR (from cardano-client-lib tests)
-    private static final String ALWAYS_SUCCEEDS_SCRIPT_CBOR = "46450101002499";
-    // Simple redeemer: ConstrPlutusData(0, []) = d87980 in CBOR
-    private static final String SIMPLE_REDEEMER = "d87980";
-    // Simple datum same as redeemer
-    private static final String SIMPLE_DATUM = "d87980";
-
-    @Test
-    void testScriptTxCollectFromWithRedeemer() throws Exception {
-        String scriptAddr = receiver1; // Use any address for test
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "collect_from",
-                        "collect_utxos": [
-                            {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                             "output_index": 0, "address": "%s",
-                             "amount": [{"unit": "lovelace", "quantity": "10000000"}]}
-                        ],
-                        "redeemer_cbor_hex": "%s",
-                        "datum_cbor_hex": "%s"
-                    },
-                    {
-                        "type": "attach_spending_validator",
-                        "script_cbor_hex": "%s",
-                        "script_type": "plutus_v3"
-                    },
-                    {
-                        "type": "pay_to_address",
-                        "address": "%s",
-                        "amounts": [{"unit": "lovelace", "quantity": "5000000"}]
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(scriptAddr, SIMPLE_REDEEMER, SIMPLE_DATUM,
-                ALWAYS_SUCCEEDS_SCRIPT_CBOR, receiver2, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertFalse(json.get("tx_cbor").asText().isEmpty());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testScriptTxReadFrom() throws Exception {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "read_from",
-                        "reference_inputs": [
-                            {"tx_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "output_index": 0}
-                        ]
-                    },
-                    {
-                        "type": "pay_to_address",
-                        "address": "%s",
-                        "amounts": [{"unit": "lovelace", "quantity": "5000000"}]
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testScriptTxMintPlutusAssets() throws Exception {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "mint_plutus_assets",
-                        "script_cbor_hex": "%s",
-                        "script_type": "plutus_v3",
-                        "assets": [{"name": "TestToken", "quantity": "100"}],
-                        "redeemer_cbor_hex": "%s",
-                        "receiver": "%s"
-                    },
-                    {
-                        "type": "pay_to_address",
-                        "address": "%s",
-                        "amounts": [{"unit": "lovelace", "quantity": "2000000"}]
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(ALWAYS_SUCCEEDS_SCRIPT_CBOR, SIMPLE_REDEEMER, receiver1,
-                receiver1, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testScriptTxAttachValidators() throws Exception {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "attach_spending_validator",
-                        "script_cbor_hex": "%s",
-                        "script_type": "plutus_v3"
-                    },
-                    {
-                        "type": "pay_to_address",
-                        "address": "%s",
-                        "amounts": [{"unit": "lovelace", "quantity": "5000000"}]
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(ALWAYS_SUCCEEDS_SCRIPT_CBOR, receiver1, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testScriptTxDelegateWithRedeemer() throws Exception {
-        String poolId = "pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy";
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "delegate_to",
-                        "address": "%s",
-                        "pool_id": "%s",
-                        "redeemer_cbor_hex": "%s"
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(sender, poolId, SIMPLE_REDEEMER, sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testComposeScriptTxWithTx() throws Exception {
-        String spec = """
-            {
-                "transactions": [
-                    {
-                        "tx_type": "tx",
-                        "from": "%s",
-                        "operations": [
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-                        ]
-                    },
-                    {
-                        "tx_type": "script_tx",
-                        "from": "%s",
-                        "operations": [
-                            {
-                                "type": "read_from",
-                                "reference_inputs": [
-                                    {"tx_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "output_index": 0}
-                                ]
-                            },
-                            {"type": "pay_to_address", "address": "%s",
-                             "amounts": [{"unit": "lovelace", "quantity": "3000000"}]}
-                        ]
-                    }
-                ],
-                "fee_payer": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s
-            }
-            """.formatted(sender, receiver1, sender, receiver2,
-                sender, sender, protocolParamsJson);
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    @Test
-    void testScriptTxMissingScriptType() {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "attach_spending_validator",
-                        "script_cbor_hex": "%s"
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(ALWAYS_SUCCEEDS_SCRIPT_CBOR, sender, sender, protocolParamsJson);
-
-        assertThrows(Exception.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testScriptTxInvalidRedeemer() {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "collect_from",
-                        "collect_utxos": [
-                            {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                             "output_index": 0, "address": "%s",
-                             "amount": [{"unit": "lovelace", "quantity": "10000000"}]}
-                        ],
-                        "redeemer_cbor_hex": "invalidhex"
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, sender, protocolParamsJson);
-
-        assertThrows(Exception.class, () -> service.buildTransaction(spec));
-    }
-
-    @Test
-    void testScriptTxMintAssetsNotAllowedInScriptTxMode() {
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "mint_assets",
-                        "script_json": "{}",
-                        "assets": [{"name": "Token", "quantity": "100"}],
-                        "receiver": "%s"
-                    }
-                ],
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, sender, protocolParamsJson);
-
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> service.buildTransaction(spec));
-        assertTrue(ex.getMessage().contains("mint_plutus_assets"));
-    }
-
-    @Test
-    void testScriptTxFromOptional() throws Exception {
-        // ScriptTx mode allows 'from' to be omitted
-        String spec = """
-            {
-                "tx_type": "script_tx",
-                "operations": [
-                    {
-                        "type": "pay_to_address",
-                        "address": "%s",
-                        "amounts": [{"unit": "lovelace", "quantity": "5000000"}]
-                    }
-                ],
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(receiver1, sender, protocolParamsJson);
-
-        // Should not throw IllegalArgumentException for missing 'from'
-        // but may fail during build since no from means no coin selection source
-        // Just verify validation passes
-        try {
-            service.buildTransaction(spec);
-        } catch (IllegalArgumentException e) {
-            fail("Should not fail validation for missing 'from' in script_tx mode: " + e.getMessage());
-        } catch (Exception e) {
-            // Build failures are ok - we're testing validation
-        }
-    }
-
-    @Test
-    void testBackwardCompatibilityDefaultTxType() throws Exception {
-        // Existing specs without tx_type should default to "tx" and work as before
-        String spec = buildSpec("""
-            "operations": [
-                {"type": "pay_to_address", "address": "%s",
-                 "amounts": [{"unit": "lovelace", "quantity": "5000000"}]}
-            ]
-            """.formatted(receiver1));
-
-        String result = service.buildTransaction(spec);
-        JsonNode json = mapper.readTree(result);
-        assertNotNull(json.get("tx_cbor").asText());
-        assertEquals(64, json.get("tx_hash").asText().length());
-    }
-
-    /**
-     * Helper to build a standard spec JSON with common defaults.
-     */
-    private String buildSpec(String operationsFragment) {
+    /** A single 100-ADA UTXO at {@code sender}, as a JSON array of the CCL Utxo model. */
+    private String utxos() {
         return """
-            {
-                %s,
-                "from": "%s",
-                "utxos": [
-                    {"tx_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     "output_index": 0, "address": "%s",
-                     "amount": [{"unit": "lovelace", "quantity": "100000000"}]}
-                ],
-                "protocol_params": %s,
-                "signer_count": 1
-            }
-            """.formatted(operationsFragment, sender, sender, protocolParamsJson);
+            [{"tx_hash":"%s","output_index":0,"address":"%s",
+              "amount":[{"unit":"lovelace","quantity":"100000000"}]}]
+            """.formatted(FAKE_TX_HASH, sender);
+    }
+
+    private JsonNode build(String yaml) throws Exception {
+        // The build result is YAML now; parse it with CCL's YAML mapper.
+        return YamlSerializer.getYamlMapper()
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+    }
+
+    private static void assertBuilt(JsonNode result) {
+        assertFalse(result.get("tx_cbor").asText().isEmpty());
+        assertEquals(64, result.get("tx_hash").asText().length());
+        assertTrue(Long.parseLong(result.get("fee").asText()) > 0);
+    }
+
+    @Test
+    void simplePayment() throws Exception {
+        String yaml = """
+            version: 1.0
+            transaction:
+              - tx:
+                  from: %s
+                  intents:
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "5000000"
+            """.formatted(sender, receiver1);
+        assertBuilt(build(yaml));
+    }
+
+    @Test
+    void multiplePayments() throws Exception {
+        String yaml = """
+            version: 1.0
+            transaction:
+              - tx:
+                  from: %s
+                  intents:
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "5000000"
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "3000000"
+            """.formatted(sender, receiver1, receiver2);
+        assertBuilt(build(yaml));
+    }
+
+    @Test
+    void paymentWithMetadata() throws Exception {
+        // The metadata intent's value is a scalar string the deserializer auto-detects; JSON
+        // (starting with '{') is parsed via MetadataBuilder.metadataFromJson.
+        String yaml = """
+            version: 1.0
+            transaction:
+              - tx:
+                  from: %s
+                  intents:
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "2000000"
+                    - type: metadata
+                      metadata: '{"674": {"msg": "Hello from Cardano Client Bindings"}}'
+            """.formatted(sender, receiver1);
+        JsonNode result = build(yaml);
+        assertBuilt(result);
+
+        // The metadata must actually be attached: the tx body carries an auxiliary data hash.
+        Transaction tx = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));
+        assertNotNull(tx.getBody().getAuxiliaryDataHash(), "metadata should set the auxiliary data hash");
+    }
+
+    @Test
+    void variableSubstitution() throws Exception {
+        String yaml = """
+            version: 1.0
+            variables:
+              to: %s
+              amount: "4000000"
+            transaction:
+              - tx:
+                  from: %s
+                  intents:
+                    - type: payment
+                      address: ${to}
+                      amounts:
+                        - unit: lovelace
+                          quantity: ${amount}
+            """.formatted(receiver1, sender);
+        assertBuilt(build(yaml));
+    }
+
+    @Test
+    void insufficientFundsFails() {
+        String yaml = """
+            version: 1.0
+            transaction:
+              - tx:
+                  from: %s
+                  intents:
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "200000000"
+            """.formatted(sender, receiver1);
+        assertThrows(Exception.class, () -> service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+    }
+
+    // An always-succeeds Plutus V2 minting policy. The script is never executed offline — the
+    // StaticTransactionEvaluator stamps the caller-supplied execution units onto the redeemer —
+    // so any valid Plutus CBOR is enough to build the transaction.
+    private static final String ALWAYS_SUCCEEDS_V2 = "4e4d01000033222220051200120011";
+
+    /** Build a Plutus mint as a TxPlan YAML (generated by CCL so the script-intent shape is exact). */
+    private String mintScriptYaml() {
+        PlutusScript mintScript = PlutusV2Script.builder().cborHex(ALWAYS_SUCCEEDS_V2).build();
+        Asset asset = new Asset("TestToken", BigInteger.ONE);
+        PlutusData redeemer = BigIntPlutusData.of(0);
+        Tx tx = new Tx()
+                .mintAsset(mintScript, asset, redeemer, sender)
+                .from(sender);
+        return TxPlan.from(tx).feePayer(sender).toYaml();
+    }
+
+    @Test
+    void plutusMintWithSuppliedExecUnits() throws Exception {
+        String yaml = mintScriptYaml();
+        // One redeemer (the mint) → one ExUnits, supplied by the caller (as it would from Ogmios,
+        // Blockfrost, Aiken, Scalus, …).
+        String execUnits = "[{\"mem\": 2000000, \"steps\": 500000000}]";
+
+        JsonNode result = YamlSerializer.getYamlMapper()
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, execUnits));
+        assertBuilt(result);
+
+        // The built tx must carry the redeemer with exactly the supplied execution units.
+        Transaction tx = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));
+        assertNotNull(tx.getWitnessSet().getRedeemers());
+        assertEquals(1, tx.getWitnessSet().getRedeemers().size());
+        var exUnits = tx.getWitnessSet().getRedeemers().get(0).getExUnits();
+        assertEquals(BigInteger.valueOf(2000000), exUnits.getMem());
+        assertEquals(BigInteger.valueOf(500000000), exUnits.getSteps());
+    }
+
+    @Test
+    void plutusMintWithoutExecUnitsUsesScalus() throws Exception {
+        String yaml = mintScriptYaml();
+        // Scalus needs cost models to run the UPLC machine; the default fixture omits them.
+        String paramsWithCostModels;
+        try (InputStream is = getClass().getClassLoader()
+                .getResourceAsStream("protocol-params-with-costmodels.json")) {
+            paramsWithCostModels = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        // No supplied units → the Scalus evaluator computes them offline by running the validator.
+        JsonNode result = YamlSerializer.getYamlMapper()
+                .readTree(service.buildTransaction(yaml, utxos(), paramsWithCostModels, null));
+        assertBuilt(result);
+
+        Transaction tx = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));
+        var exUnits = tx.getWitnessSet().getRedeemers().get(0).getExUnits();
+        System.out.println("SCALUS-COMPUTED UNITS: mem=" + exUnits.getMem() + " steps=" + exUnits.getSteps());
+        // A real UPLC evaluation of the always-succeeds script → non-zero mem and steps.
+        assertTrue(exUnits.getMem().signum() > 0);
+        assertTrue(exUnits.getSteps().signum() > 0);
+
+        // Dump fixtures for the native-image harness.
+        System.out.println("FIXTURE_YAML<<<" + yaml + ">>>");
+        System.out.println("FIXTURE_UTXOS<<<" + utxos() + ">>>");
     }
 }

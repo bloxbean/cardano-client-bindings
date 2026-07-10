@@ -27,16 +27,31 @@ class DevKitHelper:
             return resp.status
 
     def topup(self, address, ada_amount=100):
-        """Fund an address with ADA."""
+        """Fund an address with ADA.
+
+        Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to
+        the node, so a topup right after reset can transiently fail. Retry with backoff.
+        """
         data = json.dumps({"address": address, "adaAmount": ada_amount}).encode()
-        req = urllib.request.Request(
-            f"{self.base_url}/addresses/topup",
-            method="POST",
-            data=data,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read())
+        last_err = None
+        for _ in range(8):
+            req = urllib.request.Request(
+                f"{self.base_url}/addresses/topup",
+                method="POST",
+                data=data,
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    result = json.loads(resp.read())
+                if not (isinstance(result, dict) and result.get("status") is False):
+                    return result
+                last_err = RuntimeError(f"topup failed: {result}")
+            except urllib.error.HTTPError as e:
+                last_err = RuntimeError(
+                    f"topup failed: HTTP {e.code}: {e.read().decode('utf-8', 'replace')}")
+            time.sleep(4)
+        raise last_err
 
     def get_utxos(self, address):
         """Fetch UTXOs for an address."""
@@ -62,8 +77,12 @@ class DevKitHelper:
             data=tx_bytes,
             headers={"Content-Type": "application/cbor"},
         )
-        with urllib.request.urlopen(req) as resp:
-            return resp.read().decode("utf-8").strip().strip('"')
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.read().decode("utf-8").strip().strip('"')
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")
+            raise RuntimeError(f"tx submit failed: HTTP {e.code}: {body}") from None
 
     def get_tx(self, tx_hash):
         """Get transaction details by hash."""

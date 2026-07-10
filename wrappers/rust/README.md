@@ -1,0 +1,138 @@
+# Cardano Client Bindings — Rust
+
+Rust bindings for [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib)
+via the Cardano Client Bindings native library.
+
+> Part of the [Cardano Client Bindings](../../README.md) project. See the
+> [top-level README](../../README.md) for the full API reference and
+> [`docs/quicktx.md`](../../docs/quicktx.md) for transaction building.
+
+## Requirements
+
+- Rust (stable, 2021 edition).
+
+The native library is **fetched automatically at build time** — no separate download and no
+`CCL_LIB_PATH` / `DYLD_LIBRARY_PATH` / `LD_LIBRARY_PATH` needed.
+
+## Installing
+
+```bash
+cargo add cardano-client-lib          # published as cardano-client-lib, imported as `ccl`
+```
+
+`build.rs` sources `libccl.*` for your target — in priority order: `CCL_LIB_PATH` (a dir), the
+in-tree monorepo build, or **downloaded from the GitHub release** — then stages it and sets an
+`rpath`, so both linking and runtime "just work" with **no environment variables**.
+
+- Override the release tag it fetches from with `CCL_LIB_VERSION`.
+- crates.io can't host the ~50 MB binary, so the crate carries only source + `build.rs`; the lib is
+  pulled at build time (needs network on the first build). See
+  [ADR-0012](../../docs/adr/0012-native-lib-bundled-in-wrapper-packages.md).
+
+## Running the examples
+
+From `wrappers/rust`, **no env vars required**:
+
+```bash
+cargo run --example account
+```
+
+For development against a locally built library, point `CCL_LIB_PATH` at it (optional — the in-tree
+build is found automatically):
+
+```bash
+./gradlew :core:nativeCompile            # build from source (needs Oracle GraalVM 25.0.3), or
+make download-lib                        # download a pre-built binary
+CCL_LIB_PATH=../../core/build/native/nativeCompile cargo run --example account
+```
+
+The [`examples/`](examples/) directory contains:
+
+| `--example` | What it shows |
+|-------------|---------------|
+| [`account`](examples/account.rs) | Create an account, restore from mnemonic, derive keys and a DRep ID |
+| [`primitives`](examples/primitives.rs) | Mnemonics, Blake2b hashing, Ed25519 signing, address parsing/validation |
+| [`transaction`](examples/transaction.rs) | Build an unsigned payment **offline** (QuickTx) and sign it — no node/DevKit needed |
+
+## Quick start
+
+```rust
+use ccl::{Bridge, network};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let bridge = Bridge::new()?; // loads libccl, starts a GraalVM isolate
+
+    // API methods return JSON strings; parse with serde_json.
+    let account = bridge.account().create(network::TESTNET)?;
+    let json: serde_json::Value = serde_json::from_str(&account)?;
+    println!("{}", json["base_address"]); // addr_test1...
+    println!("{}", json["mnemonic"]);     // 24-word phrase
+    Ok(())
+} // Bridge's Drop tears down the isolate
+```
+
+## API surface
+
+A `Bridge` exposes namespaced accessors (all offline operations):
+`bridge.account()`, `.address()`, `.crypto()`, `.tx()`, `.plutus()`, `.script()`,
+`.gov()`, `.wallet()`, `.quicktx()`.
+
+Most methods return `Result<String>` where the `String` is JSON — parse it with
+`serde_json`.
+
+Transactions are defined as a [TxPlan](https://github.com/bloxbean/cardano-client-lib)
+**YAML** document and built fully offline — you supply the UTXOs and protocol parameters
+(as `serde_json::Value`):
+
+```rust
+let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params)?; // -> TxResult { tx_cbor, tx_hash, fee }
+```
+
+Network IDs: `network::MAINNET` (0), `network::TESTNET` (1), `network::PREPROD` (2),
+`network::PREVIEW` (3). Errors are `ccl::CclError`.
+
+## Chain-data providers (optional)
+
+`build` is offline — you supply the UTXOs and protocol parameters. Enable the `providers` feature for
+optional HTTP helpers (via `ureq`) that fetch those for you, keeping the native library offline and
+provider-free:
+
+```toml
+# Published as `cardano-client-lib`; imported as `ccl` (see below).
+cardano-client-lib = { version = "0.1", features = ["providers"] }
+```
+
+```rust
+use ccl::providers::BlockfrostProvider; // or YaciProvider
+
+let provider = BlockfrostProvider::new("proj_id", "preprod")?; // or YaciProvider::default()
+let result = bridge.quicktx().build_with(&yaml, &provider, sender, None)?;
+```
+
+Plug in any backend (Koios, Ogmios, …) by implementing the `ChainDataProvider` trait (`utxos`,
+`protocol_params`). UTXO *selection* is handled inside the bridge — a provider only returns all
+UTXOs at the address.
+
+## Transaction evaluators (optional)
+
+A Plutus build needs each redeemer's execution units. The bridge computes them **offline** with
+Scalus when you supply none — so a script build just works, no evaluation step (pass `None`):
+
+```rust
+let result = bridge.quicktx().build_with(&yaml, &provider, sender, None)?; // Scalus computes the units
+```
+
+To use a **remote** evaluator instead (e.g. an authoritative fallback), pass a
+`TransactionEvaluator`; `build_with` runs a two-pass (draft → evaluate → rebuild). libccl never
+makes HTTP calls ([ADR-0013](../../docs/adr/0013-transaction-evaluators.md)), so remote evaluation
+lives here in the wrapper (also behind the `providers` feature):
+
+```rust
+use ccl::providers::BlockfrostEvaluator;
+
+let evaluator = BlockfrostEvaluator::new("proj_id", "preprod")?;
+let result = bridge.quicktx().build_with(&yaml, &provider, sender, Some(&evaluator))?;
+```
+
+Plug in any evaluator (Ogmios, …) by implementing the `TransactionEvaluator` trait (`evaluate`). To
+supply units you computed yourself, call `build` directly. See `examples/evaluator.rs`.

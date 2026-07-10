@@ -22,7 +22,7 @@ extern "C" {
 
     pub fn graal_tear_down_isolate(thread: *mut graal_isolatethread_t) -> c_int;
 
-    // CCL Bridge lifecycle
+    // Cardano Client Bindings lifecycle
     pub fn ccl_version(thread: *mut graal_isolatethread_t) -> c_int;
     pub fn ccl_get_result(thread: *mut graal_isolatethread_t) -> *mut c_char;
     pub fn ccl_get_last_error(thread: *mut graal_isolatethread_t) -> *mut c_char;
@@ -58,6 +58,15 @@ extern "C" {
         account_index: c_int,
         address_index: c_int,
         tx_cbor_hex: *const c_char,
+    ) -> c_int;
+    pub fn ccl_account_sign_tx_multi(
+        thread: *mut graal_isolatethread_t,
+        mnemonic: *const c_char,
+        network_id: c_int,
+        account_index: c_int,
+        address_index: c_int,
+        tx_cbor_hex: *const c_char,
+        keys: *const c_char,
     ) -> c_int;
     pub fn ccl_account_get_drep_id(
         thread: *mut graal_isolatethread_t,
@@ -184,6 +193,9 @@ extern "C" {
     // QuickTx API
     pub fn ccl_quicktx_build(
         thread: *mut graal_isolatethread_t,
-        spec_json: *const c_char,
+        yaml: *const c_char,
+        utxos_json: *const c_char,
+        protocol_params_json: *const c_char,
+        exec_units_json: *const c_char,
     ) -> c_int;
 }

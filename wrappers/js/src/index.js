@@ -1,8 +1,12 @@
 import { dlopen, FFIType, ptr, CString } from 'bun:ffi';
 import path from 'path';
 import os from 'os';
+import { existsSync } from 'fs';
+import { parse as parseYaml } from 'yaml';
 
-export { Provider, YaciDevKitProvider } from './provider.js';
+// Optional chain-data provider helpers (re-exported for convenience).
+export { ChainDataProvider, YaciProvider, BlockfrostProvider } from './providers.js';
+export { TransactionEvaluator, BlockfrostEvaluator } from './providers.js';
 
 // Error codes
 export const CCL_SUCCESS = 0;
@@ -35,23 +39,115 @@ function cstr(str) {
   return Buffer.from(str + '\0', 'utf-8');
 }
 
+// Plutus cost models: prefer the ordered `cost_models_raw` array form.
+//
+// Per upstream guidance (bloxbean/cardano-client-lib#633), `cost_models_raw` — a per-language ordered
+// list of costs that CCL consumes directly — is the preferred way to carry cost models. The map form
+// `cost_models` is deprecated: after recent cost-model changes its entries are no longer ordered, so
+// relying on their order is unsafe. Providers that already return `cost_models_raw` (e.g. real
+// Blockfrost, and yaci-store's own API) pass straight through here untouched.
+//
+// Only when a provider returns *just* the deprecated `cost_models` (a map keyed by numeric indices)
+// do we convert it here: JavaScript object semantics iterate canonical integer-string keys ("100")
+// ahead of zero-padded ones ("000"), so JSON.stringify would emit the map out of order and the node
+// would reject Plutus txs with PPViewHashesDontMatch. We sort by numeric key and emit
+// `cost_models_raw`, which serializes order-stably. (Go/Python are unaffected: Go's json.Marshal
+// sorts keys, Python preserves the provider's order.) Languages with named-operation keys (which JS
+// does not reorder) are left as a `cost_models` map untouched.
+//
+// This conversion is still load-bearing because the endpoint our tests/provider-helpers use — the
+// Yaci DevKit :10000 local-cluster proxy — returns numeric `cost_models` only (empirically verified:
+// no `cost_models_raw`), even though the DevKit's own yaci-store serves the ordered form on :8080.
+// Remove this whole function once every endpoint we fetch params from returns `cost_models_raw` —
+// tracked in bloxbean/cardano-client-bindings#11.
+export function normalizeCostModels(protocolParams) {
+  if (!protocolParams || typeof protocolParams !== 'object') return protocolParams;
+
+  // Preferred form already present — CCL consumes cost_models_raw ahead of the deprecated map, so
+  // pass the params through unchanged rather than touch the deprecated cost_models.
+  const existingRaw = protocolParams.cost_models_raw ?? protocolParams.costModelsRaw;
+  if (existingRaw && typeof existingRaw === 'object' && Object.keys(existingRaw).length > 0) {
+    return protocolParams;
+  }
+
+  const costModels = protocolParams.cost_models ?? protocolParams.costModels;
+  if (!costModels || typeof costModels !== 'object') return protocolParams;
+
+  const raw = {};
+  const named = {};
+  let converted = false;
+  for (const [lang, model] of Object.entries(costModels)) {
+    const keys = model && typeof model === 'object' && !Array.isArray(model) ? Object.keys(model) : null;
+    if (keys && keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
+      raw[lang] = keys.sort((a, b) => Number(a) - Number(b)).map((k) => model[k]);
+      converted = true;
+    } else {
+      named[lang] = model;
+    }
+  }
+  if (!converted) return protocolParams;
+
+  const out = { ...protocolParams };
+  delete out.cost_models;
+  delete out.costModels;
+  if (Object.keys(named).length > 0) out.cost_models = named;
+  out.cost_models_raw = raw;
+  return out;
+}
+
+function libFilename() {
+  const platform = os.platform();
+  if (platform === 'darwin') return 'libccl.dylib';
+  if (platform === 'win32') return 'libccl.dll';
+  return 'libccl.so';
+}
+
+// The per-platform npm package suffix for the current runtime, e.g. "macos-aarch64". Mirrors the
+// native build/release matrix; used to locate the `@bloxbean/cardano-client-lib-<suffix>` optionalDependency.
+export function platformSuffix() {
+  const p = os.platform();
+  const a = os.arch();
+  if (p === 'darwin') return a === 'arm64' ? 'macos-aarch64' : 'macos-x86_64';
+  if (p === 'win32') return 'windows-x86_64';
+  return a === 'arm64' ? 'linux-aarch64' : 'linux-x86_64';
+}
+
+// Locate the native library, in priority order:
+//   1. an explicit `libPath` argument (a directory), if given;
+//   2. the CCL_LIB_PATH env var (a directory) — for development against a locally built lib;
+//   3. a copy bundled directly in this package (`libs/`) — a local `pack` or single-package install;
+//   4. the `@bloxbean/cardano-client-lib-<platform>` optionalDependency package — the published layout;
+//   5. the bare filename, letting the OS loader search its default paths.
+export function resolveLibFile(libPath) {
+  const name = libFilename();
+  if (libPath) return path.join(libPath, name);
+  if (process.env.CCL_LIB_PATH) return path.join(process.env.CCL_LIB_PATH, name);
+  const bundled = path.join(import.meta.dir, '..', 'libs', name);
+  if (existsSync(bundled)) return bundled;
+  try {
+    const fromPkg = Bun.resolveSync(`@bloxbean/cardano-client-lib-${platformSuffix()}/${name}`, import.meta.dir);
+    if (fromPkg && existsSync(fromPkg)) return fromPkg;
+  } catch {
+    // platform package not installed — fall through to the bare filename
+  }
+  return name;
+}
+
+// Native libccl version this wrapper expects, kept in lockstep with the package version. On
+// construction the wrapper compares it against ccl_version() and fails fast on a skew.
+const EXPECTED_LIB_VERSION = '0.1.0';
+
+// Strip any pre-release / build suffix: '0.1.0-preview1' -> '0.1.0'.
+function baseVersion(v) {
+  return v.split(/[-+]/, 1)[0].trim();
+}
 export class CclBridge {
   constructor(libPath) {
-    if (!libPath) {
-      libPath = process.env.CCL_LIB_PATH || '.';
-    }
+    const libFile = resolveLibFile(libPath);
 
-    const platform = os.platform();
-    let libFile;
-    if (platform === 'darwin') {
-      libFile = path.join(libPath, 'libccl.dylib');
-    } else if (platform === 'win32') {
-      libFile = path.join(libPath, 'libccl.dll');
-    } else {
-      libFile = path.join(libPath, 'libccl.so');
-    }
-
-    const lib = dlopen(libFile, {
+    let lib;
+    try {
+      lib = dlopen(libFile, {
       graal_create_isolate: {
         args: [FFIType.ptr, FFIType.ptr, FFIType.ptr],
         returns: FFIType.i32,
@@ -72,6 +168,7 @@ export class CclBridge {
       ccl_account_get_public_key: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
       ccl_account_get_drep_id: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
       ccl_account_sign_tx: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.cstring], returns: FFIType.i32 },
+      ccl_account_sign_tx_multi: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
 
       // Address
       ccl_address_info: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
@@ -114,8 +211,14 @@ export class CclBridge {
       ccl_wallet_get_address: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 
       // QuickTx
-      ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
+      ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
     });
+    } catch (e) {
+      throw new Error(
+        `Failed to load the CCL native library (${libFile}): ${e.message}\n` +
+        `Install a package that bundles it, or set CCL_LIB_PATH to the directory containing ${libFilename()}.`
+      );
+    }
 
     this._lib = lib.symbols;
 
@@ -127,6 +230,8 @@ export class CclBridge {
       throw new Error(`Failed to create GraalVM isolate: ${rc}`);
     }
     this._thread = Number(threadBuf[0]);
+
+    this._checkVersion();
 
     // Namespace APIs
     this.account = new AccountApi(this);
@@ -175,6 +280,20 @@ export class CclBridge {
   version() {
     return this._check(this._lib.ccl_version(this._thread));
   }
+
+  // Fail fast on a native-lib / wrapper version skew (bypass with CCL_SKIP_VERSION_CHECK).
+  _checkVersion() {
+    if (process.env.CCL_SKIP_VERSION_CHECK) return;
+    const libVer = this.version();
+    if (baseVersion(libVer) !== baseVersion(EXPECTED_LIB_VERSION)) {
+      throw new Error(
+        `libccl version '${libVer}' is incompatible with the @bloxbean/cardano-client-lib wrapper ` +
+        `(expects '${EXPECTED_LIB_VERSION}'). The native library and wrapper must be the same version ` +
+        `— reinstall the package, or set CCL_LIB_PATH to a matching libccl. ` +
+        `Set CCL_SKIP_VERSION_CHECK=1 to bypass.`
+      );
+    }
+  }
 }
 
 // --- Namespace API classes ---
@@ -209,6 +328,15 @@ class AccountApi {
   signTx(mnemonic, networkId, accountIndex, addressIndex, txCborHex) {
     return this._b._check(
       this._b._lib.ccl_account_sign_tx(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex)));
+  }
+
+  // Sign with one or more of the account's keys, selected by role (any of: payment, stake, drep,
+  // committee_cold, committee_hot, applied in order). Use for transactions whose certificates also
+  // need the stake or DRep key — stake registration/delegation/withdrawal and DRep/vote operations.
+  signTxWithKeys(mnemonic, networkId, accountIndex, addressIndex, txCborHex, keys) {
+    const keysStr = Array.isArray(keys) ? keys.join(",") : keys;
+    return this._b._check(
+      this._b._lib.ccl_account_sign_tx_multi(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex), cstr(keysStr)));
   }
 }
 
@@ -349,1318 +477,58 @@ class WalletApi {
   }
 }
 
-class QuickTxApi {
-  constructor(bridge) { this._b = bridge; }
-
-  newTx() {
-    return new TxBuilder(this._b);
-  }
-
-  tx() {
-    return new Tx();
-  }
-
-  newScriptTx() {
-    return new ScriptTxBuilder(this._b);
-  }
-
-  scriptTx() {
-    return new ScriptTx();
-  }
-
-  compose(...txs) {
-    return new ComposeTxBuilder(this._b, txs);
-  }
-}
-
-export class Amount {
-  static lovelace(quantity) {
-    return { unit: 'lovelace', quantity: String(Math.floor(quantity)) };
-  }
-
-  static ada(adaAmount) {
-    return { unit: 'lovelace', quantity: String(Math.floor(adaAmount * 1_000_000)) };
-  }
-
-  static asset(unit, quantity) {
-    return { unit, quantity: String(Math.floor(quantity)) };
-  }
-}
-
-export class TxBuilder {
+export class QuickTxApi {
   constructor(bridge) {
     this._b = bridge;
-    this._operations = [];
-    this._from = null;
-    this._changeAddress = null;
-    this._feePayer = null;
-    this._utxos = null;
-    this._protocolParams = null;
-    this._validity = {};
-    this._mergeOutputs = null;
-    this._signerCount = 1;
   }
 
-  payToAddress(address, ...args) {
-    let amounts = args;
-    let options = {};
-    if (args.length > 0) {
-      const last = args[args.length - 1];
-      if (last && typeof last === 'object' && !last.unit) {
-        options = args[args.length - 1];
-        amounts = args.slice(0, -1);
-      }
+  /**
+   * Build an unsigned transaction from a CCL TxPlan (YAML), fully offline.
+   *
+   * @param {string} txplanYaml - the TxPlan YAML document defining the transaction(s).
+   * @param {Array<object>} utxos - UTXOs (CCL Utxo model) available to the sender.
+   * @param {object} protocolParams - protocol parameters (CCL ProtocolParams model).
+   * @param {Array<{mem: (number|string), steps: (number|string)}>} [execUnits] - optional redeemer
+   *   execution units (one per redeemer, in transaction order) for Plutus script transactions.
+   *   Compute these with any evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run
+   *   the script.
+   * @returns {{tx_cbor: string, tx_hash: string, fee: string}}
+   */
+  build(txplanYaml, utxos, protocolParams, execUnits = null) {
+    const rc = this._b._lib.ccl_quicktx_build(
+      this._b._thread,
+      cstr(txplanYaml),
+      cstr(JSON.stringify(utxos)),
+      cstr(JSON.stringify(normalizeCostModels(protocolParams))),
+      execUnits != null ? cstr(JSON.stringify(execUnits)) : null,
+    );
+    // The build result is a YAML document.
+    return parseYaml(this._b._check(rc));
+  }
+
+  /**
+   * Convenience: fetch chain data from a provider and build, in one call.
+   *
+   * Composes `provider.utxos(sender)` + `provider.protocolParams()` with {@link QuickTxApi#build}.
+   * The bridge stays offline — this only moves the optional HTTP fetch into wrapper code. See
+   * `src/providers.js` for available providers (Yaci DevKit, Blockfrost) or supply your own object
+   * with `utxos(address)` and `protocolParams()`.
+   *
+   * @param {string} txplanYaml - the TxPlan YAML document defining the transaction(s).
+   * @param {{utxos: (a: string) => Promise<object[]>, protocolParams: () => Promise<object>}} provider
+   * @param {string} sender - the address whose UTXOs fund the transaction.
+   * @param {Array<{mem: (number|string), steps: (number|string)}>} [execUnits]
+   * @returns {Promise<{tx_cbor: string, tx_hash: string, fee: string}>}
+   */
+  async buildWith(txplanYaml, provider, sender, evaluator = null) {
+    const utxos = await provider.utxos(sender);
+    const protocolParams = await provider.protocolParams();
+    let execUnits = null;
+    if (evaluator != null) {
+      // Two-pass: draft (units computed offline by Scalus) -> remote evaluate -> rebuild.
+      const draft = this.build(txplanYaml, utxos, protocolParams);
+      execUnits = await evaluator.evaluate(draft.tx_cbor, utxos);
     }
-    const op = {
-      type: 'pay_to_address',
-      address,
-      amounts: [...amounts],
-    };
-    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
-    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
-    const op = {
-      type: 'pay_to_contract',
-      address,
-      amounts: Array.isArray(amounts) ? amounts : [amounts],
-    };
-    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
-    if (datumHash) op.datum_hash = datumHash;
-    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
-    if (scriptRefType) op.script_ref_type = scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  mintAssets(scriptJson, assets, receiver) {
-    this._operations.push({
-      type: 'mint_assets',
-      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
-      assets,
-      receiver,
-    });
-    return this;
-  }
-
-  attachMetadata(label, metadata) {
-    this._operations.push({
-      type: 'attach_metadata',
-      label,
-      metadata,
-    });
-    return this;
-  }
-
-  collectFrom(utxos) {
-    this._operations.push({
-      type: 'collect_from',
-      collect_utxos: utxos,
-    });
-    return this;
-  }
-
-  // Staking
-  registerStakeAddress(address) {
-    this._operations.push({ type: 'register_stake_address', address });
-    return this;
-  }
-
-  deregisterStakeAddress(address, refundAddress = null) {
-    const op = { type: 'deregister_stake_address', address };
-    if (refundAddress) op.refund_address = refundAddress;
-    this._operations.push(op);
-    return this;
-  }
-
-  delegateTo(address, poolId) {
-    this._operations.push({ type: 'delegate_to', address, pool_id: poolId });
-    return this;
-  }
-
-  withdraw(rewardAddress, amount, receiver = null) {
-    const op = { type: 'withdraw', reward_address: rewardAddress, amount: String(amount) };
-    if (receiver) op.receiver = receiver;
-    this._operations.push(op);
-    return this;
-  }
-
-  // DRep
-  registerDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
-    const op = { type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  unregisterDRep(credentialHash, credentialType = 'key', { refundAddress, refundAmount } = {}) {
-    const op = { type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType };
-    if (refundAddress) op.refund_address = refundAddress;
-    if (refundAmount != null) op.refund_amount = String(refundAmount);
-    this._operations.push(op);
-    return this;
-  }
-
-  updateDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
-    const op = { type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Voting
-  delegateVotingPowerTo(address, drepType, drepHash = null) {
-    const op = { type: 'delegate_voting_power_to', address, drep_type: drepType };
-    if (drepHash) op.drep_hash = drepHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
-      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Governance
-  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, options = {}) {
-    const op = {
-      type: 'create_proposal', gov_action_type: govActionType,
-      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
-    };
-    if (options.withdrawals) op.withdrawals = options.withdrawals;
-    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
-    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
-    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
-    if (options.newMembers) op.new_members = options.newMembers;
-    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
-    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
-    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
-    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
-    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
-    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
-    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
-    if (options.policyHash) op.policy_hash = options.policyHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Pool operations
-  registerPool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
-               rewardAddress, poolOwners, options = {}) {
-    const op = {
-      type: 'register_pool', operator, vrf_key_hash: vrfKeyHash,
-      pledge: String(pledge), cost: String(cost),
-      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
-      reward_address: rewardAddress, pool_owners: poolOwners,
-    };
-    if (options.relays) op.relays = options.relays;
-    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
-    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  updatePool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
-             rewardAddress, poolOwners, options = {}) {
-    const op = {
-      type: 'update_pool', operator, vrf_key_hash: vrfKeyHash,
-      pledge: String(pledge), cost: String(cost),
-      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
-      reward_address: rewardAddress, pool_owners: poolOwners,
-    };
-    if (options.relays) op.relays = options.relays;
-    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
-    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  retirePool(poolId, epoch) {
-    this._operations.push({ type: 'retire_pool', pool_id: poolId, epoch });
-    return this;
-  }
-
-  // Treasury donation
-  donateToTreasury(treasuryValue, donationAmount) {
-    this._operations.push({
-      type: 'donate_to_treasury',
-      treasury_value: String(treasuryValue),
-      donation_amount: String(donationAmount),
-    });
-    return this;
-  }
-
-  // Native script attachment
-  attachNativeScript(scriptJson) {
-    this._operations.push({
-      type: 'attach_native_script',
-      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
-    });
-    return this;
-  }
-
-  from(address) {
-    this._from = address;
-    return this;
-  }
-
-  changeAddress(address) {
-    this._changeAddress = address;
-    return this;
-  }
-
-  feePayer(address) {
-    this._feePayer = address;
-    return this;
-  }
-
-  withUtxos(utxos) {
-    this._utxos = utxos;
-    return this;
-  }
-
-  withProtocolParams(params) {
-    this._protocolParams = params;
-    return this;
-  }
-
-  validFrom(slot) {
-    this._validity.valid_from = slot;
-    return this;
-  }
-
-  validTo(slot) {
-    this._validity.valid_to = slot;
-    return this;
-  }
-
-  mergeOutputs(merge) {
-    this._mergeOutputs = merge;
-    return this;
-  }
-
-  signerCount(count) {
-    this._signerCount = count;
-    return this;
-  }
-
-  build(providerConfig = null) {
-    const spec = {
-      operations: this._operations,
-      from: this._from,
-      signer_count: this._signerCount,
-    };
-
-    if (providerConfig) {
-      spec.provider = { name: providerConfig.name, url: providerConfig.url };
-      if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
-      if (providerConfig.enableCostEvaluation !== undefined) spec.provider.enable_cost_evaluation = providerConfig.enableCostEvaluation;
-      if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
-    } else {
-      spec.utxos = this._utxos;
-      spec.protocol_params = this._protocolParams;
-    }
-
-    if (this._changeAddress) spec.change_address = this._changeAddress;
-    if (this._feePayer) spec.fee_payer = this._feePayer;
-    if (Object.keys(this._validity).length > 0) spec.validity = this._validity;
-    if (this._mergeOutputs !== null) spec.merge_outputs = this._mergeOutputs;
-
-    const specJson = JSON.stringify(spec);
-    const rc = this._b._lib.ccl_quicktx_build(this._b._thread, cstr(specJson));
-    return JSON.parse(this._b._check(rc));
-  }
-
-  async buildWithProvider(provider) {
-    if (this._utxos === null && this._from) {
-      this._utxos = await provider.getUtxos(this._from);
-    }
-    if (this._protocolParams === null) {
-      this._protocolParams = await provider.getProtocolParams();
-    }
-    return this.build();
-  }
-}
-
-export class Tx {
-  constructor() {
-    this._operations = [];
-    this._from = null;
-    this._changeAddress = null;
-  }
-
-  payToAddress(address, ...args) {
-    let amounts = args;
-    let options = {};
-    if (args.length > 0) {
-      const last = args[args.length - 1];
-      if (last && typeof last === 'object' && !last.unit) {
-        options = args[args.length - 1];
-        amounts = args.slice(0, -1);
-      }
-    }
-    const op = {
-      type: 'pay_to_address',
-      address,
-      amounts: [...amounts],
-    };
-    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
-    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
-    const op = {
-      type: 'pay_to_contract',
-      address,
-      amounts: Array.isArray(amounts) ? amounts : [amounts],
-    };
-    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
-    if (datumHash) op.datum_hash = datumHash;
-    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
-    if (scriptRefType) op.script_ref_type = scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  mintAssets(scriptJson, assets, receiver) {
-    this._operations.push({
-      type: 'mint_assets',
-      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
-      assets,
-      receiver,
-    });
-    return this;
-  }
-
-  attachMetadata(label, metadata) {
-    this._operations.push({
-      type: 'attach_metadata',
-      label,
-      metadata,
-    });
-    return this;
-  }
-
-  collectFrom(utxos) {
-    this._operations.push({
-      type: 'collect_from',
-      collect_utxos: utxos,
-    });
-    return this;
-  }
-
-  // Staking
-  registerStakeAddress(address) {
-    this._operations.push({ type: 'register_stake_address', address });
-    return this;
-  }
-
-  deregisterStakeAddress(address, refundAddress = null) {
-    const op = { type: 'deregister_stake_address', address };
-    if (refundAddress) op.refund_address = refundAddress;
-    this._operations.push(op);
-    return this;
-  }
-
-  delegateTo(address, poolId) {
-    this._operations.push({ type: 'delegate_to', address, pool_id: poolId });
-    return this;
-  }
-
-  withdraw(rewardAddress, amount, receiver = null) {
-    const op = { type: 'withdraw', reward_address: rewardAddress, amount: String(amount) };
-    if (receiver) op.receiver = receiver;
-    this._operations.push(op);
-    return this;
-  }
-
-  // DRep
-  registerDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
-    const op = { type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  unregisterDRep(credentialHash, credentialType = 'key', { refundAddress, refundAmount } = {}) {
-    const op = { type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType };
-    if (refundAddress) op.refund_address = refundAddress;
-    if (refundAmount != null) op.refund_amount = String(refundAmount);
-    this._operations.push(op);
-    return this;
-  }
-
-  updateDRep(credentialHash, credentialType = 'key', { anchorUrl, anchorDataHash } = {}) {
-    const op = { type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Voting
-  delegateVotingPowerTo(address, drepType, drepHash = null) {
-    const op = { type: 'delegate_voting_power_to', address, drep_type: drepType };
-    if (drepHash) op.drep_hash = drepHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
-      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Governance
-  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, options = {}) {
-    const op = {
-      type: 'create_proposal', gov_action_type: govActionType,
-      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
-    };
-    if (options.withdrawals) op.withdrawals = options.withdrawals;
-    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
-    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
-    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
-    if (options.newMembers) op.new_members = options.newMembers;
-    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
-    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
-    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
-    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
-    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
-    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
-    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
-    if (options.policyHash) op.policy_hash = options.policyHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Pool operations
-  registerPool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
-               rewardAddress, poolOwners, options = {}) {
-    const op = {
-      type: 'register_pool', operator, vrf_key_hash: vrfKeyHash,
-      pledge: String(pledge), cost: String(cost),
-      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
-      reward_address: rewardAddress, pool_owners: poolOwners,
-    };
-    if (options.relays) op.relays = options.relays;
-    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
-    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  updatePool(operator, vrfKeyHash, pledge, cost, marginNumerator, marginDenominator,
-             rewardAddress, poolOwners, options = {}) {
-    const op = {
-      type: 'update_pool', operator, vrf_key_hash: vrfKeyHash,
-      pledge: String(pledge), cost: String(cost),
-      margin_numerator: String(marginNumerator), margin_denominator: String(marginDenominator),
-      reward_address: rewardAddress, pool_owners: poolOwners,
-    };
-    if (options.relays) op.relays = options.relays;
-    if (options.poolMetadataUrl) op.pool_metadata_url = options.poolMetadataUrl;
-    if (options.poolMetadataHash) op.pool_metadata_hash = options.poolMetadataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  retirePool(poolId, epoch) {
-    this._operations.push({ type: 'retire_pool', pool_id: poolId, epoch });
-    return this;
-  }
-
-  // Treasury donation
-  donateToTreasury(treasuryValue, donationAmount) {
-    this._operations.push({
-      type: 'donate_to_treasury',
-      treasury_value: String(treasuryValue),
-      donation_amount: String(donationAmount),
-    });
-    return this;
-  }
-
-  // Native script attachment
-  attachNativeScript(scriptJson) {
-    this._operations.push({
-      type: 'attach_native_script',
-      script_json: typeof scriptJson === 'string' ? scriptJson : JSON.stringify(scriptJson),
-    });
-    return this;
-  }
-
-  from(address) {
-    this._from = address;
-    return this;
-  }
-
-  changeAddress(address) {
-    this._changeAddress = address;
-    return this;
-  }
-
-  _toSpec() {
-    const spec = {
-      from: this._from,
-      operations: this._operations,
-    };
-    if (this._changeAddress) spec.change_address = this._changeAddress;
-    return spec;
-  }
-}
-
-export class ComposeTxBuilder {
-  constructor(bridge, txs) {
-    this._b = bridge;
-    this._txs = [...txs];
-    this._feePayer = null;
-    this._utxos = null;
-    this._protocolParams = null;
-    this._validity = {};
-    this._mergeOutputs = null;
-    this._signerCount = null;
-  }
-
-  feePayer(address) {
-    this._feePayer = address;
-    return this;
-  }
-
-  withUtxos(utxos) {
-    this._utxos = utxos;
-    return this;
-  }
-
-  withProtocolParams(params) {
-    this._protocolParams = params;
-    return this;
-  }
-
-  validFrom(slot) {
-    this._validity.valid_from = slot;
-    return this;
-  }
-
-  validTo(slot) {
-    this._validity.valid_to = slot;
-    return this;
-  }
-
-  mergeOutputs(merge) {
-    this._mergeOutputs = merge;
-    return this;
-  }
-
-  signerCount(count) {
-    this._signerCount = count;
-    return this;
-  }
-
-  build(providerConfig = null) {
-    const spec = {
-      transactions: this._txs.map(tx => tx._toSpec()),
-      fee_payer: this._feePayer,
-    };
-
-    if (providerConfig) {
-      spec.provider = { name: providerConfig.name, url: providerConfig.url };
-      if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
-      if (providerConfig.enableCostEvaluation !== undefined) spec.provider.enable_cost_evaluation = providerConfig.enableCostEvaluation;
-      if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
-    } else {
-      spec.utxos = this._utxos;
-      spec.protocol_params = this._protocolParams;
-    }
-
-    if (this._signerCount !== null) spec.signer_count = this._signerCount;
-    if (Object.keys(this._validity).length > 0) spec.validity = this._validity;
-    if (this._mergeOutputs !== null) spec.merge_outputs = this._mergeOutputs;
-
-    const specJson = JSON.stringify(spec);
-    const rc = this._b._lib.ccl_quicktx_build(this._b._thread, cstr(specJson));
-    return JSON.parse(this._b._check(rc));
-  }
-
-  async buildWithProvider(provider) {
-    if (this._utxos === null) {
-      const addresses = new Set();
-      for (const tx of this._txs) {
-        if (tx._from) addresses.add(tx._from);
-      }
-      const allUtxos = [];
-      for (const addr of addresses) {
-        const utxos = await provider.getUtxos(addr);
-        allUtxos.push(...utxos);
-      }
-      this._utxos = allUtxos;
-    }
-    if (this._protocolParams === null) {
-      this._protocolParams = await provider.getProtocolParams();
-    }
-    return this.build();
-  }
-}
-
-export class ScriptTxBuilder {
-  constructor(bridge) {
-    this._b = bridge;
-    this._operations = [];
-    this._from = null;
-    this._changeAddress = null;
-    this._feePayer = null;
-    this._utxos = null;
-    this._protocolParams = null;
-    this._validity = {};
-    this._mergeOutputs = null;
-    this._signerCount = 1;
-    this._changeDatumCborHex = null;
-    this._changeDatumHash = null;
-  }
-
-  payToAddress(address, ...args) {
-    let amounts = args;
-    let options = {};
-    if (args.length > 0) {
-      const last = args[args.length - 1];
-      if (last && typeof last === 'object' && !last.unit) {
-        options = args[args.length - 1];
-        amounts = args.slice(0, -1);
-      }
-    }
-    const op = {
-      type: 'pay_to_address',
-      address,
-      amounts: [...amounts],
-    };
-    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
-    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
-    const op = {
-      type: 'pay_to_contract',
-      address,
-      amounts: Array.isArray(amounts) ? amounts : [amounts],
-    };
-    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
-    if (datumHash) op.datum_hash = datumHash;
-    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
-    if (scriptRefType) op.script_ref_type = scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  attachMetadata(label, metadata) {
-    this._operations.push({
-      type: 'attach_metadata',
-      label,
-      metadata,
-    });
-    return this;
-  }
-
-  collectFrom(utxos) {
-    this._operations.push({
-      type: 'collect_from',
-      collect_utxos: utxos,
-    });
-    return this;
-  }
-
-  collectFromScript(utxos, redeemerCborHex, datumCborHex = null) {
-    const op = {
-      type: 'collect_from',
-      collect_utxos: utxos,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
-    this._operations.push(op);
-    return this;
-  }
-
-  readFrom(referenceInputs) {
-    this._operations.push({
-      type: 'read_from',
-      reference_inputs: referenceInputs.map(ri => ({ tx_hash: ri.txHash, output_index: ri.outputIndex })),
-    });
-    return this;
-  }
-
-  mintPlutusAssets(scriptCborHex, scriptType, assets, redeemerCborHex, receiver = null, outputDatumCborHex = null) {
-    const op = {
-      type: 'mint_plutus_assets',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-      assets,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (receiver) op.receiver = receiver;
-    if (outputDatumCborHex) op.output_datum_cbor_hex = outputDatumCborHex;
-    this._operations.push(op);
-    return this;
-  }
-
-  attachSpendingValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_spending_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachCertificateValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_certificate_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachRewardValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_reward_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachProposingValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_proposing_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachVotingValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_voting_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  // Staking (with redeemer)
-  deregisterStakeAddress(address, redeemerCborHex, refundAddress = null) {
-    const op = { type: 'deregister_stake_address', address, redeemer_cbor_hex: redeemerCborHex };
-    if (refundAddress) op.refund_address = refundAddress;
-    this._operations.push(op);
-    return this;
-  }
-
-  delegateTo(address, poolId, redeemerCborHex) {
-    this._operations.push({
-      type: 'delegate_to', address, pool_id: poolId, redeemer_cbor_hex: redeemerCborHex,
-    });
-    return this;
-  }
-
-  withdraw(rewardAddress, amount, redeemerCborHex, receiver = null) {
-    const op = {
-      type: 'withdraw', reward_address: rewardAddress, amount: String(amount),
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (receiver) op.receiver = receiver;
-    this._operations.push(op);
-    return this;
-  }
-
-  // DRep (with redeemer)
-  registerDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  unregisterDRep(credentialHash, credentialType, redeemerCborHex, { refundAddress, refundAmount } = {}) {
-    const op = {
-      type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (refundAddress) op.refund_address = refundAddress;
-    if (refundAmount != null) op.refund_amount = String(refundAmount);
-    this._operations.push(op);
-    return this;
-  }
-
-  updateDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Voting (with redeemer)
-  delegateVotingPowerTo(address, drepType, drepHash, redeemerCborHex) {
-    this._operations.push({
-      type: 'delegate_voting_power_to', address, drep_type: drepType,
-      drep_hash: drepHash, redeemer_cbor_hex: redeemerCborHex,
-    });
-    return this;
-  }
-
-  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
-      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Governance (with redeemer)
-  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, redeemerCborHex, options = {}) {
-    const op = {
-      type: 'create_proposal', gov_action_type: govActionType,
-      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (options.withdrawals) op.withdrawals = options.withdrawals;
-    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
-    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
-    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
-    if (options.newMembers) op.new_members = options.newMembers;
-    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
-    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
-    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
-    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
-    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
-    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
-    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
-    if (options.policyHash) op.policy_hash = options.policyHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Treasury donation (with redeemer)
-  donateToTreasury(treasuryValue, donationAmount, redeemerCborHex) {
-    this._operations.push({
-      type: 'donate_to_treasury',
-      treasury_value: String(treasuryValue),
-      donation_amount: String(donationAmount),
-      redeemer_cbor_hex: redeemerCborHex,
-    });
-    return this;
-  }
-
-  from(address) {
-    this._from = address;
-    return this;
-  }
-
-  changeAddress(address) {
-    this._changeAddress = address;
-    return this;
-  }
-
-  changeDatum(datumCborHex) {
-    this._changeDatumCborHex = datumCborHex;
-    return this;
-  }
-
-  changeDatumHash(hash) {
-    this._changeDatumHash = hash;
-    return this;
-  }
-
-  feePayer(address) {
-    this._feePayer = address;
-    return this;
-  }
-
-  withUtxos(utxos) {
-    this._utxos = utxos;
-    return this;
-  }
-
-  withProtocolParams(params) {
-    this._protocolParams = params;
-    return this;
-  }
-
-  validFrom(slot) {
-    this._validity.valid_from = slot;
-    return this;
-  }
-
-  validTo(slot) {
-    this._validity.valid_to = slot;
-    return this;
-  }
-
-  mergeOutputs(merge) {
-    this._mergeOutputs = merge;
-    return this;
-  }
-
-  signerCount(count) {
-    this._signerCount = count;
-    return this;
-  }
-
-  build(providerConfig = null) {
-    const spec = {
-      tx_type: 'script_tx',
-      operations: this._operations,
-      from: this._from,
-      signer_count: this._signerCount,
-    };
-
-    if (providerConfig) {
-      spec.provider = { name: providerConfig.name, url: providerConfig.url };
-      if (providerConfig.apiKey) spec.provider.api_key = providerConfig.apiKey;
-      if (providerConfig.enableCostEvaluation !== undefined) spec.provider.enable_cost_evaluation = providerConfig.enableCostEvaluation;
-      if (this._protocolParams !== null) spec.protocol_params = this._protocolParams;
-    } else {
-      spec.utxos = this._utxos;
-      spec.protocol_params = this._protocolParams;
-    }
-
-    if (this._changeAddress) spec.change_address = this._changeAddress;
-    if (this._feePayer) spec.fee_payer = this._feePayer;
-    if (Object.keys(this._validity).length > 0) spec.validity = this._validity;
-    if (this._mergeOutputs !== null) spec.merge_outputs = this._mergeOutputs;
-    if (this._changeDatumCborHex) spec.change_datum_cbor_hex = this._changeDatumCborHex;
-    if (this._changeDatumHash) spec.change_datum_hash = this._changeDatumHash;
-
-    const specJson = JSON.stringify(spec);
-    const rc = this._b._lib.ccl_quicktx_build(this._b._thread, cstr(specJson));
-    return JSON.parse(this._b._check(rc));
-  }
-
-  async buildWithProvider(provider) {
-    if (this._utxos === null && this._from) {
-      this._utxos = await provider.getUtxos(this._from);
-    }
-    if (this._protocolParams === null) {
-      this._protocolParams = await provider.getProtocolParams();
-    }
-    return this.build();
-  }
-}
-
-export class ScriptTx {
-  constructor() {
-    this._operations = [];
-    this._from = null;
-    this._changeAddress = null;
-    this._changeDatumCborHex = null;
-    this._changeDatumHash = null;
-  }
-
-  payToAddress(address, ...args) {
-    let amounts = args;
-    let options = {};
-    if (args.length > 0) {
-      const last = args[args.length - 1];
-      if (last && typeof last === 'object' && !last.unit) {
-        options = args[args.length - 1];
-        amounts = args.slice(0, -1);
-      }
-    }
-    const op = {
-      type: 'pay_to_address',
-      address,
-      amounts: [...amounts],
-    };
-    if (options.scriptRefCborHex) op.script_ref_cbor_hex = options.scriptRefCborHex;
-    if (options.scriptRefType) op.script_ref_type = options.scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  payToContract(address, amounts, { datumCborHex, datumHash, scriptRefCborHex, scriptRefType } = {}) {
-    const op = {
-      type: 'pay_to_contract',
-      address,
-      amounts: Array.isArray(amounts) ? amounts : [amounts],
-    };
-    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
-    if (datumHash) op.datum_hash = datumHash;
-    if (scriptRefCborHex) op.script_ref_cbor_hex = scriptRefCborHex;
-    if (scriptRefType) op.script_ref_type = scriptRefType;
-    this._operations.push(op);
-    return this;
-  }
-
-  attachMetadata(label, metadata) {
-    this._operations.push({
-      type: 'attach_metadata',
-      label,
-      metadata,
-    });
-    return this;
-  }
-
-  collectFrom(utxos) {
-    this._operations.push({
-      type: 'collect_from',
-      collect_utxos: utxos,
-    });
-    return this;
-  }
-
-  collectFromScript(utxos, redeemerCborHex, datumCborHex = null) {
-    const op = {
-      type: 'collect_from',
-      collect_utxos: utxos,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (datumCborHex) op.datum_cbor_hex = datumCborHex;
-    this._operations.push(op);
-    return this;
-  }
-
-  readFrom(referenceInputs) {
-    this._operations.push({
-      type: 'read_from',
-      reference_inputs: referenceInputs.map(ri => ({ tx_hash: ri.txHash, output_index: ri.outputIndex })),
-    });
-    return this;
-  }
-
-  mintPlutusAssets(scriptCborHex, scriptType, assets, redeemerCborHex, receiver = null, outputDatumCborHex = null) {
-    const op = {
-      type: 'mint_plutus_assets',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-      assets,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (receiver) op.receiver = receiver;
-    if (outputDatumCborHex) op.output_datum_cbor_hex = outputDatumCborHex;
-    this._operations.push(op);
-    return this;
-  }
-
-  attachSpendingValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_spending_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachCertificateValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_certificate_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachRewardValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_reward_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachProposingValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_proposing_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  attachVotingValidator(scriptCborHex, scriptType) {
-    this._operations.push({
-      type: 'attach_voting_validator',
-      script_cbor_hex: scriptCborHex,
-      script_type: scriptType,
-    });
-    return this;
-  }
-
-  // Staking (with redeemer)
-  deregisterStakeAddress(address, redeemerCborHex, refundAddress = null) {
-    const op = { type: 'deregister_stake_address', address, redeemer_cbor_hex: redeemerCborHex };
-    if (refundAddress) op.refund_address = refundAddress;
-    this._operations.push(op);
-    return this;
-  }
-
-  delegateTo(address, poolId, redeemerCborHex) {
-    this._operations.push({
-      type: 'delegate_to', address, pool_id: poolId, redeemer_cbor_hex: redeemerCborHex,
-    });
-    return this;
-  }
-
-  withdraw(rewardAddress, amount, redeemerCborHex, receiver = null) {
-    const op = {
-      type: 'withdraw', reward_address: rewardAddress, amount: String(amount),
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (receiver) op.receiver = receiver;
-    this._operations.push(op);
-    return this;
-  }
-
-  // DRep (with redeemer)
-  registerDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'register_drep', credential_hash: credentialHash, credential_type: credentialType,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  unregisterDRep(credentialHash, credentialType, redeemerCborHex, { refundAddress, refundAmount } = {}) {
-    const op = {
-      type: 'unregister_drep', credential_hash: credentialHash, credential_type: credentialType,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (refundAddress) op.refund_address = refundAddress;
-    if (refundAmount != null) op.refund_amount = String(refundAmount);
-    this._operations.push(op);
-    return this;
-  }
-
-  updateDRep(credentialHash, credentialType, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'update_drep', credential_hash: credentialHash, credential_type: credentialType,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Voting (with redeemer)
-  delegateVotingPowerTo(address, drepType, drepHash, redeemerCborHex) {
-    this._operations.push({
-      type: 'delegate_voting_power_to', address, drep_type: drepType,
-      drep_hash: drepHash, redeemer_cbor_hex: redeemerCborHex,
-    });
-    return this;
-  }
-
-  createVote(voterType, voterHash, govActionTxHash, govActionIndex, vote, redeemerCborHex, { anchorUrl, anchorDataHash } = {}) {
-    const op = {
-      type: 'create_vote', voter_type: voterType, voter_hash: voterHash,
-      gov_action_tx_hash: govActionTxHash, gov_action_index: govActionIndex, vote,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (anchorUrl) op.anchor_url = anchorUrl;
-    if (anchorDataHash) op.anchor_data_hash = anchorDataHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Governance (with redeemer)
-  createProposal(govActionType, returnAddress, anchorUrl, anchorDataHash, redeemerCborHex, options = {}) {
-    const op = {
-      type: 'create_proposal', gov_action_type: govActionType,
-      return_address: returnAddress, anchor_url: anchorUrl, anchor_data_hash: anchorDataHash,
-      redeemer_cbor_hex: redeemerCborHex,
-    };
-    if (options.withdrawals) op.withdrawals = options.withdrawals;
-    if (options.govActionTxHash) op.gov_action_tx_hash = options.govActionTxHash;
-    if (options.govActionIndex != null) op.gov_action_index = options.govActionIndex;
-    if (options.membersToRemove) op.members_to_remove = options.membersToRemove;
-    if (options.newMembers) op.new_members = options.newMembers;
-    if (options.quorumNumerator != null) op.quorum_numerator = String(options.quorumNumerator);
-    if (options.quorumDenominator != null) op.quorum_denominator = String(options.quorumDenominator);
-    if (options.constitutionAnchorUrl) op.constitution_anchor_url = options.constitutionAnchorUrl;
-    if (options.constitutionAnchorDataHash) op.constitution_anchor_data_hash = options.constitutionAnchorDataHash;
-    if (options.constitutionScriptHash) op.constitution_script_hash = options.constitutionScriptHash;
-    if (options.protocolVersionMajor != null) op.protocol_version_major = options.protocolVersionMajor;
-    if (options.protocolVersionMinor != null) op.protocol_version_minor = options.protocolVersionMinor;
-    if (options.policyHash) op.policy_hash = options.policyHash;
-    this._operations.push(op);
-    return this;
-  }
-
-  // Treasury donation (with redeemer)
-  donateToTreasury(treasuryValue, donationAmount, redeemerCborHex) {
-    this._operations.push({
-      type: 'donate_to_treasury',
-      treasury_value: String(treasuryValue),
-      donation_amount: String(donationAmount),
-      redeemer_cbor_hex: redeemerCborHex,
-    });
-    return this;
-  }
-
-  from(address) {
-    this._from = address;
-    return this;
-  }
-
-  changeAddress(address) {
-    this._changeAddress = address;
-    return this;
-  }
-
-  changeDatum(datumCborHex) {
-    this._changeDatumCborHex = datumCborHex;
-    return this;
-  }
-
-  changeDatumHash(hash) {
-    this._changeDatumHash = hash;
-    return this;
-  }
-
-  _toSpec() {
-    const spec = {
-      tx_type: 'script_tx',
-      from: this._from,
-      operations: this._operations,
-    };
-    if (this._changeAddress) spec.change_address = this._changeAddress;
-    if (this._changeDatumCborHex) spec.change_datum_cbor_hex = this._changeDatumCborHex;
-    if (this._changeDatumHash) spec.change_datum_hash = this._changeDatumHash;
-    return spec;
+    return this.build(txplanYaml, utxos, protocolParams, execUnits);
   }
 }

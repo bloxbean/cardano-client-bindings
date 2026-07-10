@@ -1,9 +1,9 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   test:
@@ -19,11 +19,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: graalvm/setup-graalvm@v1
         with:
-          java-version: '25'
+          java-version: '25.0.3'
           distribution: 'graalvm'
       - uses: oven-sh/setup-bun@v2
-      - name: Install pytest
-        run: python3 -m pip install --break-system-packages pytest
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Python test deps
+        run: python3 -m pip install --break-system-packages pytest pyyaml build
       - name: Build native library
         run: ./gradlew :core:nativeCompile
       - name: Run JVM tests
@@ -32,9 +36,106 @@ jobs:
         run: ./gradlew :native-test:test
       - name: Run Python tests
         run: ./gradlew :wrappers:python:test
+      # Prove the bundled wheel actually works: build it (lib staged into ccl/_libs/), install it
+      # into a clean venv, and load the native lib with NO CCL_LIB_PATH / library-path env vars.
+      - name: Build & verify the bundled Python wheel
+        run: |
+          set -eux
+          ./gradlew :wrappers:python:wheel
+          python3 -m venv "$RUNNER_TEMP/wheelvenv"
+          "$RUNNER_TEMP/wheelvenv/bin/pip" install --quiet wrappers/python/dist/*.whl
+          cd "$RUNNER_TEMP" && env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+            "$RUNNER_TEMP/wheelvenv/bin/python" -c "import ccl; assert ccl.CclLib().version(); ccl.CclLib().account.create(ccl.CclLib.TESTNET); print('bundled wheel OK, no CCL_LIB_PATH')"
+      - name: Run Go tests
+        run: ./gradlew :wrappers:go:test
+      # Prove the Go wrapper is distributable: it builds as pure Go (CGO_ENABLED=0 — no cgo, no C
+      # toolchain), and resolves libccl at runtime with NO CCL_LIB_PATH. The lib is seeded into the
+      # per-version cache here (standing in for the release download, which needs a published
+      # release); the loader then finds it exactly as a `go get` consumer would. Mirrors the
+      # Python wheel / npm package / Rust crate verifies above.
+      - name: Build & verify the Go wrapper (pure Go, no library env vars)
+        run: |
+          set -eux
+          (cd wrappers/go && CGO_ENABLED=0 go build ./...)
+          case "$RUNNER_OS" in
+            Linux) CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/cardano-client-bindings/v0.1.0-preview1"; LIB=libccl.so ;;
+            macOS) CACHE="$HOME/Library/Caches/cardano-client-bindings/v0.1.0-preview1"; LIB=libccl.dylib ;;
+          esac
+          mkdir -p "$CACHE"
+          cp "core/build/native/nativeCompile/$LIB" "$CACHE/$LIB"
+          cd wrappers/go
+          env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH CGO_ENABLED=0 \
+            go run ./examples/account | head -1
+          echo "Go wrapper OK — pure Go, resolved from cache, no CCL_LIB_PATH"
+      - name: Run Rust tests
+        run: ./gradlew :wrappers:rust:test
+      # Prove the crate loads the native lib with NO library env vars: build.rs stages the lib
+      # (from the in-tree build here) and sets an rpath, so the example runs with CCL_LIB_PATH /
+      # DYLD / LD unset. Mirrors the Python wheel / npm package verify.
+      - name: Verify the Rust crate loads with no library env vars
+        run: |
+          set -eux
+          cd wrappers/rust
+          env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+            cargo run --quiet --example account | head -1
+      - name: Run JS tests
+        run: ./gradlew :wrappers:js:test
+      # Prove the bundled npm package works: pack it (lib staged into libs/), install it into a clean
+      # project, and load the native lib with NO CCL_LIB_PATH / library-path env vars.
+      - name: Build & verify the bundled npm package
+        run: |
+          set -eux
+          ./gradlew :wrappers:js:pack
+          TGZ="$(ls "$PWD"/wrappers/js/*.tgz)"
+          WORK="$RUNNER_TEMP/jsverify"; rm -rf "$WORK"; mkdir -p "$WORK"; cd "$WORK"
+          echo '{"name":"verify","type":"module"}' > package.json
+          bun add "$TGZ"
+          env -u CCL_LIB_PATH -u DYLD_LIBRARY_PATH -u LD_LIBRARY_PATH \
+            bun -e "import {CclBridge} from '@bloxbean/cardano-client-lib'; const b=new CclBridge(); if(!b.version()) throw new Error('no version'); b.account.create(1); console.log('bundled npm package OK, no CCL_LIB_PATH')"
+
+  # Windows: verify the native library (libccl.dll) builds, core logic passes, and all four
+  # language wrappers run their test suites against the DLL.
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25.0.3'
+          distribution: 'graalvm'
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Python test deps
+        # Windows Python is `python`, not `python3`.
+        run: python -m pip install pytest pyyaml
+      - name: Build native library (libccl.dll)
+        run: ./gradlew :core:nativeCompile
+      - name: Run JVM tests
+        run: ./gradlew :core:test
+      - name: Run Python tests
+        run: ./gradlew :wrappers:python:test
       - name: Run Go tests
         run: ./gradlew :wrappers:go:test
       - name: Run Rust tests
-        run: ./gradlew :wrappers:rust:test
+        # Run under PowerShell, not the job's default git-bash: git-bash puts its /usr/bin (which has
+        # a GNU coreutils `link.exe`) on PATH ahead of the MSVC linker, so rustc's link step invokes
+        # the wrong `link.exe` and fails. PowerShell's PATH has no git /usr/bin, so rustc finds MSVC's.
+        shell: pwsh
+        run: .\gradlew.bat :wrappers:rust:test
       - name: Run JS tests
         run: ./gradlew :wrappers:js:test
+
+  # Fast static guard (no native build): every wrapper must bind all core @CEntryPoint functions,
+  # so a newly added/renamed entry point can't silently be missing from one language.
+  entrypoint-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check @CEntryPoint parity across all wrappers
+        run: python3 scripts/check_entrypoint_parity.py

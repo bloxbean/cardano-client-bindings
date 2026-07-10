@@ -17,5 +17,11 @@ task test(type: Exec) {
     environment 'DYLD_LIBRARY_PATH', nativeDir
     environment 'LD_LIBRARY_PATH', nativeDir
 
-    commandLine 'bash', '-c', 'cargo test -- --test-threads=1'
+    // Invoke `cargo` directly on Windows rather than via `bash` (a bare `bash` resolves to WSL on
+    // Windows runners, which has no distro).
+    if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
+        commandLine 'cargo', 'test', '--features', 'providers', '--', '--test-threads=1'
+    } else {
+        commandLine 'bash', '-c', 'cargo test --features providers -- --test-threads=1'
+    }
 }

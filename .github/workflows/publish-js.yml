@@ -1,0 +1,67 @@
+name: Publish npm packages
+
+# Publishes the per-platform npm packages (@bloxbean/cardano-client-lib-<platform>) plus the main
+# @bloxbean/cardano-client-lib package (see docs/adr/0012) on a v* tag — when repo variable
+# NPM_PUBLISH=true — via npm trusted publishing (OIDC, no token secret). The build/validation
+# jobs live in build-js-packages.yml (run on PRs by publish-js-dry-run.yml); workflow_dispatch
+# runs them here as a manual dry run (artifacts only, publish skipped).
+# One-time npm trusted-publisher setup: see wrappers/js/scripts/bootstrap-npm-trusted-publishing.sh.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-js-packages.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Trusted publishing: npm exchanges the GitHub OIDC token for publish credentials — no
+    # npm token secret. Requires npm >= 11.5.1 and node >= 22.14. The publish commands must
+    # stay in THIS file: npm's trusted publisher validates the top-level workflow filename.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PKG_VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@latest
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npmpkg-*
+          merge-multiple: true
+          path: dist
+      - name: Unpack platform packages
+        run: |
+          set -eux
+          for t in dist/platform-*.tgz; do
+            d="pkgs/$(basename "$t" .tgz)"
+            mkdir -p "$d"
+            tar xzf "$t" -C "$d" --strip-components=1
+          done
+
+      # Publish only on a tag AND when an admin has enabled it. Platform packages first, then the
+      # main package (so its optionalDependencies already exist). Pre-release versions get a
+      # matching npm dist-tag so they never become `latest`.
+      - name: Publish to npm
+        if: startsWith(github.ref, 'refs/tags/') && vars.NPM_PUBLISH == 'true'
+        run: |
+          set -eux
+          rm -f wrappers/js/libs/libccl.*
+          NPM_TAG=latest
+          case "$PKG_VERSION" in
+            *-preview*|*-pre*|*-alpha*) NPM_TAG=preview ;;
+            *-beta*)                    NPM_TAG=beta ;;
+            *-rc*)                      NPM_TAG=next ;;
+          esac
+          for d in pkgs/platform-*; do npm publish "$d" --access public --provenance --tag "$NPM_TAG"; done
+          npm publish ./wrappers/js --access public --provenance --tag "$NPM_TAG"

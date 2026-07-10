@@ -45,6 +45,7 @@ export declare class CclBridge {
     accountGetPublicKey(mnemonic: string, networkId?: number, accountIndex?: number, addressIndex?: number): string;
     accountGetDrepId(mnemonic: string, networkId?: number, accountIndex?: number): string;
     accountSignTx(mnemonic: string, networkId: number, accountIndex: number, addressIndex: number, txCborHex: string): string;
+    accountSignTxWithKeys(mnemonic: string, networkId: number, accountIndex: number, addressIndex: number, txCborHex: string, keys: string[] | string): string;
 
     // Address
     addressInfo(bech32: string): AddressInfo;
@@ -86,249 +87,70 @@ export interface QuickTxResult {
     fee: string;
 }
 
-export interface AmountSpec {
-    unit: string;
-    quantity: string;
-}
-
-export declare class Amount {
-    static lovelace(quantity: number): AmountSpec;
-    static ada(adaAmount: number): AmountSpec;
-    static asset(unit: string, quantity: number): AmountSpec;
-}
-
-export interface ReferenceInput {
-    txHash: string;
-    outputIndex: number;
-}
-
-export interface MintAsset {
-    name: string;
-    quantity: string;
-}
-
-export interface ProviderConfig {
-    name: string;
-    url: string;
-    apiKey?: string;
-    enableCostEvaluation?: boolean;
-}
-
-export interface ProposalOptions {
-    withdrawals?: Array<{ reward_address: string; amount: string }>;
-    govActionTxHash?: string;
-    govActionIndex?: number;
-    membersToRemove?: string[];
-    newMembers?: Record<string, number>;
-    quorumNumerator?: number;
-    quorumDenominator?: number;
-    constitutionAnchorUrl?: string;
-    constitutionAnchorDataHash?: string;
-    constitutionScriptHash?: string;
-    protocolVersionMajor?: number;
-    protocolVersionMinor?: number;
-    policyHash?: string;
-}
-
-export interface PoolOptions {
-    relays?: Array<{ type: string; ipv4?: string; ipv6?: string; port?: number; dns_name?: string }>;
-    poolMetadataUrl?: string;
-    poolMetadataHash?: string;
-}
-
-export interface Relay {
-    type: string;
-    ipv4?: string;
-    ipv6?: string;
-    port?: number;
-    dns_name?: string;
-}
-
-export declare class TxBuilder {
-    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): TxBuilder;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): TxBuilder;
-    mintAssets(scriptJson: string | object, assets: Array<{ name: string; quantity: string }>, receiver: string): TxBuilder;
-    attachMetadata(label: number, metadata: any): TxBuilder;
-    collectFrom(utxos: any[]): TxBuilder;
-    // Staking
-    registerStakeAddress(address: string): TxBuilder;
-    deregisterStakeAddress(address: string, refundAddress?: string | null): TxBuilder;
-    delegateTo(address: string, poolId: string): TxBuilder;
-    withdraw(rewardAddress: string, amount: string | number, receiver?: string | null): TxBuilder;
-    // DRep
-    registerDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
-    unregisterDRep(credentialHash: string, credentialType?: string, options?: { refundAddress?: string; refundAmount?: string | number }): TxBuilder;
-    updateDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
-    // Voting
-    delegateVotingPowerTo(address: string, drepType: string, drepHash?: string | null): TxBuilder;
-    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, options?: { anchorUrl?: string; anchorDataHash?: string }): TxBuilder;
-    // Governance
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: ProposalOptions): TxBuilder;
-    // Pool operations
-    registerPool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): TxBuilder;
-    updatePool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): TxBuilder;
-    retirePool(poolId: string, epoch: number): TxBuilder;
-    // Treasury donation
-    donateToTreasury(treasuryValue: string | number, donationAmount: string | number): TxBuilder;
-    // Native script
-    attachNativeScript(scriptJson: string | object): TxBuilder;
-    from(address: string): TxBuilder;
-    changeAddress(address: string): TxBuilder;
-    feePayer(address: string): TxBuilder;
-    withUtxos(utxos: any[]): TxBuilder;
-    withProtocolParams(params: any): TxBuilder;
-    validFrom(slot: number): TxBuilder;
-    validTo(slot: number): TxBuilder;
-    mergeOutputs(merge: boolean): TxBuilder;
-    signerCount(count: number): TxBuilder;
-    build(providerConfig?: ProviderConfig | null): QuickTxResult;
-    buildWithProvider(provider: Provider): Promise<QuickTxResult>;
-}
-
-export declare class Tx {
-    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): Tx;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): Tx;
-    mintAssets(scriptJson: string | object, assets: Array<{ name: string; quantity: string }>, receiver: string): Tx;
-    attachMetadata(label: number, metadata: any): Tx;
-    collectFrom(utxos: any[]): Tx;
-    // Staking
-    registerStakeAddress(address: string): Tx;
-    deregisterStakeAddress(address: string, refundAddress?: string | null): Tx;
-    delegateTo(address: string, poolId: string): Tx;
-    withdraw(rewardAddress: string, amount: string | number, receiver?: string | null): Tx;
-    // DRep
-    registerDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
-    unregisterDRep(credentialHash: string, credentialType?: string, options?: { refundAddress?: string; refundAmount?: string | number }): Tx;
-    updateDRep(credentialHash: string, credentialType?: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
-    // Voting
-    delegateVotingPowerTo(address: string, drepType: string, drepHash?: string | null): Tx;
-    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, options?: { anchorUrl?: string; anchorDataHash?: string }): Tx;
-    // Governance
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, options?: ProposalOptions): Tx;
-    // Pool operations
-    registerPool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): Tx;
-    updatePool(operator: string, vrfKeyHash: string, pledge: string | number, cost: string | number, marginNumerator: string | number, marginDenominator: string | number, rewardAddress: string, poolOwners: string[], options?: PoolOptions): Tx;
-    retirePool(poolId: string, epoch: number): Tx;
-    // Treasury donation
-    donateToTreasury(treasuryValue: string | number, donationAmount: string | number): Tx;
-    // Native script
-    attachNativeScript(scriptJson: string | object): Tx;
-    from(address: string): Tx;
-    changeAddress(address: string): Tx;
-}
-
-export declare class ComposeTxBuilder {
-    feePayer(address: string): ComposeTxBuilder;
-    withUtxos(utxos: any[]): ComposeTxBuilder;
-    withProtocolParams(params: any): ComposeTxBuilder;
-    validFrom(slot: number): ComposeTxBuilder;
-    validTo(slot: number): ComposeTxBuilder;
-    mergeOutputs(merge: boolean): ComposeTxBuilder;
-    signerCount(count: number): ComposeTxBuilder;
-    build(providerConfig?: ProviderConfig | null): QuickTxResult;
-    buildWithProvider(provider: Provider): Promise<QuickTxResult>;
-}
-
-export declare class ScriptTxBuilder {
-    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): ScriptTxBuilder;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): ScriptTxBuilder;
-    attachMetadata(label: number, metadata: any): ScriptTxBuilder;
-    collectFrom(utxos: any[]): ScriptTxBuilder;
-    collectFromScript(utxos: any[], redeemerCborHex: string, datumCborHex?: string | null): ScriptTxBuilder;
-    readFrom(referenceInputs: ReferenceInput[]): ScriptTxBuilder;
-    mintPlutusAssets(scriptCborHex: string, scriptType: string, assets: MintAsset[], redeemerCborHex: string, receiver?: string | null, outputDatumCborHex?: string | null): ScriptTxBuilder;
-    attachSpendingValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
-    attachCertificateValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
-    attachRewardValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
-    attachProposingValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
-    attachVotingValidator(scriptCborHex: string, scriptType: string): ScriptTxBuilder;
-    // Staking (with redeemer)
-    deregisterStakeAddress(address: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTxBuilder;
-    delegateTo(address: string, poolId: string, redeemerCborHex: string): ScriptTxBuilder;
-    withdraw(rewardAddress: string, amount: string | number, redeemerCborHex: string, receiver?: string | null): ScriptTxBuilder;
-    // DRep (with redeemer)
-    registerDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
-    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { refundAddress?: string; refundAmount?: string | number }): ScriptTxBuilder;
-    updateDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
-    // Voting (with redeemer)
-    delegateVotingPowerTo(address: string, drepType: string, drepHash: string, redeemerCborHex: string): ScriptTxBuilder;
-    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTxBuilder;
-    // Governance (with redeemer)
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: ProposalOptions): ScriptTxBuilder;
-    // Treasury donation (with redeemer)
-    donateToTreasury(treasuryValue: string | number, donationAmount: string | number, redeemerCborHex: string): ScriptTxBuilder;
-    from(address: string): ScriptTxBuilder;
-    changeAddress(address: string): ScriptTxBuilder;
-    changeDatum(datumCborHex: string): ScriptTxBuilder;
-    changeDatumHash(hash: string): ScriptTxBuilder;
-    feePayer(address: string): ScriptTxBuilder;
-    withUtxos(utxos: any[]): ScriptTxBuilder;
-    withProtocolParams(params: any): ScriptTxBuilder;
-    validFrom(slot: number): ScriptTxBuilder;
-    validTo(slot: number): ScriptTxBuilder;
-    mergeOutputs(merge: boolean): ScriptTxBuilder;
-    signerCount(count: number): ScriptTxBuilder;
-    build(providerConfig?: ProviderConfig | null): QuickTxResult;
-    buildWithProvider(provider: Provider): Promise<QuickTxResult>;
-}
-
-export declare class ScriptTx {
-    payToAddress(address: string, ...amounts: (AmountSpec | { scriptRefCborHex?: string; scriptRefType?: string })[]): ScriptTx;
-    payToContract(address: string, amounts: AmountSpec | AmountSpec[], options?: { datumCborHex?: string; datumHash?: string; scriptRefCborHex?: string; scriptRefType?: string }): ScriptTx;
-    attachMetadata(label: number, metadata: any): ScriptTx;
-    collectFrom(utxos: any[]): ScriptTx;
-    collectFromScript(utxos: any[], redeemerCborHex: string, datumCborHex?: string | null): ScriptTx;
-    readFrom(referenceInputs: ReferenceInput[]): ScriptTx;
-    mintPlutusAssets(scriptCborHex: string, scriptType: string, assets: MintAsset[], redeemerCborHex: string, receiver?: string | null, outputDatumCborHex?: string | null): ScriptTx;
-    attachSpendingValidator(scriptCborHex: string, scriptType: string): ScriptTx;
-    attachCertificateValidator(scriptCborHex: string, scriptType: string): ScriptTx;
-    attachRewardValidator(scriptCborHex: string, scriptType: string): ScriptTx;
-    attachProposingValidator(scriptCborHex: string, scriptType: string): ScriptTx;
-    attachVotingValidator(scriptCborHex: string, scriptType: string): ScriptTx;
-    // Staking (with redeemer)
-    deregisterStakeAddress(address: string, redeemerCborHex: string, refundAddress?: string | null): ScriptTx;
-    delegateTo(address: string, poolId: string, redeemerCborHex: string): ScriptTx;
-    withdraw(rewardAddress: string, amount: string | number, redeemerCborHex: string, receiver?: string | null): ScriptTx;
-    // DRep (with redeemer)
-    registerDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
-    unregisterDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { refundAddress?: string; refundAmount?: string | number }): ScriptTx;
-    updateDRep(credentialHash: string, credentialType: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
-    // Voting (with redeemer)
-    delegateVotingPowerTo(address: string, drepType: string, drepHash: string, redeemerCborHex: string): ScriptTx;
-    createVote(voterType: string, voterHash: string, govActionTxHash: string, govActionIndex: number, vote: string, redeemerCborHex: string, options?: { anchorUrl?: string; anchorDataHash?: string }): ScriptTx;
-    // Governance (with redeemer)
-    createProposal(govActionType: string, returnAddress: string, anchorUrl: string, anchorDataHash: string, redeemerCborHex: string, options?: ProposalOptions): ScriptTx;
-    // Treasury donation (with redeemer)
-    donateToTreasury(treasuryValue: string | number, donationAmount: string | number, redeemerCborHex: string): ScriptTx;
-    from(address: string): ScriptTx;
-    changeAddress(address: string): ScriptTx;
-    changeDatum(datumCborHex: string): ScriptTx;
-    changeDatumHash(hash: string): ScriptTx;
-}
-
 export declare class QuickTxApi {
-    newTx(): TxBuilder;
-    tx(): Tx;
-    newScriptTx(): ScriptTxBuilder;
-    scriptTx(): ScriptTx;
-    compose(...txs: (Tx | ScriptTx)[]): ComposeTxBuilder;
+    /**
+     * Build an unsigned transaction from a CCL TxPlan (YAML), fully offline.
+     * @param txplanYaml the TxPlan YAML document defining the transaction(s)
+     * @param utxos UTXOs available to the sender (CCL Utxo model)
+     * @param protocolParams protocol parameters (CCL ProtocolParams model)
+     * @param execUnits optional redeemer execution units (one per redeemer, in transaction order)
+     *   for Plutus script transactions; compute them with any evaluator (Ogmios, Blockfrost, Aiken,
+     *   Scalus) — the bridge does not run the script
+     */
+    build(
+        txplanYaml: string,
+        utxos: object[],
+        protocolParams: object,
+        execUnits?: Array<{ mem: number | string; steps: number | string }>,
+    ): QuickTxResult;
+
+    /**
+     * Fetch chain data from a provider (and, optionally, execution units from an evaluator), then
+     * build — in one call. Composes `provider.utxos(sender)` + `provider.protocolParams()` with
+     * {@link build}. With an `evaluator`, runs a two-pass (draft → evaluate → rebuild); without one,
+     * the native library's offline Scalus default computes any script units. To supply units
+     * yourself, call {@link build} directly with `execUnits`.
+     */
+    buildWith(
+        txplanYaml: string,
+        provider: ChainDataProvider,
+        sender: string,
+        evaluator?: TransactionEvaluator,
+    ): Promise<QuickTxResult>;
 }
 
-export declare class Provider {
-    getUtxos(address: string): Promise<any[]>;
-    getProtocolParams(): Promise<any>;
-    submitTx(txCborHex: string): Promise<string>;
+/** Fetches the chain data {@link QuickTxApi.build} needs. Implement to plug in any backend. */
+export interface ChainDataProvider {
+    /** All UTXOs at `address` (no selection — the bridge selects internally). */
+    utxos(address: string): Promise<object[]>;
+    /** Current protocol parameters (CCL ProtocolParams shape). */
+    protocolParams(): Promise<object>;
 }
 
-export declare class YaciDevKitProvider extends Provider {
+/** Chain-data provider backed by Yaci DevKit / yaci-store (Blockfrost-style REST). */
+export declare class YaciProvider implements ChainDataProvider {
     constructor(baseUrl?: string);
-    getUtxos(address: string): Promise<any[]>;
-    getProtocolParams(): Promise<any>;
-    submitTx(txCborHex: string): Promise<string>;
-    topup(address: string, adaAmount?: number): Promise<any>;
-    reset(): Promise<number>;
-    waitForBlock(ms?: number): Promise<void>;
-    isAvailable(): Promise<boolean>;
+    utxos(address: string): Promise<object[]>;
+    protocolParams(): Promise<object>;
+}
+
+/** Chain-data provider backed by the Blockfrost API. */
+export declare class BlockfrostProvider implements ChainDataProvider {
+    constructor(projectId: string, opts?: { network?: 'mainnet' | 'preprod' | 'preview'; baseUrl?: string });
+    utxos(address: string): Promise<object[]>;
+    protocolParams(): Promise<object>;
+}
+
+/** Computes a Plutus transaction's redeemer execution units. Implement to plug in any evaluator. */
+export interface TransactionEvaluator {
+    /** `[{ mem, steps }]`, one per redeemer in transaction order, for the draft `txCbor` (hex). */
+    evaluate(txCbor: string, utxos?: object[]): Promise<Array<{ mem: number | string; steps: number | string }>>;
+}
+
+/** Remote evaluator via a Blockfrost-compatible `/utils/txs/evaluate` endpoint. */
+export declare class BlockfrostEvaluator implements TransactionEvaluator {
+    constructor(projectId: string, opts?: { network?: 'mainnet' | 'preprod' | 'preview'; baseUrl?: string });
+    evaluate(txCbor: string, utxos?: object[]): Promise<Array<{ mem: number | string; steps: number | string }>>;
 }
 
 export declare const MAINNET: number;

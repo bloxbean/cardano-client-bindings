@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
-import { CclBridge, CclError, MAINNET, TESTNET, Amount } from '../src/index.js';
+import { CclBridge, CclError, MAINNET, TESTNET, normalizeCostModels } from '../src/index.js';
 
 // A known valid transaction CBOR hex (built from Java tests)
 const SAMPLE_TX_CBOR = '84a300d901028182582073198b7ad003862b9798106b88fbccfca464b1a38afb34958275c4a7d7d8d002010181825839009493315cd92eb5d8c4304e67b7e16ae36d61d34502694657811a2c8e32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc1a001e8480021a00029810a0f5f6';
 
-describe('CCL Bridge', () => {
+describe('Cardano Client Bindings', () => {
     let bridge;
 
     beforeAll(() => {
@@ -294,413 +294,84 @@ describe('CCL Bridge', () => {
         }];
     }
 
-    it('should build simple ADA payment', () => {
-        const sender = bridge.account.create(TESTNET);
-        const receiver = bridge.account.create(TESTNET);
+    function paymentYaml(from, to, quantity) {
+        return `
+version: 1.0
+transaction:
+  - tx:
+      from: ${from}
+      intents:
+        - type: payment
+          address: ${to}
+          amounts:
+            - unit: lovelace
+              quantity: "${quantity}"
+`;
+    }
 
-        const result = bridge.quicktx.newTx()
-            .payToAddress(receiver.base_address, Amount.ada(5))
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
+    function assertBuilt(result) {
         expect(result.tx_cbor.length).toBeGreaterThan(0);
         expect(result.tx_hash.length).toBe(64);
-        expect(Number(result.fee)).toBeGreaterThan(0);
+        expect(parseInt(result.fee, 10)).toBeGreaterThan(0);
+    }
+
+    it('should build a simple payment from TxPlan YAML', () => {
+        const sender = bridge.account.create(TESTNET);
+        const receiver = bridge.account.create(TESTNET);
+        const yaml = paymentYaml(sender.base_address, receiver.base_address, '5000000');
+        assertBuilt(bridge.quicktx.build(yaml, makeUtxos(sender.base_address), PROTOCOL_PARAMS));
     });
 
     it('should build multiple payments', () => {
         const sender = bridge.account.create(TESTNET);
         const r1 = bridge.account.create(TESTNET);
         const r2 = bridge.account.create(TESTNET);
-
-        const result = bridge.quicktx.newTx()
-            .payToAddress(r1.base_address, Amount.ada(5))
-            .payToAddress(r2.base_address, Amount.ada(3))
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_hash.length).toBe(64);
+        const yaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender.base_address}
+      intents:
+        - type: payment
+          address: ${r1.base_address}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+        - type: payment
+          address: ${r2.base_address}
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+`;
+        assertBuilt(bridge.quicktx.build(yaml, makeUtxos(sender.base_address), PROTOCOL_PARAMS));
     });
 
-    it('should build tx with metadata', () => {
+    it('should substitute variables', () => {
         const sender = bridge.account.create(TESTNET);
         const receiver = bridge.account.create(TESTNET);
-
-        const result = bridge.quicktx.newTx()
-            .payToAddress(receiver.base_address, Amount.ada(2))
-            .attachMetadata(674, { msg: ['Hello from JS'] })
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-    });
-
-    it('should build tx with validity interval', () => {
-        const sender = bridge.account.create(TESTNET);
-        const receiver = bridge.account.create(TESTNET);
-
-        const result = bridge.quicktx.newTx()
-            .payToAddress(receiver.base_address, Amount.ada(2))
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .validFrom(1000)
-            .validTo(50000)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
+        const yaml = `
+version: 1.0
+variables:
+  to: ${receiver.base_address}
+  amount: "4000000"
+transaction:
+  - tx:
+      from: ${sender.base_address}
+      intents:
+        - type: payment
+          address: \${to}
+          amounts:
+            - unit: lovelace
+              quantity: \${amount}
+`;
+        assertBuilt(bridge.quicktx.build(yaml, makeUtxos(sender.base_address), PROTOCOL_PARAMS));
     });
 
     it('should throw on insufficient funds', () => {
         const sender = bridge.account.create(TESTNET);
         const receiver = bridge.account.create(TESTNET);
-
-        expect(() => {
-            bridge.quicktx.newTx()
-                .payToAddress(receiver.base_address, Amount.ada(200))
-                .from(sender.base_address)
-                .withUtxos(makeUtxos(sender.base_address, 1_000_000))
-                .withProtocolParams(PROTOCOL_PARAMS)
-                .build();
-        }).toThrow();
-    });
-
-    it('should build multi-asset payment', () => {
-        const sender = bridge.account.create(TESTNET);
-        const receiver = bridge.account.create(TESTNET);
-        const policyId = 'a'.repeat(56);
-        const unit = policyId + '546f6b656e';
-
-        const utxos = [{
-            tx_hash: FAKE_TX_HASH,
-            output_index: 0,
-            address: sender.base_address,
-            amount: [
-                { unit: 'lovelace', quantity: '100000000' },
-                { unit, quantity: '500' },
-            ],
-        }];
-
-        const result = bridge.quicktx.newTx()
-            .payToAddress(receiver.base_address, Amount.lovelace(2_000_000), Amount.asset(unit, 100))
-            .from(sender.base_address)
-            .withUtxos(utxos)
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('Amount helpers should produce correct values', () => {
-        expect(Amount.ada(5)).toEqual({ unit: 'lovelace', quantity: '5000000' });
-        expect(Amount.lovelace(2000000)).toEqual({ unit: 'lovelace', quantity: '2000000' });
-        expect(Amount.asset('abc123', 100)).toEqual({ unit: 'abc123', quantity: '100' });
-    });
-
-    // --- Compose (multi-Tx) ---
-
-    it('should compose two senders into one transaction', () => {
-        const sender1 = bridge.account.create(TESTNET);
-        const sender2 = bridge.account.create(TESTNET);
-        const r1 = bridge.account.create(TESTNET);
-        const r2 = bridge.account.create(TESTNET);
-
-        const tx1 = bridge.quicktx.tx()
-            .payToAddress(r1.base_address, Amount.ada(5))
-            .from(sender1.base_address);
-
-        const tx2 = bridge.quicktx.tx()
-            .payToAddress(r2.base_address, Amount.ada(3))
-            .from(sender2.base_address);
-
-        const utxos = [
-            {
-                tx_hash: FAKE_TX_HASH,
-                output_index: 0,
-                address: sender1.base_address,
-                amount: [{ unit: 'lovelace', quantity: '100000000' }],
-            },
-            {
-                tx_hash: 'b'.repeat(64),
-                output_index: 0,
-                address: sender2.base_address,
-                amount: [{ unit: 'lovelace', quantity: '100000000' }],
-            },
-        ];
-
-        const result = bridge.quicktx.compose(tx1, tx2)
-            .feePayer(sender1.base_address)
-            .withUtxos(utxos)
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .signerCount(2)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-        expect(Number(result.fee)).toBeGreaterThan(0);
-    });
-
-    // --- Staking ---
-
-    it('should build register stake address tx', () => {
-        const sender = bridge.account.create(TESTNET);
-
-        const result = bridge.quicktx.newTx()
-            .registerStakeAddress(sender.base_address)
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build deregister stake address tx', () => {
-        const sender = bridge.account.create(TESTNET);
-
-        const result = bridge.quicktx.newTx()
-            .deregisterStakeAddress(sender.base_address)
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build delegate to pool tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const poolId = 'pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy';
-
-        const result = bridge.quicktx.newTx()
-            .delegateTo(sender.base_address, poolId)
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build withdraw rewards tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const info = bridge.account.fromMnemonic(sender.mnemonic, TESTNET);
-
-        const result = bridge.quicktx.newTx()
-            .withdraw(info.stake_address, '5000000')
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    // --- DRep ---
-
-    it('should build register DRep tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const credentialHash = 'ab'.repeat(28);
-
-        const result = bridge.quicktx.newTx()
-            .registerDRep(credentialHash, 'key')
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build register DRep with anchor tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const credentialHash = 'ab'.repeat(28);
-        const dataHash = 'cd'.repeat(32);
-
-        const result = bridge.quicktx.newTx()
-            .registerDRep(credentialHash, 'key', {
-                anchorUrl: 'https://example.com/drep.json',
-                anchorDataHash: dataHash,
-            })
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build unregister DRep tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const credentialHash = 'ab'.repeat(28);
-
-        const result = bridge.quicktx.newTx()
-            .unregisterDRep(credentialHash, 'key')
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build update DRep tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const credentialHash = 'ab'.repeat(28);
-        const dataHash = 'cd'.repeat(32);
-
-        const result = bridge.quicktx.newTx()
-            .updateDRep(credentialHash, 'key', {
-                anchorUrl: 'https://example.com/drep-v2.json',
-                anchorDataHash: dataHash,
-            })
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    // --- Voting ---
-
-    it('should build delegate voting power to key hash', () => {
-        const sender = bridge.account.create(TESTNET);
-        const drepHash = 'ab'.repeat(28);
-
-        const result = bridge.quicktx.newTx()
-            .delegateVotingPowerTo(sender.base_address, 'key_hash', drepHash)
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build delegate voting power to abstain', () => {
-        const sender = bridge.account.create(TESTNET);
-
-        const result = bridge.quicktx.newTx()
-            .delegateVotingPowerTo(sender.base_address, 'abstain')
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build create vote tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const voterHash = 'ab'.repeat(28);
-        const govTxHash = 'cd'.repeat(32);
-
-        const result = bridge.quicktx.newTx()
-            .createVote('drep_key_hash', voterHash, govTxHash, 0, 'yes')
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build create vote with anchor tx', () => {
-        const sender = bridge.account.create(TESTNET);
-        const voterHash = 'ab'.repeat(28);
-        const govTxHash = 'cd'.repeat(32);
-        const anchorDataHash = 'ef'.repeat(32);
-
-        const result = bridge.quicktx.newTx()
-            .createVote('drep_key_hash', voterHash, govTxHash, 0, 'no', {
-                anchorUrl: 'https://example.com/rationale.json',
-                anchorDataHash,
-            })
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    // --- Governance proposals ---
-
-    it('should build info action proposal', () => {
-        const sender = bridge.account.create(TESTNET);
-        const info = bridge.account.fromMnemonic(sender.mnemonic, TESTNET);
-        const anchorDataHash = 'ab'.repeat(32);
-
-        const result = bridge.quicktx.newTx()
-            .createProposal('info_action', info.stake_address,
-                'https://example.com/proposal.json', anchorDataHash)
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address, 2_000_000_000))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should build treasury withdrawals proposal', () => {
-        const sender = bridge.account.create(TESTNET);
-        const info = bridge.account.fromMnemonic(sender.mnemonic, TESTNET);
-        const anchorDataHash = 'ab'.repeat(32);
-
-        const result = bridge.quicktx.newTx()
-            .createProposal('treasury_withdrawals', info.stake_address,
-                'https://example.com/proposal.json', anchorDataHash, {
-                    withdrawals: [{ reward_address: info.stake_address, amount: '1000000' }],
-                })
-            .from(sender.base_address)
-            .withUtxos(makeUtxos(sender.base_address, 2_000_000_000))
-            .withProtocolParams(PROTOCOL_PARAMS)
-            .build();
-
-        expect(result.tx_cbor.length).toBeGreaterThan(0);
-        expect(result.tx_hash.length).toBe(64);
-    });
-
-    it('should throw on compose without fee_payer', () => {
-        const sender1 = bridge.account.create(TESTNET);
-        const sender2 = bridge.account.create(TESTNET);
-        const r1 = bridge.account.create(TESTNET);
-        const r2 = bridge.account.create(TESTNET);
-
-        const tx1 = bridge.quicktx.tx()
-            .payToAddress(r1.base_address, Amount.ada(5))
-            .from(sender1.base_address);
-
-        const tx2 = bridge.quicktx.tx()
-            .payToAddress(r2.base_address, Amount.ada(3))
-            .from(sender2.base_address);
-
-        expect(() => {
-            bridge.quicktx.compose(tx1, tx2)
-                .withUtxos(makeUtxos(sender1.base_address))
-                .withProtocolParams(PROTOCOL_PARAMS)
-                .build();
-        }).toThrow();
+        const yaml = paymentYaml(sender.base_address, receiver.base_address, '200000000');
+        expect(() => bridge.quicktx.build(yaml, makeUtxos(sender.base_address, 1_000_000), PROTOCOL_PARAMS)).toThrow();
     });
 
     // --- Negative / Error Tests ---
@@ -762,5 +433,55 @@ describe('CCL Bridge', () => {
 
     it('should reject invalid mnemonic validation', () => {
         expect(bridge.crypto.validateMnemonic('zzz xxx yyy www vvv uuu ttt sss rrr qqq ppp ooo')).toBe(false);
+    });
+});
+
+// normalizeCostModels: numerically-keyed cost models (Yaci DevKit / Blockfrost-style providers) must
+// be converted to the ordered cost_models_raw array form, because JS object iteration reorders the
+// canonical integer-string keys ahead of the zero-padded ones, which would corrupt the Plutus
+// script-integrity hash. See the comment on normalizeCostModels in src/index.js.
+describe('normalizeCostModels', () => {
+    it('converts numeric-keyed cost models to ordered cost_models_raw arrays', () => {
+        // 0..120 inclusive: spans zero-padded keys ("000".."099") and canonical-integer keys
+        // ("100".."120"), which is exactly the pair JS would otherwise reorder.
+        const model = {};
+        for (let i = 0; i <= 120; i++) model[String(i).padStart(3, '0')] = 1000 + i;
+
+        const out = normalizeCostModels({ min_fee_a: 44, cost_models: { PlutusV2: model } });
+
+        // Array is in ascending numeric-key order regardless of the source object's iteration order.
+        expect(out.cost_models_raw.PlutusV2).toHaveLength(121);
+        expect(out.cost_models_raw.PlutusV2[0]).toBe(1000);
+        expect(out.cost_models_raw.PlutusV2[100]).toBe(1100);
+        expect(out.cost_models_raw.PlutusV2[120]).toBe(1120);
+        expect(out.cost_models_raw.PlutusV2).toEqual(
+            Array.from({ length: 121 }, (_, i) => 1000 + i));
+        // The numeric-keyed cost_models map is removed once converted; other params are preserved.
+        expect(out.cost_models).toBeUndefined();
+        expect(out.min_fee_a).toBe(44);
+    });
+
+    it('prefers an existing cost_models_raw and passes params through untouched', () => {
+        // cost_models_raw is the preferred (ordered) form; the deprecated cost_models must be ignored.
+        const pp = {
+            min_fee_a: 44,
+            cost_models_raw: { PlutusV2: [100, 200, 300] },
+            cost_models: { PlutusV2: { '0': 1, '1': 2 } },
+        };
+        const out = normalizeCostModels(pp);
+        expect(out).toBe(pp);                                  // same object, unchanged
+        expect(out.cost_models_raw.PlutusV2).toEqual([100, 200, 300]);
+    });
+
+    it('leaves named-operation cost models (which JS does not reorder) as a cost_models map', () => {
+        const named = { 'addInteger-cpu-arguments-intercept': 205665, 'addInteger-cpu-arguments-slope': 812 };
+        const out = normalizeCostModels({ cost_models: { PlutusV2: named } });
+        expect(out.cost_models.PlutusV2).toEqual(named);
+        expect(out.cost_models_raw).toBeUndefined();
+    });
+
+    it('passes through params with no cost models unchanged', () => {
+        const pp = { min_fee_a: 44, min_fee_b: 155381 };
+        expect(normalizeCostModels(pp)).toEqual(pp);
     });
 });

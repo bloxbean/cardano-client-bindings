@@ -1,0 +1,5 @@
+# Bundled native library — staged at wheel-build time from :core:nativeCompile, never committed.
+ccl/_libs/libccl.*
+# Build outputs
+dist/
+*.egg-info/

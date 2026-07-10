@@ -1,0 +1,210 @@
+name: Build npm packages
+
+# Reusable (workflow_call) build + validation of the npm packages — everything except publishing.
+# Called by publish-js.yml (release) and publish-js-dry-run.yml (PR validation).
+#
+# The version comes from `version` in gradle.properties; on a v* tag the tag must match it, and
+# wrappers/js/package.json (version + optionalDependencies pins) must be in lockstep.
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: Package version read from gradle.properties
+        value: ${{ jobs.validate.outputs.version }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from gradle.properties
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "No version found in gradle.properties" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Git tag $GITHUB_REF_NAME does not match gradle.properties version $VERSION (expected tag v$VERSION)" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  # macOS and Windows: build the lib on the native runner, assemble the platform pkg.
+  pkg-native:
+    name: npm pkg (${{ matrix.platform }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    env:
+      PKG_VERSION: ${{ needs.validate.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: macos-aarch64
+            libext: dylib
+            npm_os: darwin
+            npm_cpu: arm64
+          - os: windows-latest
+            platform: windows-x86_64
+            libext: dll
+            npm_os: win32
+            npm_cpu: x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25.0.3'
+          distribution: 'graalvm'
+      - name: Build native library
+        shell: bash
+        run: ./gradlew :core:nativeCompile
+      - name: Assemble the platform package tarball
+        shell: bash
+        run: |
+          set -eux
+          ND=core/build/native/nativeCompile
+          rm -rf package && mkdir -p package
+          cp "$ND/libccl.${{ matrix.libext }}" package/
+          cat > package/package.json <<JSON
+          {
+            "name": "@bloxbean/cardano-client-lib-${{ matrix.platform }}",
+            "version": "${PKG_VERSION}",
+            "description": "CCL Bridge native library for ${{ matrix.platform }}",
+            "os": ["${{ matrix.npm_os }}"],
+            "cpu": ["${{ matrix.npm_cpu }}"],
+            "files": ["libccl.${{ matrix.libext }}"],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/bloxbean/cardano-client-bindings.git"
+            }
+          }
+          JSON
+          echo "CCL Bridge native library for \`${{ matrix.platform }}\`. Installed automatically as an optionalDependency of \`@bloxbean/cardano-client-lib\`." > package/README.md
+          tar czf "platform-${{ matrix.platform }}.tgz" package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npmpkg-${{ matrix.platform }}
+          path: platform-${{ matrix.platform }}.tgz
+
+  # Linux: build the lib in the manylinux_2_28 container (glibc-2.17 baseline, ADR-0008), then
+  # assemble the platform pkg with tar (no node needed in the container).
+  pkg-linux:
+    name: npm pkg (${{ matrix.platform }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    env:
+      PKG_VERSION: ${{ needs.validate.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+            image: quay.io/pypa/manylinux_2_28_x86_64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
+            npm_cpu: x64
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-aarch64_bin.tar.gz
+            npm_cpu: arm64
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure build prerequisites
+        run: dnf install -y zlib-devel || true
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz "${{ matrix.graalvm_url }}"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+      - name: Build native library
+        run: ./gradlew :core:nativeCompile --no-daemon --stacktrace
+      - name: Assemble the platform package tarball
+        run: |
+          set -eux
+          ND=core/build/native/nativeCompile
+          rm -rf package && mkdir -p package
+          cp "$ND/libccl.so" package/
+          cat > package/package.json <<JSON
+          {
+            "name": "@bloxbean/cardano-client-lib-${{ matrix.platform }}",
+            "version": "${PKG_VERSION}",
+            "description": "CCL Bridge native library for ${{ matrix.platform }}",
+            "os": ["linux"],
+            "cpu": ["${{ matrix.npm_cpu }}"],
+            "files": ["libccl.so"],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/bloxbean/cardano-client-bindings.git"
+            }
+          }
+          JSON
+          echo "CCL Bridge native library for ${{ matrix.platform }}. Installed automatically as an optionalDependency of @bloxbean/cardano-client-lib." > package/README.md
+          tar czf "platform-${{ matrix.platform }}.tgz" package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npmpkg-${{ matrix.platform }}
+          path: platform-${{ matrix.platform }}.tgz
+
+  verify:
+    needs: [validate, pkg-native, pkg-linux]
+    runs-on: ubuntu-latest
+    env:
+      PKG_VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npmpkg-*
+          merge-multiple: true
+          path: dist
+      - name: Unpack platform packages
+        run: |
+          set -eux
+          for t in dist/platform-*.tgz; do
+            d="pkgs/$(basename "$t" .tgz)"
+            mkdir -p "$d"
+            tar xzf "$t" -C "$d" --strip-components=1
+          done
+      # The main package and its optionalDependencies pins must carry the same version as
+      # gradle.properties, or the published platform packages would never be resolved.
+      - name: Check package.json is in lockstep with gradle.properties
+        run: |
+          node -e '
+            const pkg = require("./wrappers/js/package.json");
+            const v = process.env.PKG_VERSION;
+            const bad = [];
+            if (pkg.version !== v) bad.push(`version is ${pkg.version}`);
+            for (const [name, range] of Object.entries(pkg.optionalDependencies ?? {}))
+              if (range !== v) bad.push(`optionalDependencies[${name}] is ${range}`);
+            if (bad.length) {
+              console.error(`wrappers/js/package.json out of lockstep with gradle.properties version ${v}:\n  ` + bad.join("\n  "));
+              process.exit(1);
+            }
+            console.log(`package.json in lockstep at ${v}`);
+          '
+      - name: Pack the main package
+        run: |
+          set -eux
+          # The published main package carries no lib (libs/ stays empty); the platform packages do.
+          rm -f wrappers/js/libs/libccl.*
+          npm pack --pack-destination "$PWD/dist" ./wrappers/js
+      - name: List built packages
+        run: ls -la dist pkgs

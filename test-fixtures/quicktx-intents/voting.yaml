@@ -1,0 +1,15 @@
+version: 1.0
+context:
+  fee_payer: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+transaction:
+- tx:
+    from: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    change_address: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    intents:
+    - type: voting
+      voter_hex: 8202581ca5b45515a3ff8cb7c02ce351834da324eb6dfc41b5779cb5e6b832aa
+      gov_action_tx_hash: 12745f09b138d4d0a11a560b4591ebb830cf12336347606d2edbbf1893d395c6
+      gov_action_index: 0
+      vote: "YES"
+      anchor_url: https://example.com/meta.json
+      anchor_hash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
