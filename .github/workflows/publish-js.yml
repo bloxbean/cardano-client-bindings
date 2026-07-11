@@ -66,5 +66,7 @@ jobs:
             *-beta*)                    NPM_TAG=beta ;;
             *-rc*)                      NPM_TAG=next ;;
           esac
-          for d in pkgs/platform-*; do npm publish "$d" --access public --provenance --tag "$NPM_TAG"; done
+          # Leading ./ is required: npm reads a bare "pkgs/platform-x" as the github:owner/repo
+          # shorthand and tries to git-fetch it, instead of publishing the local directory.
+          for d in pkgs/platform-*; do npm publish "./$d" --access public --provenance --tag "$NPM_TAG"; done
           npm publish ./wrappers/js --access public --provenance --tag "$NPM_TAG"
