@@ -22,6 +22,12 @@ on:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    # workflow_dispatch is available to any write-access user; only let the release code owners
+    # actually tag that way. A push to main already required a CODEOWNERS-approved PR, so it needs
+    # no actor check. Keep this list in sync with .github/CODEOWNERS.
+    if: >-
+      github.event_name == 'push' ||
+      contains(fromJSON('["satran004","matiwinnetou","fabianbormann"]'), github.actor)
     permissions:
       contents: read
     steps:
