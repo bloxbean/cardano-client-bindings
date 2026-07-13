@@ -5,10 +5,14 @@ platform) and the **per-wrapper packages** that deliver it to each language's ec
 library is the foundation — everything else references a published native-library release, so it
 must go out **first**.
 
+> **You do not push `v*` tags by hand.** Tagging is gated behind a reviewed PR — see
+> [How releases are triggered](#how-releases-are-triggered-pr-gated-tagging) below.
+
 ## 1. Release the native library (do this first)
 
-Push a `v*` tag. This triggers [`release.yml`](.github/workflows/release.yml), which builds
-`libccl` on every platform and produces one tarball per platform:
+The `v*` tag (created for you by the release flow) triggers
+[`release.yml`](.github/workflows/release.yml), which builds `libccl` on every platform and produces
+one tarball per platform:
 
 ```
 cardano-client-lib-<tag>-<platform>.tar.gz     # contains libccl.{so,dylib,dll} + headers
@@ -21,12 +25,6 @@ x86_64-only; see [ADR-0008](docs/adr/0008-linux-glibc-baseline-portability.md).)
 builds use a glibc 2.17 baseline for portability; `linux-musl-x86_64` is linked against musl for
 Alpine / musl-based images (`--libc=musl`). Attach all five tarballs (and a `SHA256SUMS`) to the
 GitHub Release for the tag.
-
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-# release.yml builds + uploads the 5 tarballs
-```
 
 ## 2. Keep the pinned versions in lockstep
 
@@ -86,12 +84,48 @@ git push origin wrappers/go/v0.2.0
   toolchain. On first use the loader downloads `libccl` for the platform from the native-library
   release (step 1) and caches it, so `defaultLibVersion` (step 2) **must** match a published release.
 
+## How releases are triggered (PR-gated tagging)
+
+Nobody pushes `v*` tags by hand — direct tag pushes are blocked by a repository ruleset. Instead:
+
+1. Open a PR that bumps `version` in `gradle.properties` (plus the lockstep constants in step 2
+   above, in the same PR).
+2. A **release code owner** (`@satran004`, `@matiwinnetou`, `@fabianbormann`) reviews and merges it
+   to `main`. This is enforced by [`.github/CODEOWNERS`](.github/CODEOWNERS) + the `main` branch
+   ruleset.
+3. On merge, [`tag-release.yml`](.github/workflows/tag-release.yml) creates and pushes
+   `v<version>` (using a GitHub App token so the tag fires the downstream workflows), which triggers
+   `release.yml` and `publish-js.yml`.
+4. `publish-js.yml` pauses on the `npm-release` environment until a release code owner approves the
+   final npm publish.
+
+Why a GitHub App token (not the default `GITHUB_TOKEN`): GitHub does not fire `on: push` workflows
+for refs pushed by `GITHUB_TOKEN` (a recursion guard), so a `GITHUB_TOKEN`-pushed tag would not
+trigger `release.yml` / `publish-js.yml`. The App token is a normal actor, so the tag fans out.
+
+### One-time repo settings (admin)
+
+These enforce the flow and are configured in GitHub settings, not code:
+
+- **GitHub App** with Contents: read & write, installed on the repo; secrets `RELEASE_APP_ID` +
+  `RELEASE_APP_PRIVATE_KEY` (used by `tag-release.yml` to push the tag).
+- **`main` ruleset**: require a PR, ≥1 approval, and **Require review from Code Owners**. Keep the
+  bypass list empty (do not add `Maintain`/`Write` roles — anyone on it skips code-owner review).
+- **`v*` tag ruleset**: restrict tag creation; bypass list = the release App only, so a `v*` tag can
+  only come from the approved-PR auto-tag.
+- **`npm-release` environment**: required reviewers = the release code owners; enable
+  "Prevent self-review".
+
 ## Release checklist
 
-1. [ ] Bump `DEFAULT_LIB_VERSION` (Rust) and `defaultLibVersion` (Go) to the new tag; open/merge that PR.
-2. [ ] Tag `vX.Y.Z` and push → `release.yml` builds + uploads the 5 platform tarballs + `SHA256SUMS`.
+1. [ ] Open a PR bumping `version` in `gradle.properties`, plus `DEFAULT_LIB_VERSION` (Rust) and
+       `defaultLibVersion` (Go), and the `EXPECTED_LIB_VERSION` constants (Python/JS) to the new
+       version. Get it approved by a release code owner and merge to `main`.
+2. [ ] Merge auto-creates `vX.Y.Z` → `release.yml` builds + uploads the 5 platform tarballs +
+       `SHA256SUMS`; `publish-js.yml` builds and then waits on the `npm-release` approval.
 3. [ ] Verify the release assets are named `cardano-client-lib-vX.Y.Z-<platform>.tar.gz`.
-4. [ ] Publish Python (PyPI), JS (npm), Rust (`cargo publish`) via their gated workflows.
-5. [ ] Tag `wrappers/go/vX.Y.Z` and push (Go module release — no build step).
+4. [ ] Approve the `npm-release` environment to publish JS (npm). Publish Python (PyPI) and Rust
+       (`cargo publish`) via their (still manual) steps.
+5. [ ] Tag `wrappers/go/vX.Y.Z` and push (Go module release — no build step, separate tag).
 6. [ ] Smoke-test each: a clean `pip install` / `npm install` / `cargo add` / `go get` with no
        `CCL_LIB_PATH` set.
