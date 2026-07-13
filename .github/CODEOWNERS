@@ -1,0 +1,14 @@
+# Code owners for release-critical paths. Combined with the `main` branch ruleset's
+# "Require review from Code Owners", any PR touching these paths needs an approving review from one
+# of the listed owners. See docs/release-flow.md.
+#
+# There is intentionally no catch-all `*` rule: all other source (wrappers/*, core/*, docs, ...)
+# stays unowned and does NOT require these reviewers. CODEOWNERS is last-match-wins, so keep the
+# patterns below non-overlapping.
+
+# Bumping the version drives the auto-tag + release.
+/gradle.properties        @satran004 @matiwinnetou @fabianbormann
+
+# Protect the release pipeline and this gate itself from unreviewed changes.
+/.github/workflows/       @satran004 @matiwinnetou @fabianbormann
+/.github/CODEOWNERS       @satran004 @matiwinnetou @fabianbormann
