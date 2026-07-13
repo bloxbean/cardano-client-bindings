@@ -6,8 +6,7 @@ library is the foundation — everything else references a published native-libr
 must go out **first**.
 
 > **You do not push `v*` tags by hand.** Tagging is gated behind a reviewed PR — see
-> [How releases are triggered](#how-releases-are-triggered-pr-gated-tagging) below and the full
-> runbook in [docs/release-flow.md](docs/release-flow.md).
+> [How releases are triggered](#how-releases-are-triggered-pr-gated-tagging) below.
 
 ## 1. Release the native library (do this first)
 
@@ -100,8 +99,22 @@ Nobody pushes `v*` tags by hand — direct tag pushes are blocked by a repositor
 4. `publish-js.yml` pauses on the `npm-release` environment until a release code owner approves the
    final npm publish.
 
-Full details, rationale, and the one-time repo settings are in
-[docs/release-flow.md](docs/release-flow.md).
+Why a GitHub App token (not the default `GITHUB_TOKEN`): GitHub does not fire `on: push` workflows
+for refs pushed by `GITHUB_TOKEN` (a recursion guard), so a `GITHUB_TOKEN`-pushed tag would not
+trigger `release.yml` / `publish-js.yml`. The App token is a normal actor, so the tag fans out.
+
+### One-time repo settings (admin)
+
+These enforce the flow and are configured in GitHub settings, not code:
+
+- **GitHub App** with Contents: read & write, installed on the repo; secrets `RELEASE_APP_ID` +
+  `RELEASE_APP_PRIVATE_KEY` (used by `tag-release.yml` to push the tag).
+- **`main` ruleset**: require a PR, ≥1 approval, and **Require review from Code Owners**. Keep the
+  bypass list empty (do not add `Maintain`/`Write` roles — anyone on it skips code-owner review).
+- **`v*` tag ruleset**: restrict tag creation; bypass list = the release App only, so a `v*` tag can
+  only come from the approved-PR auto-tag.
+- **`npm-release` environment**: required reviewers = the release code owners; enable
+  "Prevent self-review".
 
 ## Release checklist
 

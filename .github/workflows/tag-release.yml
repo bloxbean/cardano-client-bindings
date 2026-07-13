@@ -1,6 +1,6 @@
 name: Tag release
 
-# Step 2 of the PR-gated release flow (see docs/release-flow.md). When a release-code-owner-approved
+# Step 2 of the PR-gated release flow (see RELEASING.md). When a release-code-owner-approved
 # PR bumps `version` in gradle.properties and merges to main, create + push the matching v<version>
 # tag. The tag then triggers release.yml (native lib + GitHub Release) and publish-js.yml (npm).
 #

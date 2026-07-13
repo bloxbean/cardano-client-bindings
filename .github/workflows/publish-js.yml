@@ -19,7 +19,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     # Final human gate before the irreversible npm publish: the job pauses until a required reviewer
-    # of the `npm-release` environment approves (configured in repo settings). See docs/release-flow.md.
+    # of the `npm-release` environment approves (configured in repo settings). See RELEASING.md.
     environment: npm-release
     # Trusted publishing: npm exchanges the GitHub OIDC token for publish credentials — no
     # npm token secret. Requires npm >= 11.5.1 and node >= 22.14. The publish commands must
