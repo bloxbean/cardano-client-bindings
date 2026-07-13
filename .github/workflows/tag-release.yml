@@ -14,16 +14,30 @@ on:
     branches: [main]
     paths:
       - 'gradle.properties'
+  # Manual re-trigger: tag whatever version is currently in gradle.properties on main (e.g. to
+  # recover a run that failed after the version was already bumped). Idempotent — skips if the tag
+  # already exists.
+  workflow_dispatch:
 
 jobs:
   tag:
     runs-on: ubuntu-latest
+    # workflow_dispatch is available to any write-access user; only let the release code owners
+    # actually tag that way. A push to main already required a CODEOWNERS-approved PR, so it needs
+    # no actor check. Keep this list in sync with .github/CODEOWNERS.
+    if: >-
+      github.event_name == 'push' ||
+      contains(fromJSON('["satran004","matiwinnetou","fabianbormann"]'), github.actor)
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # need existing tags visible for the idempotency check
+          # Don't persist the default GITHUB_TOKEN as a git credential: its http.extraheader would
+          # override the App-token remote URL below, so the push would run as github-actions[bot]
+          # (which only has contents:read here) and be denied. With this off, the App token is used.
+          persist-credentials: false
       - name: Resolve version and whether to tag
         id: v
         run: |
