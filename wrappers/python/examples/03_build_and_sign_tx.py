@@ -11,7 +11,7 @@ Run from the repo root:
     DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
       python3 wrappers/python/examples/03_build_and_sign_tx.py
 """
-from ccl._ffi import CclLib
+from ccl import CclLib, Network
 
 # Minimal protocol parameters (CCL ProtocolParams model).
 PROTOCOL_PARAMS = {
@@ -27,8 +27,8 @@ PROTOCOL_PARAMS = {
 def main():
     lib = CclLib()
     try:
-        sender = lib.account.create(CclLib.TESTNET)
-        receiver = lib.account.create(CclLib.TESTNET)
+        sender = lib.account.create(Network.TESTNET)
+        receiver = lib.account.create(Network.TESTNET)
 
         # A static UTXO the sender controls (100 ADA), instead of querying a node.
         utxos = [{
@@ -59,7 +59,7 @@ transaction:
         print("  cbor   :", result["tx_cbor"][:80], "...")
 
         signed = lib.account.sign_tx(
-            sender["mnemonic"], result["tx_cbor"], CclLib.TESTNET, 0, 0)
+            sender["mnemonic"], result["tx_cbor"], Network.TESTNET, 0, 0)
         print("Signed transaction cbor:", signed[:80], "...")
         print("\nNext step (not shown): submit `signed` to a Cardano node over HTTP.")
     finally:

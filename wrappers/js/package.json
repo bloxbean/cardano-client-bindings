@@ -27,7 +27,8 @@
     "README.md"
   ],
   "scripts": {
-    "test": "bun test test/ccl.test.js"
+    "test": "bun test test/ccl.test.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "yaml": "^2.3.0"
@@ -41,5 +42,8 @@
   },
   "engines": {
     "bun": ">=1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }

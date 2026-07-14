@@ -13,9 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from ccl import CclClosedError, CclLib
-
-TESTNET = 1
+from ccl import CclClosedError, CclLib, Network
 
 
 def test_shared_instance_is_usable_from_many_threads():
@@ -29,7 +27,7 @@ def test_shared_instance_is_usable_from_many_threads():
     with CclLib() as lib:
 
         def work(_):
-            account = lib.account.create(TESTNET)
+            account = lib.account.create(Network.TESTNET)
             info = lib.address.info(account["base_address"])
             return info["network_id"]
 
@@ -51,7 +49,7 @@ def test_calls_after_close_raise_instead_of_aborting():
     lib.close()
 
     with pytest.raises(CclClosedError):
-        lib.account.create(TESTNET)
+        lib.account.create(Network.TESTNET)
 
     with pytest.raises(CclClosedError):
         lib.version()

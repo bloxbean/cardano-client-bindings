@@ -14,7 +14,7 @@ fn test_wallet_create_testnet() {
     let b = bridge();
     let result = b
         .wallet()
-        .create(ccl::network::TESTNET)
+        .create(ccl::Network::Testnet)
         .expect("Failed to create wallet");
     let json: Value = serde_json::from_str(&result).expect("Invalid JSON");
     assert!(json["stake_address"]

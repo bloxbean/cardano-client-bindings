@@ -70,7 +70,7 @@ fn test_integration_drep_key_required() {
     // Sign with the payment key ONLY (sign_tx), omitting the DRep-key witness.
     let signed_payment_only = bridge
         .account()
-        .sign_tx(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &built.tx_cbor)
+        .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &built.tx_cbor)
         .expect("sign");
     if devkit_try_submit(&signed_payment_only).is_ok() {
         panic!(
@@ -110,7 +110,7 @@ fn test_integration_donation() {
         let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build");
         let signed = bridge
             .account()
-            .sign_tx_with_keys(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &result.tx_cbor, &["payment"])
+            .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, &["payment"])
             .expect("sign");
         match devkit_try_submit(&signed) {
             Ok(tx_hash) => {
@@ -297,7 +297,7 @@ fn test_integration_voting() {
     let action_tx_hash = proposal.tx_hash.clone();
     let signed_proposal = bridge
         .account()
-        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &proposal.tx_cbor, &["payment"])
+        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &proposal.tx_cbor, &["payment"])
         .expect("sign proposal");
     if let Err(e) = devkit_try_submit(&signed_proposal) {
         panic!("submit proposal: {}", e);

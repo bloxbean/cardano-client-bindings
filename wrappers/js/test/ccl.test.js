@@ -64,6 +64,40 @@ describe('Cardano Client Bindings', () => {
         expect(signed.length).toBeGreaterThan(SAMPLE_TX_CBOR.length);
     });
 
+    // --- Network constants ---
+    //
+    // Pins the confusing-but-correct relationship, so nobody "fixes" it back: MAINNET/TESTNET/… are
+    // CCL's *enum ordinals* (MAINNET === 0), while `address.info().network_id` is Cardano's genuine
+    // *on-chain* network id (mainnet === 1) — the two are inverted. Renumbering the constants to
+    // match the on-chain id would derive keys for the wrong network.
+
+    it('MAINNET (ordinal 0) yields an address whose on-chain network_id is 1', () => {
+        expect(MAINNET).toBe(0);
+        const account = bridge.account.create(MAINNET);
+        expect(bridge.address.info(account.base_address).network_id).toBe(1);
+        expect(account.base_address).toStartWith('addr1');
+    });
+
+    it('TESTNET (ordinal 1) yields an address whose on-chain network_id is 0', () => {
+        expect(TESTNET).toBe(1);
+        const account = bridge.account.create(TESTNET);
+        expect(bridge.address.info(account.base_address).network_id).toBe(0);
+        expect(account.base_address).toStartWith('addr_test1');
+    });
+
+    it('should reject an out-of-range network with a JS error, not an opaque native one', () => {
+        expect(() => bridge.account.create(99)).toThrow(RangeError);
+        expect(() => bridge.account.create(-1)).toThrow(RangeError);
+        expect(() => bridge.wallet.create('mainnet')).toThrow(RangeError);
+        expect(() => bridge.account.fromMnemonic('x', 4)).toThrow(RangeError);
+    });
+
+    it('should require an explicit network (no mainnet default)', () => {
+        expect(() => bridge.account.create()).toThrow(TypeError);
+        expect(() => bridge.wallet.create()).toThrow(TypeError);
+        expect(() => bridge.gov.drepKeyFromMnemonic('x')).toThrow(TypeError);
+    });
+
     // --- Address ---
 
     it('should validate addresses', () => {

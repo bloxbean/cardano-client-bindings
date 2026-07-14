@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ccl._ffi import CclLib, CclError
+from ccl._ffi import CclError
+from ccl.network import Network
 
 FIXTURES = Path(__file__).resolve().parents[3] / "test-fixtures" / "quicktx-intents"
 
@@ -69,9 +70,9 @@ def test_sign_with_stake_key(ccl):
               "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}]
     built = ccl.quicktx.build(yaml, utxos, PROTOCOL_PARAMS)
 
-    signed_payment = ccl.account.sign_tx(INTENT_MNEMONIC, built["tx_cbor"], CclLib.TESTNET, 0, 0)
+    signed_payment = ccl.account.sign_tx(INTENT_MNEMONIC, built["tx_cbor"], Network.TESTNET, 0, 0)
     signed_stake = ccl.account.sign_tx_with_keys(
-        INTENT_MNEMONIC, built["tx_cbor"], ["payment", "stake"], CclLib.TESTNET, 0, 0)
+        INTENT_MNEMONIC, built["tx_cbor"], ["payment", "stake"], Network.TESTNET, 0, 0)
     assert len(signed_stake) > len(signed_payment)
 
 

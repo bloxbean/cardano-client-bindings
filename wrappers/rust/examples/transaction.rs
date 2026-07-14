@@ -11,16 +11,16 @@
 //! CCL_LIB_PATH=$LIB_DIR DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
 //!   cargo run --example transaction
 //! ```
-use ccl::{network, Bridge};
+use ccl::{Bridge, Network};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = Bridge::new()?;
 
     let sender: serde_json::Value =
-        serde_json::from_str(&bridge.account().create(network::TESTNET)?)?;
+        serde_json::from_str(&bridge.account().create(Network::Testnet)?)?;
     let receiver: serde_json::Value =
-        serde_json::from_str(&bridge.account().create(network::TESTNET)?)?;
+        serde_json::from_str(&bridge.account().create(Network::Testnet)?)?;
     let sender_addr = sender["base_address"].as_str().unwrap();
     let receiver_addr = receiver["base_address"].as_str().unwrap();
 
@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mnemonic = sender["mnemonic"].as_str().unwrap();
     let signed = bridge
         .account()
-        .sign_tx(mnemonic, network::TESTNET, 0, 0, &result.tx_cbor)?;
+        .sign_tx(mnemonic, Network::Testnet, 0, 0, &result.tx_cbor)?;
     println!("Signed transaction cbor: {}...", &signed[..80]);
     println!("\nNext step (not shown): submit `signed` to a Cardano node over HTTP.");
     Ok(())

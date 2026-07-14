@@ -12,13 +12,55 @@ import (
 	goyaml "gopkg.in/yaml.v3"
 )
 
-// Network IDs
+// Network selects which Cardano network to derive addresses/keys for.
+//
+// These are CCL's enum ordinals, NOT Cardano's on-chain network id — the two differ, and they
+// differ in the most confusing way possible: on-chain, 0 means testnet and 1 means mainnet, which
+// is the inverse of Mainnet(0)/Testnet(1) below. Pass the constants, never a raw on-chain id: an
+// account created with Mainnet has an AddressInfo.NetworkID of 1, and one created with Testnet has
+// an AddressInfo.NetworkID of 0. That is correct and deliberate — AddressInfo.NetworkID is the
+// genuine on-chain value read back off the address, while Network is CCL's selector for it.
+type Network int
+
 const (
-	Mainnet = 0
-	Testnet = 1
-	Preprod = 2
-	Preview = 3
+	Mainnet Network = 0
+	Testnet Network = 1
+	Preprod Network = 2
+	Preview Network = 3
 )
+
+// String returns the network's name ("mainnet", "testnet", "preprod", "preview"), so a Network
+// reads as itself in logs and errors instead of as a bare, easily-misread ordinal. An unknown
+// value prints as Network(n).
+func (n Network) String() string {
+	switch n {
+	case Mainnet:
+		return "mainnet"
+	case Testnet:
+		return "testnet"
+	case Preprod:
+		return "preprod"
+	case Preview:
+		return "preview"
+	default:
+		return fmt.Sprintf("Network(%d)", int(n))
+	}
+}
+
+// Valid reports whether n is one of the four known networks.
+func (n Network) Valid() bool {
+	return n >= Mainnet && n <= Preview
+}
+
+// validate turns an out-of-range Network into a clear Go error at the call boundary, rather than
+// letting it reach the native library and come back as an opaque enum-ordinal failure.
+func (n Network) validate() error {
+	if !n.Valid() {
+		return fmt.Errorf("ccl: invalid network %s: use one of Mainnet(0), Testnet(1), Preprod(2), Preview(3) "+
+			"(these are CCL enum ordinals, not Cardano's on-chain network id)", n)
+	}
+	return nil
+}
 
 // Error codes
 const (
@@ -57,7 +99,10 @@ type AccountInfo struct {
 
 // AddressInfo contains address parsing result.
 type AddressInfo struct {
-	Type                     string `json:"type"`
+	Type string `json:"type"`
+	// NetworkID is Cardano's real on-chain network id, decoded from the address: 0 = testnet,
+	// 1 = mainnet. It is NOT a Network (CCL's enum ordinal), and the two are inverted for the
+	// first two values — an account created with Mainnet has NetworkID 1. Do not "fix" this.
 	NetworkID                int    `json:"network_id"`
 	PaymentCredentialHash    string `json:"payment_credential_hash,omitempty"`
 	DelegationCredentialHash string `json:"delegation_credential_hash,omitempty"`
@@ -298,8 +343,11 @@ type AccountApi struct {
 	bridge *Bridge
 }
 
-func (a *AccountApi) Create(networkID int) (*AccountInfo, error) {
-	result, err := a.bridge.invoke(func() int32 { return cclAccountCreate(a.bridge.thread, int32(networkID)) })
+func (a *AccountApi) Create(network Network) (*AccountInfo, error) {
+	if err := network.validate(); err != nil {
+		return nil, err
+	}
+	result, err := a.bridge.invoke(func() int32 { return cclAccountCreate(a.bridge.thread, int32(network)) })
 	if err != nil {
 		return nil, err
 	}
@@ -310,9 +358,12 @@ func (a *AccountApi) Create(networkID int) (*AccountInfo, error) {
 	return &info, nil
 }
 
-func (a *AccountApi) FromMnemonic(mnemonic string, networkID, accountIndex, addressIndex int) (*AccountInfo, error) {
+func (a *AccountApi) FromMnemonic(mnemonic string, network Network, accountIndex, addressIndex int) (*AccountInfo, error) {
+	if err := network.validate(); err != nil {
+		return nil, err
+	}
 	result, err := a.bridge.invoke(func() int32 {
-		return cclAccountFromMnemonic(a.bridge.thread, int32(networkID), mnemonic, int32(accountIndex), int32(addressIndex))
+		return cclAccountFromMnemonic(a.bridge.thread, int32(network), mnemonic, int32(accountIndex), int32(addressIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -324,27 +375,39 @@ func (a *AccountApi) FromMnemonic(mnemonic string, networkID, accountIndex, addr
 	return &info, nil
 }
 
-func (a *AccountApi) GetPublicKey(mnemonic string, networkID, accountIndex, addressIndex int) (string, error) {
+func (a *AccountApi) GetPublicKey(mnemonic string, network Network, accountIndex, addressIndex int) (string, error) {
+	if err := network.validate(); err != nil {
+		return "", err
+	}
 	return a.bridge.invoke(func() int32 {
-		return cclAccountGetPublicKey(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex))
+		return cclAccountGetPublicKey(a.bridge.thread, mnemonic, int32(network), int32(accountIndex), int32(addressIndex))
 	})
 }
 
-func (a *AccountApi) GetPrivateKey(mnemonic string, networkID, accountIndex, addressIndex int) (string, error) {
+func (a *AccountApi) GetPrivateKey(mnemonic string, network Network, accountIndex, addressIndex int) (string, error) {
+	if err := network.validate(); err != nil {
+		return "", err
+	}
 	return a.bridge.invoke(func() int32 {
-		return cclAccountGetPrivKey(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex))
+		return cclAccountGetPrivKey(a.bridge.thread, mnemonic, int32(network), int32(accountIndex), int32(addressIndex))
 	})
 }
 
-func (a *AccountApi) GetDRepID(mnemonic string, networkID, accountIndex int) (string, error) {
+func (a *AccountApi) GetDRepID(mnemonic string, network Network, accountIndex int) (string, error) {
+	if err := network.validate(); err != nil {
+		return "", err
+	}
 	return a.bridge.invoke(func() int32 {
-		return cclAccountGetDRepID(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
+		return cclAccountGetDRepID(a.bridge.thread, mnemonic, int32(network), int32(accountIndex))
 	})
 }
 
-func (a *AccountApi) SignTx(mnemonic string, networkID, accountIndex, addressIndex int, txCborHex string) (string, error) {
+func (a *AccountApi) SignTx(mnemonic string, network Network, accountIndex, addressIndex int, txCborHex string) (string, error) {
+	if err := network.validate(); err != nil {
+		return "", err
+	}
 	return a.bridge.invoke(func() int32 {
-		return cclAccountSignTx(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex), txCborHex)
+		return cclAccountSignTx(a.bridge.thread, mnemonic, int32(network), int32(accountIndex), int32(addressIndex), txCborHex)
 	})
 }
 
@@ -352,9 +415,12 @@ func (a *AccountApi) SignTx(mnemonic string, networkID, accountIndex, addressInd
 // (any of: payment, stake, drep, committee_cold, committee_hot, applied in order). Use this for
 // transactions whose certificates also need the stake or DRep key — stake registration/delegation/
 // withdrawal and DRep/vote operations — which the payment key alone cannot witness.
-func (a *AccountApi) SignTxWithKeys(mnemonic string, networkID, accountIndex, addressIndex int, txCborHex string, keys ...string) (string, error) {
+func (a *AccountApi) SignTxWithKeys(mnemonic string, network Network, accountIndex, addressIndex int, txCborHex string, keys ...string) (string, error) {
+	if err := network.validate(); err != nil {
+		return "", err
+	}
 	return a.bridge.invoke(func() int32 {
-		return cclAccountSignTxMulti(a.bridge.thread, mnemonic, int32(networkID), int32(accountIndex), int32(addressIndex), txCborHex, strings.Join(keys, ","))
+		return cclAccountSignTxMulti(a.bridge.thread, mnemonic, int32(network), int32(accountIndex), int32(addressIndex), txCborHex, strings.Join(keys, ","))
 	})
 }
 
@@ -482,9 +548,12 @@ type GovApi struct {
 	bridge *Bridge
 }
 
-func (g *GovApi) DrepKeyFromMnemonic(mnemonic string, networkID, accountIndex int) (*GovKeyInfo, error) {
+func (g *GovApi) DrepKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error) {
+	if err := network.validate(); err != nil {
+		return nil, err
+	}
 	result, err := g.bridge.invoke(func() int32 {
-		return cclGovDRepKey(g.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
+		return cclGovDRepKey(g.bridge.thread, mnemonic, int32(network), int32(accountIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -496,9 +565,12 @@ func (g *GovApi) DrepKeyFromMnemonic(mnemonic string, networkID, accountIndex in
 	return &info, nil
 }
 
-func (g *GovApi) CommitteeColdKeyFromMnemonic(mnemonic string, networkID, accountIndex int) (*GovKeyInfo, error) {
+func (g *GovApi) CommitteeColdKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error) {
+	if err := network.validate(); err != nil {
+		return nil, err
+	}
 	result, err := g.bridge.invoke(func() int32 {
-		return cclGovCommitteeColdKey(g.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
+		return cclGovCommitteeColdKey(g.bridge.thread, mnemonic, int32(network), int32(accountIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -510,9 +582,12 @@ func (g *GovApi) CommitteeColdKeyFromMnemonic(mnemonic string, networkID, accoun
 	return &info, nil
 }
 
-func (g *GovApi) CommitteeHotKeyFromMnemonic(mnemonic string, networkID, accountIndex int) (*GovKeyInfo, error) {
+func (g *GovApi) CommitteeHotKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error) {
+	if err := network.validate(); err != nil {
+		return nil, err
+	}
 	result, err := g.bridge.invoke(func() int32 {
-		return cclGovCommitteeHotKey(g.bridge.thread, mnemonic, int32(networkID), int32(accountIndex))
+		return cclGovCommitteeHotKey(g.bridge.thread, mnemonic, int32(network), int32(accountIndex))
 	})
 	if err != nil {
 		return nil, err
@@ -530,8 +605,11 @@ type WalletApi struct {
 	bridge *Bridge
 }
 
-func (w *WalletApi) Create(networkID int) (*WalletInfo, error) {
-	result, err := w.bridge.invoke(func() int32 { return cclWalletCreate(w.bridge.thread, int32(networkID)) })
+func (w *WalletApi) Create(network Network) (*WalletInfo, error) {
+	if err := network.validate(); err != nil {
+		return nil, err
+	}
+	result, err := w.bridge.invoke(func() int32 { return cclWalletCreate(w.bridge.thread, int32(network)) })
 	if err != nil {
 		return nil, err
 	}
@@ -542,8 +620,11 @@ func (w *WalletApi) Create(networkID int) (*WalletInfo, error) {
 	return &info, nil
 }
 
-func (w *WalletApi) FromMnemonic(mnemonic string, networkID int) (*WalletInfo, error) {
-	result, err := w.bridge.invoke(func() int32 { return cclWalletFromMnemonic(w.bridge.thread, mnemonic, int32(networkID)) })
+func (w *WalletApi) FromMnemonic(mnemonic string, network Network) (*WalletInfo, error) {
+	if err := network.validate(); err != nil {
+		return nil, err
+	}
+	result, err := w.bridge.invoke(func() int32 { return cclWalletFromMnemonic(w.bridge.thread, mnemonic, int32(network)) })
 	if err != nil {
 		return nil, err
 	}
@@ -554,8 +635,11 @@ func (w *WalletApi) FromMnemonic(mnemonic string, networkID int) (*WalletInfo, e
 	return &info, nil
 }
 
-func (w *WalletApi) GetAddress(mnemonic string, networkID, index int) (string, error) {
-	return w.bridge.invoke(func() int32 { return cclWalletGetAddress(w.bridge.thread, mnemonic, int32(networkID), int32(index)) })
+func (w *WalletApi) GetAddress(mnemonic string, network Network, index int) (string, error) {
+	if err := network.validate(); err != nil {
+		return "", err
+	}
+	return w.bridge.invoke(func() int32 { return cclWalletGetAddress(w.bridge.thread, mnemonic, int32(network), int32(index)) })
 }
 
 // --- QuickTx API ---

@@ -73,11 +73,11 @@ The [`examples/`](examples/) directory contains:
 ## Quick start
 
 ```python
-from ccl._ffi import CclLib
+from ccl import CclLib, Network
 
 lib = CclLib()                      # loads libccl, starts a GraalVM isolate
 try:
-    account = lib.account.create(CclLib.TESTNET)
+    account = lib.account.create(Network.TESTNET)
     print(account["base_address"])  # addr_test1...
     print(account["mnemonic"])      # 24-word phrase
 finally:
@@ -100,7 +100,28 @@ A `CclLib` instance exposes these namespaces (all offline operations):
 | `lib.wallet` | `create`, `from_mnemonic`, `get_address` |
 | `lib.quicktx` | `build(yaml, utxos, protocol_params)` — build an unsigned tx from a TxPlan YAML document |
 
-Network IDs: `CclLib.MAINNET` (0), `CclLib.TESTNET` (1), `CclLib.PREPROD` (2), `CclLib.PREVIEW` (3).
+### Networks
+
+Every key-derivation and signing call takes a **required** `network` — `Network.MAINNET`,
+`Network.TESTNET`, `Network.PREPROD` or `Network.PREVIEW`. There is no default: a library that
+derives keys must not guess, least of all guess mainnet.
+
+> **`Network` is CCL's enum ordinal, not Cardano's on-chain network id.** The two differ, and for
+> mainnet/testnet they are **inverted**:
+>
+> | Member | Value you pass | On-chain `network_id` of the address |
+> |---|---|---|
+> | `Network.MAINNET` | 0 | **1** |
+> | `Network.TESTNET` | 1 | **0** |
+> | `Network.PREPROD` | 2 | 0 |
+> | `Network.PREVIEW` | 3 | 0 |
+>
+> So do **not** pass a `network_id` you read off an address back into these APIs — you would flip
+> mainnet and testnet. `lib.address.info(addr)["network_id"]` is the real on-chain id and is a
+> different thing from the `Network` you passed in.
+
+`Network` is an `IntEnum`, so a plain int 0-3 still works, and an out-of-range value raises
+`ValueError` at the call rather than failing obscurely inside the native library.
 
 Errors raise `ccl.CclError`.
 

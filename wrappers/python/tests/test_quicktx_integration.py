@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from ccl._ffi import CclLib, CclError
+from ccl.network import Network
 from tests.devkit_helper import DevKitHelper
 
 # The fixed test account the quicktx-intents fixtures are derived from (account 0/0).
@@ -73,7 +74,7 @@ def _sign_submit(ccl_lib, devkit, yaml_str, utxos, pp, keys, exec_units=None):
     """
     result = ccl_lib.quicktx.build(yaml_str, utxos, pp, exec_units=exec_units)
     signed = ccl_lib.account.sign_tx_with_keys(
-        INTENT_MNEMONIC, result["tx_cbor"], list(keys), CclLib.TESTNET, 0, 0)
+        INTENT_MNEMONIC, result["tx_cbor"], list(keys), Network.TESTNET, 0, 0)
     tx_hash = devkit.submit_tx(signed)
     assert tx_hash
     return tx_hash
@@ -138,7 +139,7 @@ def ccl_lib():
 
 @pytest.fixture
 def funded_sender(ccl_lib, devkit):
-    account = ccl_lib.account.create(CclLib.TESTNET)
+    account = ccl_lib.account.create(Network.TESTNET)
     devkit.topup(account["base_address"], 150)
     devkit.wait_for_block(2)
     return account
@@ -161,7 +162,7 @@ transaction:
 
 def test_simple_ada_transfer(ccl_lib, devkit, funded_sender):
     """Build a 5 ADA payment from TxPlan YAML, sign, submit, and verify on-chain."""
-    receiver = ccl_lib.account.create(CclLib.TESTNET)
+    receiver = ccl_lib.account.create(Network.TESTNET)
 
     utxos = devkit.get_utxos(funded_sender["base_address"])
     pp = devkit.get_protocol_params()
@@ -173,7 +174,7 @@ def test_simple_ada_transfer(ccl_lib, devkit, funded_sender):
     assert int(result["fee"]) > 0
 
     signed_tx = ccl_lib.account.sign_tx(
-        funded_sender["mnemonic"], result["tx_cbor"], CclLib.TESTNET, 0, 0)
+        funded_sender["mnemonic"], result["tx_cbor"], Network.TESTNET, 0, 0)
     tx_hash = devkit.submit_tx(signed_tx)
     assert tx_hash
 
@@ -185,8 +186,8 @@ def test_simple_ada_transfer(ccl_lib, devkit, funded_sender):
 
 
 def test_multiple_receivers(ccl_lib, devkit, funded_sender):
-    r1 = ccl_lib.account.create(CclLib.TESTNET)
-    r2 = ccl_lib.account.create(CclLib.TESTNET)
+    r1 = ccl_lib.account.create(Network.TESTNET)
+    r2 = ccl_lib.account.create(Network.TESTNET)
 
     utxos = devkit.get_utxos(funded_sender["base_address"])
     pp = devkit.get_protocol_params()
@@ -210,7 +211,7 @@ transaction:
 """
     result = ccl_lib.quicktx.build(yaml_str, utxos, pp)
     signed_tx = ccl_lib.account.sign_tx(
-        funded_sender["mnemonic"], result["tx_cbor"], CclLib.TESTNET, 0, 0)
+        funded_sender["mnemonic"], result["tx_cbor"], Network.TESTNET, 0, 0)
     assert devkit.submit_tx(signed_tx)
 
     devkit.wait_for_block(3)
@@ -221,10 +222,10 @@ transaction:
 
 
 def test_insufficient_funds(ccl_lib, devkit):
-    sender = ccl_lib.account.create(CclLib.TESTNET)
+    sender = ccl_lib.account.create(Network.TESTNET)
     devkit.topup(sender["base_address"], 2)
     devkit.wait_for_block(2)
-    receiver = ccl_lib.account.create(CclLib.TESTNET)
+    receiver = ccl_lib.account.create(Network.TESTNET)
 
     utxos = devkit.get_utxos(sender["base_address"])
     pp = devkit.get_protocol_params()
@@ -238,7 +239,7 @@ def test_build_with_yaci_provider(ccl_lib, devkit, funded_sender):
     """The shipped YaciProvider fetches the devnet's real chain data and feeds build()."""
     from ccl.providers import YaciProvider
 
-    receiver = ccl_lib.account.create(CclLib.TESTNET)
+    receiver = ccl_lib.account.create(Network.TESTNET)
     provider = YaciProvider()  # defaults to the local DevKit cluster
     yaml_str = _payment_yaml(funded_sender["base_address"], receiver["base_address"], "5000000")
 
@@ -282,7 +283,7 @@ def test_donation_treasury(ccl_lib, devkit):
     for _ in range(5):
         yaml_str = base_yaml.replace("current_treasury_value: 0", f"current_treasury_value: {treasury}")
         result = ccl_lib.quicktx.build(yaml_str, utxos, pp)
-        signed = ccl_lib.account.sign_tx(INTENT_MNEMONIC, result["tx_cbor"], CclLib.TESTNET, 0, 0)
+        signed = ccl_lib.account.sign_tx(INTENT_MNEMONIC, result["tx_cbor"], Network.TESTNET, 0, 0)
         try:
             tx_hash = devkit.submit_tx(signed)
             assert tx_hash
@@ -384,7 +385,7 @@ def test_drep_key_required(ccl_lib, devkit):
 
     # Sign with the payment key ONLY (sign_tx), omitting the DRep-key witness.
     signed_payment_only = ccl_lib.account.sign_tx(
-        INTENT_MNEMONIC, built["tx_cbor"], CclLib.TESTNET, 0, 0)
+        INTENT_MNEMONIC, built["tx_cbor"], Network.TESTNET, 0, 0)
     with pytest.raises(RuntimeError):
         devkit.submit_tx(signed_payment_only)
 
@@ -503,7 +504,7 @@ def test_voting(ccl_lib, devkit):
     proposal = ccl_lib.quicktx.build(_read_fixture("governance_proposal.yaml"), u3, pp)
     action_tx_hash = proposal["tx_hash"]
     signed_proposal = ccl_lib.account.sign_tx_with_keys(
-        INTENT_MNEMONIC, proposal["tx_cbor"], ["payment"], CclLib.TESTNET, 0, 0)
+        INTENT_MNEMONIC, proposal["tx_cbor"], ["payment"], Network.TESTNET, 0, 0)
     assert devkit.submit_tx(signed_proposal)
     devkit.wait_for_block(3)
 

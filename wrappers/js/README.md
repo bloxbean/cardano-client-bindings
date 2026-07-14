@@ -90,8 +90,48 @@ A `CclBridge` instance exposes these namespaces (all offline operations):
 `bridge.account`, `bridge.address`, `bridge.crypto`, `bridge.tx`, `bridge.plutus`,
 `bridge.script`, `bridge.gov`, `bridge.wallet`, `bridge.quicktx`.
 
-Network IDs are exported constants: `MAINNET` (0), `TESTNET` (1), `PREPROD` (2),
-`PREVIEW` (3). Errors throw `CclError`.
+Errors throw `CclError`; using a bridge after `close()` throws `CclClosedError`.
+
+### Networks — read this before passing a number
+
+Every `network` parameter takes one of the exported constants:
+
+| Constant | Value (CCL enum ordinal) |
+|---|---|
+| `MAINNET` | `0` |
+| `TESTNET` | `1` |
+| `PREPROD` | `2` |
+| `PREVIEW` | `3` |
+
+> **⚠️ These are CCL's `Network` enum ordinals, NOT Cardano's on-chain network id — and they are
+> inverted with respect to it.** On-chain, `0 = testnet` and `1 = mainnet`; here `MAINNET = 0` and
+> `TESTNET = 1`. So `bridge.account.create(0)` derives a **mainnet** key, not a testnet one.
+> **Never pass a raw number — always pass a constant.**
+
+`network` is **required** (there is no mainnet default), an out-of-range value throws, and the
+TypeScript type is closed (`type Network = 0 | 1 | 2 | 3`), so `create(99)` will not compile:
+
+```js
+import { CclBridge, TESTNET, MAINNET } from '@bloxbean/cardano-client-lib';
+
+bridge.account.create(TESTNET);            // addr_test1… — on-chain network_id 0
+bridge.account.create();                   // TypeError: network is required
+bridge.account.create(99);                 // RangeError: invalid network
+```
+
+The **genuine on-chain network id** is the `network_id` field returned by `address.info()` — it is
+*not* a `Network` ordinal and must not be fed back into `create()`:
+
+```js
+const acct = bridge.account.create(MAINNET);            // MAINNET is the ordinal 0 …
+bridge.address.info(acct.base_address).network_id;      // … but the on-chain id is 1
+```
+
+### TypeScript
+
+The package ships `src/index.d.ts`, typed against the namespaced runtime API. `bun run typecheck`
+compiles `test/types.test-d.ts` against it (part of the Gradle `test` task), so the declarations
+cannot drift from the runtime.
 
 Transactions are defined as a [TxPlan](https://github.com/bloxbean/cardano-client-lib)
 **YAML** document and built fully offline — you supply the UTXOs and protocol parameters:

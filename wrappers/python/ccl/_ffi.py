@@ -5,6 +5,8 @@ import json
 import threading
 from ctypes import c_int, c_char_p, c_void_p, POINTER, byref
 
+from ccl.network import Network
+
 # Native libccl version this wrapper expects, kept in lockstep with the package version. On init the
 # wrapper compares it against ccl_version() and fails fast on a skew (see CclLib._check_version).
 EXPECTED_LIB_VERSION = "0.1.0"
@@ -32,11 +34,13 @@ class CclLib:
     # Raised for a malformed TxPlan — the most common failure on the core build path.
     CCL_ERROR_TX_BUILD = -10
 
-    # Network IDs
-    MAINNET = 0
-    TESTNET = 1
-    PREPROD = 2
-    PREVIEW = 3
+    # Networks. Kept as aliases of the Network enum for the call sites that predate it — prefer
+    # `from ccl import Network`. NB these are CCL's enum ordinals, not Cardano's on-chain network
+    # id (MAINNET is 0 here, but a mainnet address's on-chain network_id is 1); see ccl/network.py.
+    MAINNET = Network.MAINNET
+    TESTNET = Network.TESTNET
+    PREPROD = Network.PREPROD
+    PREVIEW = Network.PREVIEW
 
     @staticmethod
     def _lib_filename():
