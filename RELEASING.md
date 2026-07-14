@@ -67,6 +67,30 @@ Each ecosystem has a different distribution model:
 Python, JS, and Rust each publish to a registry (gated publish workflows / `cargo publish`, requiring
 credentials). **Go does not** — see below.
 
+### musl / Alpine
+
+The **fetching** wrappers (Rust, Go) get musl for free: they download from the release, which carries
+a `linux-musl-x86_64` tarball, and both detect musl at build/run time and pick it. The **bundling**
+wrappers do not — a musl tarball on the release does nothing for a `pip install` or an `npm install`,
+so each needs a musl artifact of its own:
+
+| Wrapper | musl artifact | Selected by |
+|---|---|---|
+| **JS** | `@bloxbean/cardano-client-lib-linux-musl-x86_64` npm package | npm's `libc: ["musl"]` field, plus `platformSuffix()` detecting musl at runtime |
+| **Python** | a `musllinux_1_2_x86_64` wheel | pip, from the wheel's platform tag |
+| **Rust / Go** | *(none needed)* | `build.rs` / the loader pick `linux-musl-x86_64` off the release |
+
+The `libc` field is what stops an Alpine user silently installing the glibc package: `os` and `cpu`
+match on Alpine too, so without it npm resolves the glibc build, which cannot load under musl.
+
+`musl-alpine.yml` builds the musl lib and then runs **all four wrappers inside a real Alpine
+container** — so what is verified is that they work there, not merely that an artifact exists.
+
+**x86_64 only.** GraalVM's `--libc=musl` hardcodes the `x86_64-linux-musl-gcc` compiler name and never
+looks for an aarch64 one, so there is no musl/aarch64 build. Alpine-on-ARM users must build libccl
+from source and set `CCL_LIB_PATH`; the wrappers say so explicitly rather than handing back a glibc
+artifact that cannot load. See [ADR-0008](docs/adr/0008-linux-glibc-baseline-portability.md).
+
 ## Go: no artifact, no registry — just a tag
 
 Go modules are served directly from the tagged git source by the module proxy (`proxy.golang.org`).

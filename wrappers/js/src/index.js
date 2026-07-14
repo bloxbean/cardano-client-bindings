@@ -102,6 +102,18 @@ function libFilename() {
   return 'libccl.so';
 }
 
+// Is this a musl-based Linux (Alpine)? os.platform() reports "linux" for both glibc and musl, so —
+// exactly as the Go loader does — detect musl by its dynamic loader, a file only musl systems ship.
+// Without this an Alpine user resolves to the glibc package and gets a load failure, because the
+// glibc libccl.so cannot load under musl.
+function isMuslLinux() {
+  if (os.platform() !== 'linux') return false;
+  const loader = os.arch() === 'arm64'
+    ? '/lib/ld-musl-aarch64.so.1'
+    : '/lib/ld-musl-x86_64.so.1';
+  return existsSync(loader);
+}
+
 // The per-platform npm package suffix for the current runtime, e.g. "macos-aarch64". Mirrors the
 // native build/release matrix; used to locate the `@bloxbean/cardano-client-lib-<suffix>` optionalDependency.
 export function platformSuffix() {
@@ -109,6 +121,18 @@ export function platformSuffix() {
   const a = os.arch();
   if (p === 'darwin') return a === 'arm64' ? 'macos-aarch64' : 'macos-x86_64';
   if (p === 'win32') return 'windows-x86_64';
+  if (isMuslLinux()) {
+    // GraalVM's --libc=musl is x86_64-only (it hardcodes x86_64-linux-musl-gcc), so there is no
+    // musl/aarch64 build to fall back to — say so, rather than handing back a glibc package that
+    // cannot load here. See ADR-0008.
+    if (a === 'arm64') {
+      throw new Error(
+        'No prebuilt libccl for musl/aarch64 (Alpine on ARM): GraalVM\'s --libc=musl is x86_64-only. ' +
+        'Build libccl from source and set CCL_LIB_PATH.'
+      );
+    }
+    return 'linux-musl-x86_64';
+  }
   return a === 'arm64' ? 'linux-aarch64' : 'linux-x86_64';
 }
 

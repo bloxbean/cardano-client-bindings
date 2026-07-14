@@ -107,8 +107,11 @@ jobs:
               apk add --no-cache build-base go cargo >/dev/null
 
               # Go — runtime musl detection: the slug test asserts linux-musl-x86_64 on real musl, and
-              # the example loads the seeded musl lib with no env vars.
-              CACHE="$HOME/.cache/cardano-client-bindings/v0.1.0-preview1"
+              # the example loads the seeded musl lib with no env vars. Read the cache dir from the
+              # wrapper'"'"'s own pinned version rather than hardcoding it, so a version bump cannot
+              # silently turn this into a network download (or a miss) without anyone noticing.
+              GOVER=$(sed -n '"'"'s/.*defaultLibVersion = "\(.*\)".*/\1/p'"'"' wrappers/go/ccl/loader.go)
+              CACHE="$HOME/.cache/cardano-client-bindings/$GOVER"
               mkdir -p "$CACHE"; cp /out/libccl.so "$CACHE/libccl.so"
               ( cd wrappers/go
                 env -u CCL_LIB_PATH go test -run "PlatformSlug|Musl" ./ccl/
@@ -120,4 +123,78 @@ jobs:
                 env -u CCL_LIB_PATH cargo run --quiet --example account | head -1 )
 
               echo "OK: Go + Rust auto-selected + ran the musl libccl on Alpine, no CCL_LIB_PATH"
+            '
+
+      # Python and JS are the two wrappers that *bundle* the lib rather than fetching it from the
+      # release, so a musl libccl existing on the release does nothing for them — they need a musl
+      # artifact of their own (a musllinux wheel; a linux-musl-x86_64 npm package). Both are now
+      # built, and these steps prove they actually work on Alpine, which is the only way to know the
+      # artifact is right rather than merely present.
+      - name: Verify the Python musllinux wheel installs and runs on Alpine
+        run: |
+          set -eux
+          docker run --rm -v "$PWD:/w" -w /w \
+            -v "$PWD/core/build/native/nativeCompile:/out" alpine:3.20 sh -c '
+              set -eux
+              apk add --no-cache python3 py3-pip >/dev/null
+
+              # Stage the musl lib exactly as the wheel build does, then build the wheel here — on
+              # musl, so setuptools tags it musllinux_*, not manylinux_*.
+              mkdir -p wrappers/python/ccl/_libs
+              cp /out/libccl.so wrappers/python/ccl/_libs/libccl.so
+
+              python3 -m venv /tmp/venv
+              /tmp/venv/bin/pip install --quiet build
+              ( cd wrappers/python && /tmp/venv/bin/python -m build --wheel --no-isolation )
+
+              WHEEL=$(ls wrappers/python/dist/*.whl)
+              echo "built: $WHEEL"
+              case "$WHEEL" in
+                *musllinux*) ;;
+                *) echo "FAIL: wheel is not musllinux-tagged: $WHEEL" >&2; exit 1 ;;
+              esac
+
+              # Install it clean and load the lib with NO env vars — the pip-install user experience.
+              python3 -m venv /tmp/wheelvenv
+              /tmp/wheelvenv/bin/pip install --quiet "$WHEEL"
+              cd /tmp && env -u CCL_LIB_PATH -u LD_LIBRARY_PATH \
+                /tmp/wheelvenv/bin/python -c "
+              import ccl
+              lib = ccl.CclLib()
+              assert lib.version()
+              lib.account.create(ccl.CclLib.TESTNET)
+              print(\"OK: musllinux wheel works on Alpine, no CCL_LIB_PATH\")
+              "
+            '
+
+      - name: Verify the JS wrapper runs on Alpine under Bun
+        run: |
+          set -eux
+          # oven/bun:alpine is Bun'"'"'s own musl build — the runtime an Alpine user would actually have.
+          docker run --rm -v "$PWD:/w" -w /w \
+            -v "$PWD/core/build/native/nativeCompile:/out" oven/bun:alpine sh -c '
+              set -eux
+              mkdir -p wrappers/js/libs
+              cp /out/libccl.so wrappers/js/libs/libccl.so
+              cd wrappers/js
+              env -u CCL_LIB_PATH -u LD_LIBRARY_PATH bun -e "
+                import { CclBridge, platformSuffix, TESTNET } from \"./src/index.js\";
+
+                // The regression this guards: platformSuffix() used to have no musl detection at all,
+                // so on Alpine it returned linux-x86_64 and resolved the *glibc* package, which
+                // cannot load under musl.
+                const suffix = platformSuffix();
+                if (suffix !== \"linux-musl-x86_64\") {
+                  throw new Error(\`platformSuffix() = \${suffix} on Alpine; expected linux-musl-x86_64\`);
+                }
+
+                const bridge = new CclBridge();
+                try {
+                  if (!bridge.version()) throw new Error(\"no version\");
+                  bridge.account.create(TESTNET);
+                  console.log(\`OK: JS wrapper runs on Alpine/musl under Bun (suffix=\${suffix})\`);
+                } finally {
+                  bridge.close();
+                }
+              "
             '
