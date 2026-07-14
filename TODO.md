@@ -181,6 +181,75 @@ available as a current dependency — no further upgrade needed.
 
 ---
 
+## 8. Developer Experience — from the four-wrapper DX audit
+
+A full DX audit of all four wrappers (2026-07-14) found the engineering underneath to be sound —
+offline/stateless core, hidden native memory, duck-typed providers, version-skew checks — but the
+*surface a newcomer touches* to be rough in all four languages. The audit split into two streams: the
+**crashes and correctness defects** it found (stale Go pin / 404, use-after-close aborting or
+deadlocking, Python thread affinity, Rust's unsound `Send`, the inverted+defaulted network selector,
+the JS `.d.ts` describing an API that did not exist, the missing `-10` error code) are fixed in a
+separate PR (#51, `fix(wrappers)`); what remains, tracked below, is **ergonomics**.
+
+These are the items that decide whether the library feels native or feels like an FFI shim, and they
+are the same complaint in all four languages:
+
+- [ ] `P1` **Typed models instead of untyped bags.** There is no `Utxo` or `ProtocolParams` type in
+      *any* language: Python hands back `dict`, Go `map[string]interface{}`, Rust `Result<String>` of
+      undocumented JSON, JS `object[]`. Users reverse-engineer snake_case keys from the examples with
+      no autocomplete and no compile-time help. (JS now has interfaces in its `.d.ts`; the other three
+      need real types — dataclasses / structs / serde models.)
+- [ ] `P1` **Typed errors instead of integer codes.** Every wrapper surfaces failures as an int code
+      the caller must compare by hand. Idiomatic equivalents: an exception hierarchy (Python),
+      sentinel errors that work with `errors.Is`/`errors.As` (Go — note `ccl.ErrInvalidAddress` is an
+      `int` today, so `errors.Is` does not even compile), a `thiserror` enum (Rust), a string
+      discriminant (JS). Related: giving Go's error codes a defined `ErrorCode` type would also stop
+      `Account.Create(ccl.Success)` compiling (untyped constants convert to `Network` today).
+- [ ] `P1` **A TxPlan builder.** The headline use case — build a transaction — is hand-templated YAML
+      with load-bearing indentation in all four languages (Rust's example uses `\x20` escapes). Both
+      JS and Python already depend on a YAML library, so accepting a plain object/dataclass and
+      serialising it is nearly free.
+- [ ] `P1` **Python: type hints + `py.typed`.** Not one annotation in the package today, so no
+      autocomplete, no mypy. Biggest everyday-friction item in that wrapper.
+- [ ] `P1` **JS: Node.js users get a baffling crash.** `engines.bun` enforces nothing (npm only honours
+      `node`/`npm`), so a Node user installs cleanly — even under `engine-strict` — and is rewarded
+      with `Received protocol 'bun:'`, which names neither Bun nor this package. Needs an `exports` map
+      with a `bun` condition and a `default` entry that throws a real explanation. Also add
+      `"type": "module"`.
+- [ ] `P2` **Rust: `pub use ffi::*` re-exports the entire raw C ABI** as public, semver-stable API —
+      docs.rs will open on `graal_create_isolate` and friends. Hide it (`#[doc(hidden)] pub mod sys`)
+      or split a `-sys` crate.
+- [ ] `P2` **Rust: docs.rs will likely fail to build the crate** — `build.rs` shells out to `curl`, and
+      docs.rs builds have no network. Needs a `DOCS_RS` escape hatch. Also `Cargo.toml` has no
+      `include`/`exclude`, so `cargo package` ships `tests/` (which read `../../test-fixtures/` and
+      cannot work from a published crate).
+- [ ] `P2` **Rust: the downloaded native library is unverified** — no checksum/signature on the
+      release tarball `build.rs` fetches and links. We already publish `SHA256SUMS`; check it.
+- [ ] `P2` **Go: no `context.Context` anywhere**, and providers use `http.DefaultClient` with no
+      timeout — a hung Blockfrost endpoint hangs `BuildWith` forever with no way to cancel.
+- [ ] `P2` **Go: 37 exported methods have no doc comment**, so `pkg.go.dev` renders a wall of bare
+      signatures. Magic ints are undiscoverable (`Script.Hash(cbor, scriptType int)` — the values are
+      documented only in the Java source). Naming also needs a pass: `ccl.CclError` stutters,
+      `AccountApi` should be `AccountAPI`, `ToJson` → `ToJSON`.
+- [ ] `P2` **Go: no module tag.** The module needs subdirectory-prefixed tags (`wrappers/go/v0.1.0`);
+      today `go get` resolves a `v0.0.0-<pseudo>` version, which reads as "unreleased".
+- [ ] `P2` **`validate`/`verify` return a bare bool** (Python, Go, Rust), collapsing "input was
+      garbage" and "signature genuinely invalid" into the same value. For a crypto API those must not
+      be indistinguishable.
+- [ ] `P2` **JS: `examples/` is not in the npm tarball**, and every relative README link (including the
+      one to the API reference and the TxPlan format) 404s on npmjs.com. There is no path to learning
+      the API from the package itself.
+- [ ] `P3` **JVM deprecation warnings on stderr.** Every `quicktx.build` prints
+      `WARNING: sun.misc.Unsafe::objectFieldOffset has been called by scala.runtime.LazyVals$` (Scalus's
+      Scala runtime). Harmless, but it lands on 100% of users on the headline path and reads as
+      "this thing is broken".
+- [ ] `P3` **Stale example/README instructions.** Go's example headers tell users to set
+      `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`, which the loader never consults (it wants `CCL_LIB_PATH`);
+      Rust's README `build(...)` snippet has the wrong arity and does not compile; Python's README
+      quick-start and 3 of 4 examples import from the private `ccl._ffi` rather than `ccl`.
+
+---
+
 ## Non-Goals (intentional, for now)
 
 - **Verified data structures** (`verified-structures`: Merkle Patricia Forestry,
