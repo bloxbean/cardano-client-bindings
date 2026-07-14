@@ -7,6 +7,7 @@ Each test builds its own CclLib rather than using the shared `ccl` fixture: they
 attaches extra threads to its isolate.
 """
 
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -67,9 +68,35 @@ def test_failed_load_raises_cleanly():
     __init__ raised before the isolate fields existed, so __del__ -> close() tripped over the
     half-built object and printed "'CclLib' object has no attribute '_thread'" on top of the real
     error — the first thing a newcomer with a bad CCL_LIB_PATH ever saw.
+
+    This has to run in a subprocess with the library-path variables stripped. Pointing CclLib at a
+    nonexistent directory is not enough on its own: macOS's dyld searches DYLD_LIBRARY_PATH for the
+    *leaf name* of a dylib even when it was given an absolute path, so with DYLD_LIBRARY_PATH set —
+    which is exactly what the Gradle test task does — "/nonexistent/libccl.dylib" cheerfully
+    resolves to the real library and nothing fails. (Linux's glibc does not do this for paths
+    containing a slash, so the bug was macOS-only and invisible locally.)
     """
-    with pytest.raises(OSError, match="Failed to load the CCL native library"):
-        CclLib(lib_path="/nonexistent-ccl-dir")
+    code = (
+        "from ccl import CclLib\n"
+        "try:\n"
+        "    CclLib(lib_path='/nonexistent-ccl-dir')\n"
+        "except OSError as e:\n"
+        "    print('OSERROR:', str(e).splitlines()[0])\n"
+        "else:\n"
+        "    print('NO-ERROR')\n"
+    )
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CCL_LIB_PATH", "DYLD_LIBRARY_PATH", "LD_LIBRARY_PATH")}
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          timeout=120, env=env)
+
+    assert "Failed to load the CCL native library" in proc.stdout, (
+        f"expected a clean OSError; got stdout={proc.stdout!r} stderr={proc.stderr[-400:]!r}"
+    )
+    # The actual regression: __del__ must not pile an AttributeError on top of the real error.
+    assert "AttributeError" not in proc.stderr, (
+        f"__del__ raised on a half-built object: {proc.stderr[-400:]}"
+    )
 
 
 def test_use_after_close_does_not_kill_the_interpreter():
