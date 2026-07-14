@@ -30,7 +30,21 @@ export const PREVIEW = 3;
 export class CclError extends Error {
   constructor(code, message) {
     super(`CCL Error ${code}: ${message}`);
+    this.name = 'CclError';
     this.code = code;
+  }
+}
+
+/**
+ * Thrown when a CclBridge is used after close().
+ *
+ * Without it the stale isolate handle reaches the native library and GraalVM aborts the whole
+ * process — uncatchable, with no JS stack trace.
+ */
+export class CclClosedError extends Error {
+  constructor() {
+    super('CclBridge is closed; create a new one (or move the call inside its `using`/try block)');
+    this.name = 'CclClosedError';
   }
 }
 
@@ -253,7 +267,7 @@ export class CclBridge {
     if (rc !== 0) {
       throw new Error(`Failed to create GraalVM isolate: ${rc}`);
     }
-    this._thread = Number(threadBuf[0]);
+    this._threadPtr = Number(threadBuf[0]);
 
     this._checkVersion();
 
@@ -267,6 +281,25 @@ export class CclBridge {
     this.gov = new GovApi(this);
     this.wallet = new WalletApi(this);
     this.quicktx = new QuickTxApi(this);
+  }
+
+  /**
+   * The GraalVM isolate thread. Every FFI call in this file reads it, so it is the one place that
+   * can catch use-after-close.
+   *
+   * close() tears the isolate down; passing its stale handle back to the native side makes GraalVM
+   * abort the *process* ("Failed to enter the specified IsolateThread context") — not a JS
+   * exception, so try/catch cannot see it and no stack points at the offending call. Any stray async
+   * callback racing the `finally { bridge.close() }` that the examples teach would kill the process.
+   * Throwing a real Error here turns that into something catchable and debuggable.
+   *
+   * @throws {CclClosedError} if the bridge has been closed
+   */
+  get _thread() {
+    if (this._threadPtr === null) {
+      throw new CclClosedError();
+    }
+    return this._threadPtr;
   }
 
   _getResult() {
@@ -294,11 +327,17 @@ export class CclBridge {
     return this._getResult();
   }
 
+  /** Tear down the isolate. Idempotent; any later call throws {@link CclClosedError}. */
   close() {
-    if (this._thread) {
-      this._lib.graal_tear_down_isolate(this._thread);
-      this._thread = null;
+    if (this._threadPtr !== null) {
+      this._lib.graal_tear_down_isolate(this._threadPtr);
+      this._threadPtr = null;
     }
+  }
+
+  /** Enables `using bridge = new CclBridge()` — closes automatically at end of scope. */
+  [Symbol.dispose]() {
+    this.close();
   }
 
   version() {

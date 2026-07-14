@@ -4,6 +4,7 @@ mod ffi;
 pub mod providers;
 
 use std::ffi::{CStr, CString};
+use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::ptr;
 
@@ -23,6 +24,8 @@ pub mod error_codes {
     pub const CCL_ERROR_INVALID_ADDRESS: i32 = -7;
     pub const CCL_ERROR_INSUFFICIENT_FUNDS: i32 = -8;
     pub const CCL_ERROR_INVALID_TRANSACTION: i32 = -9;
+    /// Malformed TxPlan — the most common failure on the core build path.
+    pub const CCL_ERROR_TX_BUILD: i32 = -10;
 }
 
 /// Network IDs.
@@ -63,14 +66,50 @@ fn to_cstring(s: &str) -> Result<CString> {
 }
 
 /// Safe wrapper around the CCL native library.
+///
+/// # Threading
+///
+/// A `Bridge` is **thread-affine**: it must be used from the thread that created it. It is therefore
+/// neither `Send` nor `Sync`, and the compiler will stop you from moving one across threads. To use
+/// the library from several threads, **create one `Bridge` per thread**.
+///
+/// This is not a conservative choice; it is what the native library requires. A `Bridge` holds a
+/// `graal_isolatethread_t*`, and that handle belongs to the OS thread that created it — it carries
+/// that thread's stack bounds and the VM's thread-local state, including the result/error slots that
+/// [`Bridge::get_result`] reads back after each call. Handing it to another thread corrupts the VM.
+/// (The *isolate* — the heap — can be shared; the isolate **thread** cannot. Conflating the two is
+/// what made the previous `unsafe impl Send for Bridge` unsound: it let safe code do exactly this,
+/// with no `unsafe` block anywhere in sight, and it appeared to work right up until it didn't.)
+///
+/// Moving a `Bridge` to another thread does not compile — and must keep not compiling:
+///
+/// ```compile_fail
+/// let bridge = ccl::Bridge::new().unwrap();
+/// std::thread::spawn(move || {
+///     let _ = bridge.version(); // error: `*mut c_void` cannot be sent between threads safely
+/// });
+/// ```
+///
+/// Use one per thread instead:
+///
+/// ```no_run
+/// let handles: Vec<_> = (0..4)
+///     .map(|_| std::thread::spawn(|| {
+///         let bridge = ccl::Bridge::new()?;   // each thread owns its own isolate
+///         bridge.version()
+///     }))
+///     .collect();
+/// # Ok::<(), ccl::CclError>(())
+/// ```
 pub struct Bridge {
     #[allow(dead_code)]
     isolate: *mut ffi::graal_isolate_t,
     thread: *mut ffi::graal_isolatethread_t,
+    // Raw pointers are already !Send + !Sync, so no negative impl is needed — but that is a load-
+    // bearing property of this type, not an accident, and removing this field must not silently
+    // make it Send again.
+    _not_send: PhantomData<*const ()>,
 }
-
-// Bridge is Send because GraalVM isolates can be passed between threads
-unsafe impl Send for Bridge {}
 
 impl Bridge {
     /// Create a new Bridge instance with a GraalVM isolate.
@@ -89,7 +128,11 @@ impl Bridge {
             });
         }
 
-        let bridge = Bridge { isolate, thread };
+        let bridge = Bridge {
+            isolate,
+            thread,
+            _not_send: PhantomData,
+        };
         bridge.check_version()?;
         Ok(bridge)
     }

@@ -2,6 +2,7 @@ package ccl
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -31,6 +32,8 @@ const (
 	ErrInvalidAddress     = -7
 	ErrInsufficientFunds  = -8
 	ErrInvalidTransaction = -9
+	// ErrTxBuild is a malformed TxPlan — the most common failure on the core build path.
+	ErrTxBuild = -10
 )
 
 // CclError represents an error from the CCL native library.
@@ -156,10 +159,24 @@ func (b *Bridge) loop(ready chan<- error) {
 	}
 }
 
-// run executes fn on the isolate's dedicated OS thread and blocks until it finishes.
-func (b *Bridge) run(fn func()) {
+// ErrBridgeClosed is returned by any call made on a Bridge after Close. Test for it with errors.Is.
+var ErrBridgeClosed = errors.New("ccl: bridge is closed")
+
+// run executes fn on the isolate's dedicated OS thread and blocks until it finishes. It returns
+// ErrBridgeClosed if the Bridge is closed.
+//
+// The closed check is not optional: Close sets b.calls to nil, and a send on a nil channel blocks
+// forever — while this goroutine holds b.mu. A single stray call after Close would therefore hang
+// that goroutine permanently *and* deadlock every other goroutine behind the mutex, with no error
+// and no stack to point at the cause. Failing fast here turns the worst failure mode into an error
+// value.
+func (b *Bridge) run(fn func()) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	if b.calls == nil {
+		return ErrBridgeClosed
+	}
 
 	done := make(chan struct{})
 	b.calls <- func() {
@@ -167,6 +184,7 @@ func (b *Bridge) run(fn func()) {
 		close(done)
 	}
 	<-done
+	return nil
 }
 
 // invoke runs a result-returning FFI call on the isolate thread and reads the
@@ -174,21 +192,26 @@ func (b *Bridge) run(fn func()) {
 func (b *Bridge) invoke(call func() int32) (string, error) {
 	var s string
 	var err error
-	b.run(func() {
+	if rerr := b.run(func() {
 		if rc := call(); rc != Success {
 			err = &CclError{Code: int(rc), Message: b.getError()}
 		} else {
 			s = b.getResult()
 		}
-	})
+	}); rerr != nil {
+		return "", rerr
+	}
 	return s, err
 }
 
 // invokeRC runs an FFI call on the isolate thread and returns its raw status code,
 // for calls (e.g. validate/verify) where the caller interprets the code directly.
+// A closed Bridge yields ErrGeneral, so those calls report failure rather than deadlocking.
 func (b *Bridge) invokeRC(call func() int32) int32 {
 	var rc int32
-	b.run(func() { rc = call() })
+	if err := b.run(func() { rc = call() }); err != nil {
+		return ErrGeneral
+	}
 	return rc
 }
 
