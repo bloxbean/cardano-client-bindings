@@ -1,33 +1,40 @@
 name: Publish Rust crate
 
-# Publishes the `cardano-client-lib` crate to crates.io on a version tag — gated behind an admin flag.
-# Unlike the Python wheels / npm packages, the crate ships SOURCE ONLY: crates.io can't host the
-# native binary, so the crate's `build.rs` fetches the matching `libccl` from this repo's GitHub
-# release at the *consumer's* build time. There are therefore no per-platform artifacts here — just
-# a single `cargo publish`.
+# Publishes the `cardano-client-lib` crate to crates.io on a v* tag via crates.io trusted publishing
+# (OIDC — no API token secret). The build/validation lives in build-rust-crate.yml (run on PRs by
+# publish-rust-dry-run.yml); workflow_dispatch runs it here as a manual dry run (publish skipped).
 #
-# Enabling crates.io (admin, one-time):
-#   1. Create a crates.io API token with publish rights for `cardano-client-lib`, and add it as the
-#      `CARGO_REGISTRY_TOKEN` secret (Settings -> Secrets and variables -> Actions -> Secrets).
-#   2. Set repository variable `CRATES_PUBLISH=true` (… -> Variables).
-# Until both are set, this workflow only *validates* the crate (a dry-run publish); nothing uploads.
+# The crate ships SOURCE ONLY — crates.io can't host the native binary, so the crate's build.rs
+# fetches the matching libccl from this repo's GitHub release at the *consumer's* build time. So the
+# release must exist before/with the publish (see RELEASING.md).
+#
+# Version: `version` in gradle.properties is the single source of truth. Cargo.toml's `version` and
+# build.rs's DEFAULT_LIB_VERSION are stamped from it; the v* tag must equal v<version>.
 
 on:
   push:
     tags: ['v*']
-  # Build-only validation when the workflow or the crate changes (publish is tag + flag gated, so a PR
-  # never uploads). workflow_dispatch is unavailable until this file lands on the default branch, so
-  # this path filter is how the crate gets validated pre-merge.
-  pull_request:
-    paths:
-      - '.github/workflows/publish-rust.yml'
-      - 'wrappers/rust/**'
   workflow_dispatch:
 
 jobs:
-  crate:
-    name: crate (crates.io)
+  build:
+    uses: ./.github/workflows/build-rust-crate.yml
+
+  publish:
+    needs: build
     runs-on: ubuntu-latest
+    # Final human gate before the irreversible crates.io publish (a published version can never be
+    # overwritten or deleted, only yanked): the job pauses until a required reviewer of the
+    # `crates-release` environment approves (configured in repo settings). See RELEASING.md.
+    environment: crates-release
+    # Trusted publishing: crates.io exchanges the GitHub OIDC token for a short-lived publish token —
+    # no CARGO_REGISTRY_TOKEN secret. Configure the trusted publisher on crates.io against this repo,
+    # this workflow filename, and the `crates-release` environment.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CRATE_VERSION: ${{ needs.build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: graalvm/setup-graalvm@v1
@@ -36,23 +43,25 @@ jobs:
           distribution: 'graalvm'
       - uses: dtolnay/rust-toolchain@stable
 
-      # cargo's verification build runs build.rs, which needs libccl. Build it here and point
-      # CCL_LIB_PATH at it so the verify uses the in-tree lib instead of downloading from a release
-      # (which, for an unreleased dev version, wouldn't exist yet).
+      # `cargo publish` verify-builds the crate, which runs build.rs. Point it at an in-tree libccl so
+      # the verify doesn't depend on the release tarball already being downloadable.
       - name: Build native library (for the verification build)
         run: ./gradlew :core:nativeCompile
       - name: Point build.rs at the in-tree lib
         run: echo "CCL_LIB_PATH=$PWD/core/build/native/nativeCompile" >> "$GITHUB_ENV"
 
-      # Always: package + verify-build the crate (catches metadata / packaging / build.rs regressions).
-      - name: Validate the crate (dry-run publish)
-        working-directory: wrappers/rust
-        run: cargo publish --dry-run
+      - name: Stamp crate version from gradle.properties
+        run: ./wrappers/rust/scripts/set-crate-version.sh "$CRATE_VERSION"
 
-      # Only on a version tag AND when an admin has enabled it.
+      - name: Authenticate to crates.io (trusted publishing)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
       - name: Publish to crates.io
-        if: startsWith(github.ref, 'refs/tags/v') && vars.CRATES_PUBLISH == 'true'
+        if: startsWith(github.ref, 'refs/tags/')
         working-directory: wrappers/rust
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        # --allow-dirty: the version stamp above modifies Cargo.toml / build.rs in the checkout.
+        run: cargo publish --allow-dirty

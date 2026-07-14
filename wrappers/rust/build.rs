@@ -15,9 +15,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Release tag the prebuilt native lib is fetched from when it isn't available locally. Kept separate
-// from the crate version (release tags may carry a preview suffix); override with CCL_LIB_VERSION.
-const DEFAULT_LIB_VERSION: &str = "v0.1.0-preview1";
+// Release tag the prebuilt native lib is fetched from when it isn't available locally. Stamped from
+// `version` in gradle.properties (the single source of truth) by scripts/set-crate-version.sh at
+// build/publish time — always `v<crate version>`; never hand-maintained. Override with
+// CCL_LIB_VERSION to test against a different release.
+const DEFAULT_LIB_VERSION: &str = "v0.1.0-pre4";
 const REPO: &str = "bloxbean/cardano-client-bindings";
 
 fn main() {

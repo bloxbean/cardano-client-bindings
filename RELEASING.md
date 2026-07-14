@@ -28,16 +28,20 @@ GitHub Release for the tag.
 
 ## 2. Keep the pinned versions in lockstep
 
-Two wrappers **fetch** the native library from that release and pin its version in source. **Bump
-both to the new tag before (or as part of) the release**, or they will download the wrong version:
+**`gradle.properties` `version` is the single source of truth.** It generates the native lib's
+`ccl_version`, and the **JS** and **Rust** packages are **stamped from it in CI** — their versions are
+never hand-maintained. On a `v*` tag the tag must equal `v<version>`, so a mistyped tag can't publish
+a mismatched version.
 
-| Wrapper | Constant | File |
+| Wrapper | Version + release-tag pin | Manual bump needed? |
 |---|---|---|
-| Rust | `DEFAULT_LIB_VERSION` | [`wrappers/rust/build.rs`](wrappers/rust/build.rs) |
-| Go   | `defaultLibVersion`   | [`wrappers/go/ccl/loader.go`](wrappers/go/ccl/loader.go) |
+| **Rust** | `Cargo.toml` `version` **and** `DEFAULT_LIB_VERSION` in `build.rs` — stamped by [`wrappers/rust/scripts/set-crate-version.sh`](wrappers/rust/scripts/set-crate-version.sh) | **No** — `gradle.properties` only |
+| **JS** | `package.json` version + `optionalDependencies` pins — stamped by [`wrappers/js/scripts/set-package-version.mjs`](wrappers/js/scripts/set-package-version.mjs) | **No** — `gradle.properties` only |
+| **Go** | `defaultLibVersion` in [`wrappers/go/ccl/loader.go`](wrappers/go/ccl/loader.go) (the release tag it downloads) | **Yes** — Go has no build step to stamp it |
+| **Python** | `pyproject.toml` `version` | **Yes** (until stamped like the others) |
 
-Both accept a `CCL_LIB_VERSION` environment override (build time for Rust, run time for Go) — useful
-for testing against a release before pinning it.
+Rust and Go both accept a `CCL_LIB_VERSION` environment override (build time for Rust, run time for
+Go) — useful for testing against a release before pinning it.
 
 **Version-skew check.** On init each wrapper calls `ccl_version` and fails fast if it doesn't match
 the wrapper's expected version (bypass with `CCL_SKIP_VERSION_CHECK`). The lib side is single-sourced —
@@ -46,7 +50,7 @@ for the native lib. The wrapper's *expected* version must be bumped in lockstep 
 
 | Wrapper | Expected-version source | Bump needed? |
 |---|---|---|
-| Rust | `CARGO_PKG_VERSION` (`Cargo.toml` `version`) | automatic with the package version |
+| Rust | `CARGO_PKG_VERSION` (`Cargo.toml` `version`, itself stamped from `gradle.properties`) | **no** — fully derived |
 | Python | `EXPECTED_LIB_VERSION` in [`wrappers/python/ccl/_ffi.py`](wrappers/python/ccl/_ffi.py) | **yes**, alongside `pyproject.toml` |
 | JS | `EXPECTED_LIB_VERSION` in [`wrappers/js/src/index.js`](wrappers/js/src/index.js) | **yes**, alongside `package.json` |
 | Go | `expectedLibVersion` in [`wrappers/go/ccl/ccl.go`](wrappers/go/ccl/ccl.go) | **yes** (Go has no package-version field) |
