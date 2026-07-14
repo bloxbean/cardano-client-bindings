@@ -8,8 +8,9 @@ name: Publish Rust crate
 # fetches the matching libccl from this repo's GitHub release at the *consumer's* build time. So the
 # release must exist before/with the publish (see RELEASING.md).
 #
-# Version: `version` in gradle.properties is the single source of truth. Cargo.toml's `version` and
-# build.rs's DEFAULT_LIB_VERSION are stamped from it; the v* tag must equal v<version>.
+# Version: `version` in gradle.properties is the single source of truth. Cargo.toml's `version` is
+# stamped from it and build.rs derives the release tag it fetches from that; the v* tag must equal
+# v<version>, so the published crate always points at the release it was built from.
 
 on:
   push:

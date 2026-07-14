@@ -4,8 +4,9 @@ name: Build Rust crate
 # publishing. Called by publish-rust.yml (release) and publish-rust-dry-run.yml (PR validation).
 #
 # The version comes from `version` in gradle.properties (single source of truth); on a v* tag the tag
-# must match it. Cargo.toml's `version` and build.rs's DEFAULT_LIB_VERSION are stamped from it at
-# build time (scripts/set-crate-version.sh) — never hand-maintained. Mirrors build-js-packages.yml.
+# must match it. Cargo.toml's `version` is stamped from it at build time (scripts/set-crate-version.sh)
+# — never hand-maintained. The release tag build.rs fetches libccl from is derived from that in turn,
+# so the crate has exactly one version site. Mirrors build-js-packages.yml.
 
 on:
   workflow_call:

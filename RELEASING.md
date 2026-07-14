@@ -35,7 +35,7 @@ a mismatched version.
 
 | Wrapper | Version + release-tag pin | Manual bump needed? |
 |---|---|---|
-| **Rust** | `Cargo.toml` `version` **and** `DEFAULT_LIB_VERSION` in `build.rs` — stamped by [`wrappers/rust/scripts/set-crate-version.sh`](wrappers/rust/scripts/set-crate-version.sh) | **No** — `gradle.properties` only |
+| **Rust** | `Cargo.toml` `version` — stamped by [`set-crate-version.sh`](wrappers/rust/scripts/set-crate-version.sh). The release tag `build.rs` fetches libccl from is *derived* from it (`v$CARGO_PKG_VERSION`), not stored | **No** — `gradle.properties` only |
 | **JS** | `package.json` version + `optionalDependencies` pins — stamped by [`wrappers/js/scripts/set-package-version.mjs`](wrappers/js/scripts/set-package-version.mjs) | **No** — `gradle.properties` only |
 | **Go** | `defaultLibVersion` in [`wrappers/go/ccl/loader.go`](wrappers/go/ccl/loader.go) (the release tag it downloads) | **Yes** — Go has no build step to stamp it |
 | **Python** | `pyproject.toml` `version` | **Yes** (until stamped like the others) |
