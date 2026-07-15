@@ -130,7 +130,7 @@ jobs:
       # artifact of their own (a musllinux wheel; a linux-musl-x86_64 npm package). Both are now
       # built, and these steps prove they actually work on Alpine, which is the only way to know the
       # artifact is right rather than merely present.
-      - name: Verify the Python musllinux wheel installs and runs on Alpine
+      - name: Verify the Python wheel bundling the musl lib installs and runs on Alpine
         run: |
           set -eux
           docker run --rm -v "$PWD:/w" -w /w \
@@ -138,21 +138,24 @@ jobs:
               set -eux
               apk add --no-cache python3 py3-pip >/dev/null
 
-              # Stage the musl lib exactly as the wheel build does, then build the wheel here — on
-              # musl, so setuptools tags it musllinux_*, not manylinux_*.
+              # Bundle the musl lib exactly as the wheel build does, then build + install + load the
+              # wheel on Alpine. This proves the musl libccl works through the wheel path — the thing
+              # that was missing. It deliberately does NOT assert a musllinux_* platform tag: `python
+              # -m build` emits the legacy linux_x86_64 tag, and the PEP 600 musllinux tag (which
+              # PyPI requires) is applied by auditwheel at *publish* time — same as manylinux for the
+              # glibc wheels, and same as this repos existing glibc wheel verification, which asserts
+              # load, not tag. That repair step belongs to the Python publish workflow (PR #15).
               mkdir -p wrappers/python/ccl/_libs
               cp /out/libccl.so wrappers/python/ccl/_libs/libccl.so
 
+              # --no-isolation builds with *this* venv backend, so setuptools+wheel must be present
+              # here (installing only `build` leaves "Cannot import setuptools.build_meta").
               python3 -m venv /tmp/venv
-              /tmp/venv/bin/pip install --quiet build
+              /tmp/venv/bin/pip install --quiet build setuptools wheel
               ( cd wrappers/python && /tmp/venv/bin/python -m build --wheel --no-isolation )
 
               WHEEL=$(ls wrappers/python/dist/*.whl)
               echo "built: $WHEEL"
-              case "$WHEEL" in
-                *musllinux*) ;;
-                *) echo "FAIL: wheel is not musllinux-tagged: $WHEEL" >&2; exit 1 ;;
-              esac
 
               # Install it clean and load the lib with NO env vars — the pip-install user experience.
               python3 -m venv /tmp/wheelvenv
@@ -163,7 +166,7 @@ jobs:
               lib = ccl.CclLib()
               assert lib.version()
               lib.account.create(ccl.CclLib.TESTNET)
-              print(\"OK: musllinux wheel works on Alpine, no CCL_LIB_PATH\")
+              print(\"OK: wheel bundling the musl lib works on Alpine, no CCL_LIB_PATH\")
               "
             '
 
