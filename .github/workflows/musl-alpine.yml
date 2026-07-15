@@ -158,16 +158,12 @@ jobs:
               echo "built: $WHEEL"
 
               # Install it clean and load the lib with NO env vars — the pip-install user experience.
+              # One-line python -c: a multi-line body would carry this block leading whitespace into
+              # the source and trip IndentationError. Escaped double quotes because we are inside a
+              # single-quoted docker sh -c.
               python3 -m venv /tmp/wheelvenv
               /tmp/wheelvenv/bin/pip install --quiet "$WHEEL"
-              cd /tmp && env -u CCL_LIB_PATH -u LD_LIBRARY_PATH \
-                /tmp/wheelvenv/bin/python -c "
-              import ccl
-              lib = ccl.CclLib()
-              assert lib.version()
-              lib.account.create(ccl.CclLib.TESTNET)
-              print(\"OK: wheel bundling the musl lib works on Alpine, no CCL_LIB_PATH\")
-              "
+              cd /tmp && env -u CCL_LIB_PATH -u LD_LIBRARY_PATH /tmp/wheelvenv/bin/python -c "import ccl; lib = ccl.CclLib(); assert lib.version(); lib.account.create(ccl.CclLib.TESTNET); print(\"OK: wheel bundling the musl lib works on Alpine, no CCL_LIB_PATH\")"
             '
 
       - name: Verify the JS wrapper runs on Alpine under Bun
