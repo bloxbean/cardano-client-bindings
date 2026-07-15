@@ -81,7 +81,14 @@ A `*Bridge` exposes these namespaces (all offline operations):
 `bridge.Account`, `bridge.Address`, `bridge.Crypto`, `bridge.Tx`, `bridge.Plutus`,
 `bridge.Script`, `bridge.Gov`, `bridge.Wallet`, `bridge.QuickTx`.
 
-Network IDs: `ccl.Mainnet` (0), `ccl.Testnet` (1), `ccl.Preprod` (2), `ccl.Preview` (3).
+Networks are the `ccl.Network` type: `ccl.Mainnet`, `ccl.Testnet`, `ccl.Preprod`, `ccl.Preview`.
+
+> **These are CCL's enum ordinals, not Cardano's on-chain network id.** `Mainnet` is 0 and
+> `Testnet` is 1, which is the *inverse* of the on-chain encoding (0 = testnet, 1 = mainnet).
+> So an account created with `ccl.Mainnet` has an `AddressInfo.NetworkID` of `1` — `NetworkID` on
+> the *returned* `AddressInfo` is the genuine on-chain value decoded from the address. Always pass
+> a `ccl.Network` constant; passing a raw int for the network is a compile error.
+
 Errors are returned as a `*ccl.CclError`.
 
 Transactions are built from a [TxPlan](https://github.com/bloxbean/cardano-client-lib)

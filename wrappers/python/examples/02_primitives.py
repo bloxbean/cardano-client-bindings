@@ -7,7 +7,7 @@ Run from the repo root:
     DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
       python3 wrappers/python/examples/02_primitives.py
 """
-from ccl._ffi import CclLib
+from ccl import CclLib, Network
 
 
 def main():
@@ -26,9 +26,9 @@ def main():
         # --- Ed25519 signing ---
         # account_get_private_key returns the 64-byte extended key; ccl_crypto_sign
         # expects a 32-byte Ed25519 key, so take the first 32 bytes (64 hex chars).
-        acct = lib.account.create(CclLib.TESTNET)
-        sk = lib.account.get_private_key(acct["mnemonic"], CclLib.TESTNET)[:64]
-        pk = lib.account.get_public_key(acct["mnemonic"], CclLib.TESTNET)
+        acct = lib.account.create(Network.TESTNET)
+        sk = lib.account.get_private_key(acct["mnemonic"], Network.TESTNET)[:64]
+        pk = lib.account.get_public_key(acct["mnemonic"], Network.TESTNET)
         message_hex = "68656c6c6f"  # "hello"
         signature = lib.crypto.sign(message_hex, sk)
         print("Ed25519 signature:", signature)

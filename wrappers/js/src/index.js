@@ -21,16 +21,60 @@ export const CCL_ERROR_INSUFFICIENT_FUNDS = -8;
 export const CCL_ERROR_INVALID_TRANSACTION = -9;
 export const CCL_ERROR_TX_BUILD = -10;
 
-// Network IDs
+// Network selectors.
+//
+// WARNING — these are CCL's `Network` *enum ordinals*, NOT Cardano's on-chain network id. They are
+// inverted with respect to it: on-chain, testnet is 0 and mainnet is 1, whereas here MAINNET is 0
+// and TESTNET is 1. Never pass a raw number: `account.create(0)` derives a **mainnet** key, not a
+// testnet one. Always pass one of these constants.
+//
+// The genuine on-chain id is the `network_id` field returned by `address.info()` — an account made
+// with MAINNET (0) has `address.info().network_id === 1`, and one made with TESTNET (1) has 0.
 export const MAINNET = 0;
 export const TESTNET = 1;
 export const PREPROD = 2;
 export const PREVIEW = 3;
 
+const NETWORKS = new Set([MAINNET, TESTNET, PREPROD, PREVIEW]);
+
+// Validate a `network` argument at the wrapper boundary. Without this an out-of-range value reaches
+// the native library, which fails with an opaque error (or, for a valid-looking ordinal, silently
+// derives keys for the wrong network).
+function checkNetwork(network) {
+  if (network === undefined || network === null) {
+    throw new TypeError(
+      'network is required: pass MAINNET, TESTNET, PREPROD or PREVIEW. ' +
+      'These are CCL enum ordinals (MAINNET === 0), not Cardano\'s on-chain network id.'
+    );
+  }
+  if (!NETWORKS.has(network)) {
+    throw new RangeError(
+      `invalid network ${JSON.stringify(network)}: expected MAINNET (0), TESTNET (1), PREPROD (2) ` +
+      'or PREVIEW (3). These are CCL enum ordinals, not Cardano\'s on-chain network id ' +
+      '(on-chain: 0 = testnet, 1 = mainnet — the inverse).'
+    );
+  }
+  return network;
+}
+
 export class CclError extends Error {
   constructor(code, message) {
     super(`CCL Error ${code}: ${message}`);
+    this.name = 'CclError';
     this.code = code;
+  }
+}
+
+/**
+ * Thrown when a CclBridge is used after close().
+ *
+ * Without it the stale isolate handle reaches the native library and GraalVM aborts the whole
+ * process — uncatchable, with no JS stack trace.
+ */
+export class CclClosedError extends Error {
+  constructor() {
+    super('CclBridge is closed; create a new one (or move the call inside its `using`/try block)');
+    this.name = 'CclClosedError';
   }
 }
 
@@ -253,7 +297,7 @@ export class CclBridge {
     if (rc !== 0) {
       throw new Error(`Failed to create GraalVM isolate: ${rc}`);
     }
-    this._thread = Number(threadBuf[0]);
+    this._threadPtr = Number(threadBuf[0]);
 
     this._checkVersion();
 
@@ -267,6 +311,25 @@ export class CclBridge {
     this.gov = new GovApi(this);
     this.wallet = new WalletApi(this);
     this.quicktx = new QuickTxApi(this);
+  }
+
+  /**
+   * The GraalVM isolate thread. Every FFI call in this file reads it, so it is the one place that
+   * can catch use-after-close.
+   *
+   * close() tears the isolate down; passing its stale handle back to the native side makes GraalVM
+   * abort the *process* ("Failed to enter the specified IsolateThread context") — not a JS
+   * exception, so try/catch cannot see it and no stack points at the offending call. Any stray async
+   * callback racing the `finally { bridge.close() }` that the examples teach would kill the process.
+   * Throwing a real Error here turns that into something catchable and debuggable.
+   *
+   * @throws {CclClosedError} if the bridge has been closed
+   */
+  get _thread() {
+    if (this._threadPtr === null) {
+      throw new CclClosedError();
+    }
+    return this._threadPtr;
   }
 
   _getResult() {
@@ -294,11 +357,17 @@ export class CclBridge {
     return this._getResult();
   }
 
+  /** Tear down the isolate. Idempotent; any later call throws {@link CclClosedError}. */
   close() {
-    if (this._thread) {
-      this._lib.graal_tear_down_isolate(this._thread);
-      this._thread = null;
+    if (this._threadPtr !== null) {
+      this._lib.graal_tear_down_isolate(this._threadPtr);
+      this._threadPtr = null;
     }
+  }
+
+  /** Enables `using bridge = new CclBridge()` — closes automatically at end of scope. */
+  [Symbol.dispose]() {
+    this.close();
   }
 
   version() {
@@ -325,48 +394,81 @@ export class CclBridge {
 class AccountApi {
   constructor(bridge) { this._b = bridge; }
 
-  create(networkId = MAINNET) {
-    return JSON.parse(this._b._check(this._b._lib.ccl_account_create(this._b._thread, networkId)));
+  /**
+   * Create a new account (random 24-word mnemonic) on `network`.
+   *
+   * @param {0|1|2|3} network - MAINNET (0), TESTNET (1), PREPROD (2) or PREVIEW (3). Required, and a
+   *   CCL enum ordinal — **not** Cardano's on-chain network id, which is inverted (on-chain: 0 =
+   *   testnet, 1 = mainnet). An account created with MAINNET (the ordinal 0) has an
+   *   `address.info().network_id` of 1; one created with TESTNET (the ordinal 1) has 0.
+   * @returns {{mnemonic: string, base_address: string, enterprise_address: string, stake_address: string, change_address: string}}
+   */
+  create(network) {
+    checkNetwork(network);
+    return JSON.parse(this._b._check(this._b._lib.ccl_account_create(this._b._thread, network)));
   }
 
-  fromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
+  /** Restore an account from a mnemonic. `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
+  fromMnemonic(mnemonic, network, accountIndex = 0, addressIndex = 0) {
+    checkNetwork(network);
     return JSON.parse(this._b._check(
-      this._b._lib.ccl_account_from_mnemonic(this._b._thread, networkId, cstr(mnemonic), accountIndex, addressIndex)));
+      this._b._lib.ccl_account_from_mnemonic(this._b._thread, network, cstr(mnemonic), accountIndex, addressIndex)));
   }
 
-  getPrivateKey(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
+  /** Extended private key (hex). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
+  getPrivateKey(mnemonic, network, accountIndex = 0, addressIndex = 0) {
+    checkNetwork(network);
     return this._b._check(
-      this._b._lib.ccl_account_get_private_key(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex));
+      this._b._lib.ccl_account_get_private_key(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex));
   }
 
-  getPublicKey(mnemonic, networkId = MAINNET, accountIndex = 0, addressIndex = 0) {
+  /** Public key (hex). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
+  getPublicKey(mnemonic, network, accountIndex = 0, addressIndex = 0) {
+    checkNetwork(network);
     return this._b._check(
-      this._b._lib.ccl_account_get_public_key(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex));
+      this._b._lib.ccl_account_get_public_key(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex));
   }
 
-  getDrepId(mnemonic, networkId = MAINNET, accountIndex = 0) {
+  /** DRep ID (bech32). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
+  getDrepId(mnemonic, network, accountIndex = 0) {
+    checkNetwork(network);
     return this._b._check(
-      this._b._lib.ccl_account_get_drep_id(this._b._thread, cstr(mnemonic), networkId, accountIndex));
+      this._b._lib.ccl_account_get_drep_id(this._b._thread, cstr(mnemonic), network, accountIndex));
   }
 
-  signTx(mnemonic, networkId, accountIndex, addressIndex, txCborHex) {
+  /** Sign a transaction with the account's payment key. `network` is a CCL ordinal (MAINNET === 0). */
+  signTx(mnemonic, network, accountIndex, addressIndex, txCborHex) {
+    checkNetwork(network);
     return this._b._check(
-      this._b._lib.ccl_account_sign_tx(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex)));
+      this._b._lib.ccl_account_sign_tx(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex, cstr(txCborHex)));
   }
 
   // Sign with one or more of the account's keys, selected by role (any of: payment, stake, drep,
   // committee_cold, committee_hot, applied in order). Use for transactions whose certificates also
   // need the stake or DRep key — stake registration/delegation/withdrawal and DRep/vote operations.
-  signTxWithKeys(mnemonic, networkId, accountIndex, addressIndex, txCborHex, keys) {
+  //
+  // `network` is a CCL enum ordinal (MAINNET === 0), not the on-chain network id.
+  signTxWithKeys(mnemonic, network, accountIndex, addressIndex, txCborHex, keys) {
+    checkNetwork(network);
     const keysStr = Array.isArray(keys) ? keys.join(",") : keys;
     return this._b._check(
-      this._b._lib.ccl_account_sign_tx_multi(this._b._thread, cstr(mnemonic), networkId, accountIndex, addressIndex, cstr(txCborHex), cstr(keysStr)));
+      this._b._lib.ccl_account_sign_tx_multi(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex, cstr(txCborHex), cstr(keysStr)));
   }
 }
 
 class AddressApi {
   constructor(bridge) { this._b = bridge; }
 
+  /**
+   * Decode a bech32 address.
+   *
+   * The returned `network_id` is Cardano's genuine **on-chain** network id (0 = testnet, 1 =
+   * mainnet) — the inverse of the MAINNET/TESTNET ordinals accepted by the `network` parameters
+   * elsewhere in this API. Do not feed it back into `account.create()` / `wallet.create()`.
+   *
+   * @param {string} bech32
+   * @returns {{type: string, network_id: 0|1, payment_credential_hash?: string, delegation_credential_hash?: string, is_pubkey_payment: boolean, is_script_payment: boolean}}
+   */
   info(bech32) {
     return JSON.parse(this._b._check(this._b._lib.ccl_address_info(this._b._thread, cstr(bech32))));
   }
@@ -464,40 +566,54 @@ class ScriptApi {
   }
 }
 
+// Every `network` below is a CCL enum ordinal (MAINNET === 0, TESTNET === 1, …), *not* Cardano's
+// on-chain network id — those are inverted (on-chain: 0 = testnet, 1 = mainnet).
 class GovApi {
   constructor(bridge) { this._b = bridge; }
 
-  drepKeyFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0) {
+  /** DRep key + id. `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
+  drepKeyFromMnemonic(mnemonic, network, accountIndex = 0) {
+    checkNetwork(network);
     return JSON.parse(this._b._check(
-      this._b._lib.ccl_gov_drep_key_from_mnemonic(this._b._thread, cstr(mnemonic), networkId, accountIndex)));
+      this._b._lib.ccl_gov_drep_key_from_mnemonic(this._b._thread, cstr(mnemonic), network, accountIndex)));
   }
 
-  committeeColdKeyFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0) {
+  /** Constitutional-committee cold key. `network` is a CCL ordinal (MAINNET === 0). */
+  committeeColdKeyFromMnemonic(mnemonic, network, accountIndex = 0) {
+    checkNetwork(network);
     return JSON.parse(this._b._check(
-      this._b._lib.ccl_gov_committee_cold_key_from_mnemonic(this._b._thread, cstr(mnemonic), networkId, accountIndex)));
+      this._b._lib.ccl_gov_committee_cold_key_from_mnemonic(this._b._thread, cstr(mnemonic), network, accountIndex)));
   }
 
-  committeeHotKeyFromMnemonic(mnemonic, networkId = MAINNET, accountIndex = 0) {
+  /** Constitutional-committee hot key. `network` is a CCL ordinal (MAINNET === 0). */
+  committeeHotKeyFromMnemonic(mnemonic, network, accountIndex = 0) {
+    checkNetwork(network);
     return JSON.parse(this._b._check(
-      this._b._lib.ccl_gov_committee_hot_key_from_mnemonic(this._b._thread, cstr(mnemonic), networkId, accountIndex)));
+      this._b._lib.ccl_gov_committee_hot_key_from_mnemonic(this._b._thread, cstr(mnemonic), network, accountIndex)));
   }
 }
 
 class WalletApi {
   constructor(bridge) { this._b = bridge; }
 
-  create(networkId = MAINNET) {
-    return JSON.parse(this._b._check(this._b._lib.ccl_wallet_create(this._b._thread, networkId)));
+  /** Create a wallet (random mnemonic). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
+  create(network) {
+    checkNetwork(network);
+    return JSON.parse(this._b._check(this._b._lib.ccl_wallet_create(this._b._thread, network)));
   }
 
-  fromMnemonic(mnemonic, networkId = MAINNET) {
+  /** Restore a wallet from a mnemonic. `network` is a CCL ordinal (MAINNET === 0). */
+  fromMnemonic(mnemonic, network) {
+    checkNetwork(network);
     return JSON.parse(this._b._check(
-      this._b._lib.ccl_wallet_from_mnemonic(this._b._thread, cstr(mnemonic), networkId)));
+      this._b._lib.ccl_wallet_from_mnemonic(this._b._thread, cstr(mnemonic), network)));
   }
 
-  getAddress(mnemonic, networkId = MAINNET, index = 0) {
+  /** The wallet's address at `index`. `network` is a CCL ordinal (MAINNET === 0). */
+  getAddress(mnemonic, network, index = 0) {
+    checkNetwork(network);
     return this._b._check(
-      this._b._lib.ccl_wallet_get_address(this._b._thread, cstr(mnemonic), networkId, index));
+      this._b._lib.ccl_wallet_get_address(this._b._thread, cstr(mnemonic), network, index));
   }
 }
 

@@ -57,13 +57,13 @@ The [`examples/`](examples/) directory contains:
 ## Quick start
 
 ```rust
-use ccl::{Bridge, network};
+use ccl::{Bridge, Network};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = Bridge::new()?; // loads libccl, starts a GraalVM isolate
 
     // API methods return JSON strings; parse with serde_json.
-    let account = bridge.account().create(network::TESTNET)?;
+    let account = bridge.account().create(Network::Testnet)?;
     let json: serde_json::Value = serde_json::from_str(&account)?;
     println!("{}", json["base_address"]); // addr_test1...
     println!("{}", json["mnemonic"]);     // 24-word phrase
@@ -88,8 +88,15 @@ Transactions are defined as a [TxPlan](https://github.com/bloxbean/cardano-clien
 let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params)?; // -> TxResult { tx_cbor, tx_hash, fee }
 ```
 
-Network IDs: `network::MAINNET` (0), `network::TESTNET` (1), `network::PREPROD` (2),
-`network::PREVIEW` (3). Errors are `ccl::CclError`.
+Methods that need a network take the `Network` enum — `Network::Mainnet`, `Network::Testnet`,
+`Network::Preprod`, `Network::Preview` — so a transposed argument is a compile error rather than a
+key silently derived on the wrong network. Errors are `ccl::CclError`.
+
+> **`Network` is not Cardano's on-chain network id.** Its discriminants are CCL's own enum ordinals
+> (`Mainnet = 0`, `Testnet = 1`, `Preprod = 2`, `Preview = 3`). Cardano's on-chain network id is the
+> other way round — **mainnet = 1, testnet = 0** — so an account created with `Network::Mainnet` has
+> an address whose `network_id` is `1`. The `network_id` field returned by `bridge.address().info()`
+> is that genuine on-chain value, not an ordinal from this enum.
 
 ## Chain-data providers (optional)
 

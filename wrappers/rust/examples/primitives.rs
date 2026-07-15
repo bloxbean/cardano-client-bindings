@@ -7,7 +7,7 @@
 //! CCL_LIB_PATH=$LIB_DIR DYLD_LIBRARY_PATH=$LIB_DIR LD_LIBRARY_PATH=$LIB_DIR \
 //!   cargo run --example primitives
 //! ```
-use ccl::{network, Bridge};
+use ccl::{Bridge, Network};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = Bridge::new()?;
@@ -28,11 +28,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- Ed25519 signing ---
     // get_private_key returns the 64-byte extended key; sign expects a 32-byte
     // Ed25519 key, so take the first 32 bytes (64 hex chars).
-    let created = bridge.account().create(network::TESTNET)?;
+    let created = bridge.account().create(Network::Testnet)?;
     let account: serde_json::Value = serde_json::from_str(&created)?;
     let mnemonic = account["mnemonic"].as_str().unwrap();
-    let priv_ext = bridge.account().get_private_key(mnemonic, network::TESTNET, 0, 0)?;
-    let pub_key = bridge.account().get_public_key(mnemonic, network::TESTNET, 0, 0)?;
+    let priv_ext = bridge.account().get_private_key(mnemonic, Network::Testnet, 0, 0)?;
+    let pub_key = bridge.account().get_public_key(mnemonic, Network::Testnet, 0, 0)?;
     let message_hex = "68656c6c6f"; // "hello"
     let signature = bridge.crypto().sign(message_hex, &priv_ext[..64])?;
     println!("Ed25519 signature: {}", signature);

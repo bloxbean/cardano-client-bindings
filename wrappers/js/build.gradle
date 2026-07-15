@@ -20,9 +20,9 @@ task test(type: Exec) {
     // On Windows invoke via `cmd /c` (which understands `&&`) rather than `bash` (a bare `bash`
     // resolves to WSL on Windows runners, which has no distro).
     if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
-        commandLine 'cmd', '/c', 'bun install && bun test test/ccl.test.js test/intents.e2e.test.js test/providers.test.js'
+        commandLine 'cmd', '/c', 'bun install && bun run typecheck && bun test test/ccl.test.js test/intents.e2e.test.js test/providers.test.js'
     } else {
-        commandLine 'bash', '-c', 'bun install && bun test test/ccl.test.js test/intents.e2e.test.js test/providers.test.js'
+        commandLine 'bash', '-c', 'bun install && bun run typecheck && bun test test/ccl.test.js test/intents.e2e.test.js test/providers.test.js'
     }
 }
 
@@ -37,7 +37,7 @@ task integrationTest(type: Exec) {
     environment 'DYLD_LIBRARY_PATH', nativeDir
     environment 'LD_LIBRARY_PATH', nativeDir
 
-    commandLine 'bash', '-c', 'bun install && bun test test/'
+    commandLine 'bash', '-c', 'bun install && bun run typecheck && bun test test/'
 }
 
 // Stage the platform's libccl.* into libs/ (pure Gradle — no shell — so it works on Windows).

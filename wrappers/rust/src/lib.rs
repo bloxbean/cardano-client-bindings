@@ -4,6 +4,7 @@ mod ffi;
 pub mod providers;
 
 use std::ffi::{CStr, CString};
+use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::ptr;
 
@@ -23,14 +24,56 @@ pub mod error_codes {
     pub const CCL_ERROR_INVALID_ADDRESS: i32 = -7;
     pub const CCL_ERROR_INSUFFICIENT_FUNDS: i32 = -8;
     pub const CCL_ERROR_INVALID_TRANSACTION: i32 = -9;
+    /// Malformed TxPlan — the most common failure on the core build path.
+    pub const CCL_ERROR_TX_BUILD: i32 = -10;
 }
 
-/// Network IDs.
-pub mod network {
-    pub const MAINNET: i32 = 0;
-    pub const TESTNET: i32 = 1;
-    pub const PREPROD: i32 = 2;
-    pub const PREVIEW: i32 = 3;
+/// Which Cardano network to derive addresses/keys for.
+///
+/// # These are *not* Cardano's on-chain network ids
+///
+/// The discriminants below are **CCL's own enum ordinals** (`Mainnet = 0`, `Testnet = 1`,
+/// `Preprod = 2`, `Preview = 3`) — they are what the native library expects. Cardano's *on-chain*
+/// network id, the one encoded in an address, is the opposite way round: **0 = testnet, 1 =
+/// mainnet**. So the two disagree exactly where it hurts most:
+///
+/// | | CCL ordinal (this enum) | on-chain network id |
+/// |---|---|---|
+/// | mainnet | `Network::Mainnet` = 0 | 1 |
+/// | testnet | `Network::Testnet` = 1 | 0 |
+///
+/// An account created with [`Network::Mainnet`] therefore has an on-chain `network_id` of **1**.
+/// That inversion is why these methods take a `Network` and not a bare `i32`: passing `1` because
+/// you know mainnet is network id 1 on-chain would have silently derived a *testnet* key.
+///
+/// The `network_id` field in the JSON returned by [`AddressApi::info`] is the genuine on-chain
+/// value, not an ordinal from this enum — do not compare the two.
+///
+/// ```
+/// # use ccl::Network;
+/// assert_eq!(Network::Mainnet.as_i32(), 0); // CCL ordinal, not the on-chain id (which is 1)
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Network {
+    Mainnet,
+    Testnet,
+    Preprod,
+    Preview,
+}
+
+impl Network {
+    /// The CCL enum ordinal for this network — what the native library expects.
+    ///
+    /// Not the on-chain network id; see the type-level docs.
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+impl From<Network> for i32 {
+    fn from(n: Network) -> i32 {
+        n.as_i32()
+    }
 }
 
 /// Error type for CCL operations.
@@ -63,14 +106,50 @@ fn to_cstring(s: &str) -> Result<CString> {
 }
 
 /// Safe wrapper around the CCL native library.
+///
+/// # Threading
+///
+/// A `Bridge` is **thread-affine**: it must be used from the thread that created it. It is therefore
+/// neither `Send` nor `Sync`, and the compiler will stop you from moving one across threads. To use
+/// the library from several threads, **create one `Bridge` per thread**.
+///
+/// This is not a conservative choice; it is what the native library requires. A `Bridge` holds a
+/// `graal_isolatethread_t*`, and that handle belongs to the OS thread that created it — it carries
+/// that thread's stack bounds and the VM's thread-local state, including the result/error slots that
+/// [`Bridge::get_result`] reads back after each call. Handing it to another thread corrupts the VM.
+/// (The *isolate* — the heap — can be shared; the isolate **thread** cannot. Conflating the two is
+/// what made the previous `unsafe impl Send for Bridge` unsound: it let safe code do exactly this,
+/// with no `unsafe` block anywhere in sight, and it appeared to work right up until it didn't.)
+///
+/// Moving a `Bridge` to another thread does not compile — and must keep not compiling:
+///
+/// ```compile_fail
+/// let bridge = ccl::Bridge::new().unwrap();
+/// std::thread::spawn(move || {
+///     let _ = bridge.version(); // error: `*mut c_void` cannot be sent between threads safely
+/// });
+/// ```
+///
+/// Use one per thread instead:
+///
+/// ```no_run
+/// let handles: Vec<_> = (0..4)
+///     .map(|_| std::thread::spawn(|| {
+///         let bridge = ccl::Bridge::new()?;   // each thread owns its own isolate
+///         bridge.version()
+///     }))
+///     .collect();
+/// # Ok::<(), ccl::CclError>(())
+/// ```
 pub struct Bridge {
     #[allow(dead_code)]
     isolate: *mut ffi::graal_isolate_t,
     thread: *mut ffi::graal_isolatethread_t,
+    // Raw pointers are already !Send + !Sync, so no negative impl is needed — but that is a load-
+    // bearing property of this type, not an accident, and removing this field must not silently
+    // make it Send again.
+    _not_send: PhantomData<*const ()>,
 }
-
-// Bridge is Send because GraalVM isolates can be passed between threads
-unsafe impl Send for Bridge {}
 
 impl Bridge {
     /// Create a new Bridge instance with a GraalVM isolate.
@@ -89,7 +168,11 @@ impl Bridge {
             });
         }
 
-        let bridge = Bridge { isolate, thread };
+        let bridge = Bridge {
+            isolate,
+            thread,
+            _not_send: PhantomData,
+        };
         bridge.check_version()?;
         Ok(bridge)
     }
@@ -225,15 +308,15 @@ pub struct AccountApi<'a> {
 }
 
 impl<'a> AccountApi<'a> {
-    pub fn create(&self, network_id: i32) -> Result<String> {
-        let rc = unsafe { ffi::ccl_account_create(self.bridge.thread, network_id) };
+    pub fn create(&self, network: Network) -> Result<String> {
+        let rc = unsafe { ffi::ccl_account_create(self.bridge.thread, network.as_i32()) };
         self.bridge.check(rc)
     }
 
     pub fn from_mnemonic(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
         address_index: i32,
     ) -> Result<String> {
@@ -241,7 +324,7 @@ impl<'a> AccountApi<'a> {
         let rc = unsafe {
             ffi::ccl_account_from_mnemonic(
                 self.bridge.thread,
-                network_id,
+                network.as_i32(),
                 cs.as_ptr(),
                 account_index,
                 address_index,
@@ -253,7 +336,7 @@ impl<'a> AccountApi<'a> {
     pub fn get_public_key(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
         address_index: i32,
     ) -> Result<String> {
@@ -262,7 +345,7 @@ impl<'a> AccountApi<'a> {
             ffi::ccl_account_get_public_key(
                 self.bridge.thread,
                 cs.as_ptr(),
-                network_id,
+                network.as_i32(),
                 account_index,
                 address_index,
             )
@@ -273,7 +356,7 @@ impl<'a> AccountApi<'a> {
     pub fn get_private_key(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
         address_index: i32,
     ) -> Result<String> {
@@ -282,7 +365,7 @@ impl<'a> AccountApi<'a> {
             ffi::ccl_account_get_private_key(
                 self.bridge.thread,
                 cs.as_ptr(),
-                network_id,
+                network.as_i32(),
                 account_index,
                 address_index,
             )
@@ -293,7 +376,7 @@ impl<'a> AccountApi<'a> {
     pub fn sign_tx(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
         address_index: i32,
         tx_cbor_hex: &str,
@@ -304,7 +387,7 @@ impl<'a> AccountApi<'a> {
             ffi::ccl_account_sign_tx(
                 self.bridge.thread,
                 cs_mnemonic.as_ptr(),
-                network_id,
+                network.as_i32(),
                 account_index,
                 address_index,
                 cs_tx.as_ptr(),
@@ -320,7 +403,7 @@ impl<'a> AccountApi<'a> {
     pub fn sign_tx_with_keys(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
         address_index: i32,
         tx_cbor_hex: &str,
@@ -333,7 +416,7 @@ impl<'a> AccountApi<'a> {
             ffi::ccl_account_sign_tx_multi(
                 self.bridge.thread,
                 cs_mnemonic.as_ptr(),
-                network_id,
+                network.as_i32(),
                 account_index,
                 address_index,
                 cs_tx.as_ptr(),
@@ -346,12 +429,12 @@ impl<'a> AccountApi<'a> {
     pub fn get_drep_id(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
     ) -> Result<String> {
         let cs = to_cstring(mnemonic)?;
         let rc = unsafe {
-            ffi::ccl_account_get_drep_id(self.bridge.thread, cs.as_ptr(), network_id, account_index)
+            ffi::ccl_account_get_drep_id(self.bridge.thread, cs.as_ptr(), network.as_i32(), account_index)
         };
         self.bridge.check(rc)
     }
@@ -549,12 +632,12 @@ impl<'a> GovApi<'a> {
     pub fn drep_key_from_mnemonic(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
     ) -> Result<String> {
         let cs = to_cstring(mnemonic)?;
         let rc = unsafe {
-            ffi::ccl_gov_drep_key_from_mnemonic(self.bridge.thread, cs.as_ptr(), network_id, account_index)
+            ffi::ccl_gov_drep_key_from_mnemonic(self.bridge.thread, cs.as_ptr(), network.as_i32(), account_index)
         };
         self.bridge.check(rc)
     }
@@ -562,7 +645,7 @@ impl<'a> GovApi<'a> {
     pub fn committee_cold_key_from_mnemonic(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
     ) -> Result<String> {
         let cs = to_cstring(mnemonic)?;
@@ -570,7 +653,7 @@ impl<'a> GovApi<'a> {
             ffi::ccl_gov_committee_cold_key_from_mnemonic(
                 self.bridge.thread,
                 cs.as_ptr(),
-                network_id,
+                network.as_i32(),
                 account_index,
             )
         };
@@ -580,7 +663,7 @@ impl<'a> GovApi<'a> {
     pub fn committee_hot_key_from_mnemonic(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         account_index: i32,
     ) -> Result<String> {
         let cs = to_cstring(mnemonic)?;
@@ -588,7 +671,7 @@ impl<'a> GovApi<'a> {
             ffi::ccl_gov_committee_hot_key_from_mnemonic(
                 self.bridge.thread,
                 cs.as_ptr(),
-                network_id,
+                network.as_i32(),
                 account_index,
             )
         };
@@ -603,26 +686,26 @@ pub struct WalletApi<'a> {
 }
 
 impl<'a> WalletApi<'a> {
-    pub fn create(&self, network_id: i32) -> Result<String> {
-        let rc = unsafe { ffi::ccl_wallet_create(self.bridge.thread, network_id) };
+    pub fn create(&self, network: Network) -> Result<String> {
+        let rc = unsafe { ffi::ccl_wallet_create(self.bridge.thread, network.as_i32()) };
         self.bridge.check(rc)
     }
 
-    pub fn from_mnemonic(&self, mnemonic: &str, network_id: i32) -> Result<String> {
+    pub fn from_mnemonic(&self, mnemonic: &str, network: Network) -> Result<String> {
         let cs = to_cstring(mnemonic)?;
-        let rc = unsafe { ffi::ccl_wallet_from_mnemonic(self.bridge.thread, cs.as_ptr(), network_id) };
+        let rc = unsafe { ffi::ccl_wallet_from_mnemonic(self.bridge.thread, cs.as_ptr(), network.as_i32()) };
         self.bridge.check(rc)
     }
 
     pub fn get_address(
         &self,
         mnemonic: &str,
-        network_id: i32,
+        network: Network,
         index: i32,
     ) -> Result<String> {
         let cs = to_cstring(mnemonic)?;
         let rc =
-            unsafe { ffi::ccl_wallet_get_address(self.bridge.thread, cs.as_ptr(), network_id, index) };
+            unsafe { ffi::ccl_wallet_get_address(self.bridge.thread, cs.as_ptr(), network.as_i32(), index) };
         self.bridge.check(rc)
     }
 }

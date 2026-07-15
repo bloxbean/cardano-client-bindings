@@ -1,4 +1,4 @@
-from ccl._ffi import CclLib
+from ccl.network import Network
 
 
 def test_crypto_blake2b_256(ccl):
@@ -31,10 +31,10 @@ def test_crypto_invalid_mnemonic(ccl):
 def test_crypto_sign(ccl):
     # account_get_private_key returns 64-byte extended BIP32-ED25519 key (128 hex chars)
     # ccl_crypto_sign expects standard 32-byte Ed25519 key (64 hex chars)
-    created = ccl.account.create(CclLib.MAINNET)
+    created = ccl.account.create(Network.MAINNET)
     mnemonic = created['mnemonic']
 
-    private_key_extended = ccl.account.get_private_key(mnemonic, CclLib.MAINNET)
+    private_key_extended = ccl.account.get_private_key(mnemonic, Network.MAINNET)
     private_key = private_key_extended[:64]  # first 32 bytes
 
     message_hex = "68656c6c6f"
@@ -43,8 +43,8 @@ def test_crypto_sign(ccl):
 
 
 def test_crypto_verify_rejects_wrong_signature(ccl):
-    created = ccl.account.create(CclLib.MAINNET)
-    public_key = ccl.account.get_public_key(created['mnemonic'], CclLib.MAINNET)
+    created = ccl.account.create(Network.MAINNET)
+    public_key = ccl.account.get_public_key(created['mnemonic'], Network.MAINNET)
 
     # A fake signature should fail verification
     fake_sig = "00" * 64

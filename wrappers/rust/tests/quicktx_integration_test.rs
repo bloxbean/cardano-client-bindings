@@ -57,7 +57,7 @@ fn test_integration_simple_ada_transfer() {
 
     let signed_tx = bridge
         .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
+        .sign_tx(&mnemonic, ccl::Network::Testnet, 0, 0, &result.tx_cbor)
         .expect("sign failed");
     let tx_hash = devkit_submit_tx(&signed_tx);
     assert!(!tx_hash.is_empty());
@@ -105,7 +105,7 @@ fn test_integration_multiple_receivers() {
     let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build failed");
     let signed_tx = bridge
         .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
+        .sign_tx(&mnemonic, ccl::Network::Testnet, 0, 0, &result.tx_cbor)
         .expect("sign failed");
     let tx_hash = devkit_submit_tx(&signed_tx);
     assert!(!tx_hash.is_empty());
@@ -188,7 +188,7 @@ fn test_integration_donation_treasury() {
         let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build");
         let signed = bridge
             .account()
-            .sign_tx(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
+            .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor)
             .expect("sign");
         match devkit_try_submit(&signed) {
             Ok(tx_hash) => {

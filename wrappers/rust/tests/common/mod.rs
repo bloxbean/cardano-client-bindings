@@ -175,7 +175,7 @@ pub fn skip_if_no_devkit() -> bool {
 pub fn get_testnet_account(bridge: &Bridge) -> (String, String, String) {
     let result = bridge
         .account()
-        .create(ccl::network::TESTNET)
+        .create(ccl::Network::Testnet)
         .expect("create account");
     let json: Value = serde_json::from_str(&result).expect("parse account");
     let addr = json["base_address"].as_str().unwrap().to_string();
@@ -245,7 +245,7 @@ pub fn sign_submit(
         .expect("build");
     let signed = bridge
         .account()
-        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &result.tx_cbor, keys)
+        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, keys)
         .expect("sign");
     match devkit_try_submit(&signed) {
         Ok(hash) => hash,
