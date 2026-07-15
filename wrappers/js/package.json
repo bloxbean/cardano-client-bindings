@@ -35,6 +35,7 @@
   "optionalDependencies": {
     "@bloxbean/cardano-client-lib-linux-x86_64": "0.1.0-pre2-ci1",
     "@bloxbean/cardano-client-lib-linux-aarch64": "0.1.0-pre2-ci1",
+    "@bloxbean/cardano-client-lib-linux-musl-x86_64": "0.1.0-pre2-ci1",
     "@bloxbean/cardano-client-lib-macos-aarch64": "0.1.0-pre2-ci1",
     "@bloxbean/cardano-client-lib-windows-x86_64": "0.1.0-pre2-ci1"
   },
