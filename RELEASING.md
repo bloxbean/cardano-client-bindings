@@ -35,7 +35,7 @@ a mismatched version.
 
 | Wrapper | Version + release-tag pin | Manual bump needed? |
 |---|---|---|
-| **Rust** | `Cargo.toml` `version` — stamped by [`set-crate-version.sh`](wrappers/rust/scripts/set-crate-version.sh). The release tag `build.rs` fetches libccl from is *derived* from it (`v$CARGO_PKG_VERSION`), not stored | **No** — `gradle.properties` only |
+| **Rust** | `Cargo.toml` `version` — stamped by [`set-crate-version.sh`](wrappers/rust/scripts/set-crate-version.sh) at publish time. The release tag `build.rs` fetches libccl from is *derived* from it (`v$CARGO_PKG_VERSION`), not stored | **Scripted** — publishing needs nothing, but the *committed* `Cargo.toml` must be re-stamped in the bump PR (run the script, commit `Cargo.toml` + `Cargo.lock`); `version_sync_test.rs` fails CI with that instruction if it's forgotten |
 | **JS** | `package.json` version + `optionalDependencies` pins — stamped by [`wrappers/js/scripts/set-package-version.mjs`](wrappers/js/scripts/set-package-version.mjs) | **No** — `gradle.properties` only |
 | **Go** | `defaultLibVersion` in [`wrappers/go/ccl/loader.go`](wrappers/go/ccl/loader.go) (the release tag it downloads) | **Yes** — Go has no build step to stamp it |
 | **Python** | `pyproject.toml` `version` | **Yes** (until stamped like the others) |
@@ -157,8 +157,11 @@ These enforce the flow and are configured in GitHub settings, not code:
 
 1. [ ] Open a PR bumping `version` in `gradle.properties` — plus, in the same PR, the constants that
        aren't stamped yet: `defaultLibVersion` + `expectedLibVersion` (Go), `version` +
-       `EXPECTED_LIB_VERSION` (Python), and `EXPECTED_LIB_VERSION` (JS). Rust needs **nothing** —
-       it's fully derived. Get it approved by a release code owner and merge to `main`.
+       `EXPECTED_LIB_VERSION` (Python), and `EXPECTED_LIB_VERSION` (JS). For Rust, run
+       `./wrappers/rust/scripts/set-crate-version.sh <version>` and commit `Cargo.toml` +
+       `Cargo.lock` — one command; `version_sync_test.rs` fails CI if it's skipped (the published
+       crate itself derives everything and needs no manual pin). Get it approved by a release code
+       owner and merge to `main`.
 2. [ ] Merge auto-creates `vX.Y.Z` → `release.yml` builds + uploads the 5 platform tarballs +
        `SHA256SUMS`; `publish-js.yml` and `publish-rust.yml` build, then wait on their approvals.
 3. [ ] Verify the release assets are named `cardano-client-lib-vX.Y.Z-<platform>.tar.gz`. **The Rust

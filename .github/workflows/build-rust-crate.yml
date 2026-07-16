@@ -59,11 +59,11 @@ jobs:
       - name: Point build.rs at the in-tree lib
         run: echo "CCL_LIB_PATH=$PWD/core/build/native/nativeCompile" >> "$GITHUB_ENV"
 
-      # Single source of truth: stamp the crate version + the release tag it fetches libccl from.
+      # Single source of truth: stamp the crate version; build.rs derives the release tag from it.
       - name: Stamp crate version from gradle.properties
         run: ./wrappers/rust/scripts/set-crate-version.sh "$CRATE_VERSION"
 
       - name: Validate the crate (dry-run publish)
         working-directory: wrappers/rust
-        # --allow-dirty: the stamp above modifies Cargo.toml / build.rs in the checkout.
+        # --allow-dirty: the stamp above modifies Cargo.toml in the checkout.
         run: cargo publish --dry-run --allow-dirty

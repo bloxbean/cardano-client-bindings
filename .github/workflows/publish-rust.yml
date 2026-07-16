@@ -2,7 +2,8 @@ name: Publish Rust crate
 
 # Publishes the `cardano-client-lib` crate to crates.io on a v* tag via crates.io trusted publishing
 # (OIDC — no API token secret). The build/validation lives in build-rust-crate.yml (run on PRs by
-# publish-rust-dry-run.yml); workflow_dispatch runs it here as a manual dry run (publish skipped).
+# publish-rust-dry-run.yml); workflow_dispatch runs only that build job here as a manual dry run —
+# the publish job is skipped entirely, so no environment approval is requested for a no-op.
 #
 # The crate ships SOURCE ONLY — crates.io can't host the native binary, so the crate's build.rs
 # fetches the matching libccl from this repo's GitHub release at the *consumer's* build time. So the
@@ -23,6 +24,10 @@ jobs:
 
   publish:
     needs: build
+    # Job-level, not step-level: the `crates-release` approval fires when the job *starts*, so
+    # gating only the final steps would make a workflow_dispatch dry run page a release code owner
+    # to approve a job that builds libccl for ~10 minutes and then skips the actual publish.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     # Final human gate before the irreversible crates.io publish (a published version can never be
     # overwritten or deleted, only yanked): the job pauses until a required reviewer of the
@@ -55,14 +60,12 @@ jobs:
         run: ./wrappers/rust/scripts/set-crate-version.sh "$CRATE_VERSION"
 
       - name: Authenticate to crates.io (trusted publishing)
-        if: startsWith(github.ref, 'refs/tags/')
         uses: rust-lang/crates-io-auth-action@v1
         id: auth
 
       - name: Publish to crates.io
-        if: startsWith(github.ref, 'refs/tags/')
         working-directory: wrappers/rust
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        # --allow-dirty: the version stamp above modifies Cargo.toml / build.rs in the checkout.
+        # --allow-dirty: the version stamp above modifies Cargo.toml in the checkout.
         run: cargo publish --allow-dirty
