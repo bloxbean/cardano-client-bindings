@@ -17,8 +17,13 @@
 //   const provider = new BlockfrostProvider(projectId, { network: "preprod" }); // or new YaciProvider()
 //   const result = await bridge.quicktx.buildWith(txplanYaml, provider, senderAddress);
 
+// Bound provider requests so a hung endpoint can't leave the returned promise pending forever
+// (fetch has no default timeout). 60s matches the Python/Go wrappers; generous for a large paginated
+// UTxO fetch.
+const HTTP_TIMEOUT_MS = 60_000;
+
 async function httpGetJson(url, headers) {
-  const resp = await fetch(url, { headers: headers ?? {} });
+  const resp = await fetch(url, { headers: headers ?? {}, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
     throw new Error(`GET ${url} failed: HTTP ${resp.status}: ${body}`);
@@ -27,7 +32,12 @@ async function httpGetJson(url, headers) {
 }
 
 async function httpPostJson(url, body, headers) {
-  const resp = await fetch(url, { method: "POST", headers: headers ?? {}, body });
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: headers ?? {},
+    body,
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+  });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => "");
     throw new Error(`POST ${url} failed: HTTP ${resp.status}: ${detail}`);
