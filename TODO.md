@@ -18,6 +18,8 @@ off items freely as the project evolves.
 - `P0` — blocks real-world adoption / advertised but missing
 - `P1` — important; needed for a solid 1.0
 - `P2` — nice-to-have / future polish
+- `P3` — minor polish / low-frequency papercut
+- `P4` — speculative hardening; limited practical gain today
 
 **Supported languages today:** Python, Go, Rust, JavaScript (Bun only).
 C is test-only (smoke tests in `native-test/`); C headers ship for raw FFI consumers,
@@ -55,6 +57,7 @@ but there is no standalone "C wrapper" product.
 - [ ] `P2` Automate version bumping from a single source of truth (the version is duplicated across `gradle.properties` and each wrapper manifest).
 - [ ] `P2` **Runtime lib↔wrapper version check.** A native lib a version behind its wrapper fails confusingly; have each wrapper call `ccl_version` on init and error clearly on mismatch.
 - [ ] `P2` **Sign release artifacts** (cosign/sigstore) for supply-chain trust when pulling a prebuilt native lib. The release already emits `SHA256SUMS`; add signatures + verification docs.
+- [ ] `P4` **Verify the downloaded native lib at fetch time.** The fetching wrappers — Go (`loader.go`) and Rust (`build.rs`) — download `libccl` from the GitHub release over HTTPS and load/link it **without checking it against a known hash** (surfaced in the safety audit, PR #52). A *same-release* `SHA256SUMS` fetch would be near security-theater (a compromised release compromises the checksum too), so the real fix is **per-platform checksums pinned in the wrapper source** (lockfile-style), verified after download — which only becomes meaningful once ties in with the signing item above. Low urgency: TLS + GitHub are the current trust anchor, and the atomic temp-file+rename already guards partial/corrupt downloads. Python/JS bundle the lib in the package, so they're unaffected.
 
 ## 2b. Plutus script evaluation — pluggable evaluators
 

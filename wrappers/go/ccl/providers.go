@@ -28,7 +28,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// httpClient bounds provider requests so a hung or unresponsive endpoint can't pin a goroutine and
+// its connection forever (the default http.Client has no timeout). Matches the Python wrapper's 60s
+// ceiling; generous enough for a large paginated UTxO fetch. A fuller context.Context-based API is
+// tracked in TODO.md §8.
+var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 // ChainDataProvider fetches the chain data QuickTx.Build needs. Implement it to plug in any backend
 // (Blockfrost, Koios, Ogmios, Yaci DevKit, ...).
@@ -47,7 +54,7 @@ func httpGetJSON(url string, headers map[string]string, out interface{}) error {
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -56,7 +63,14 @@ func httpGetJSON(url string, headers map[string]string, out interface{}) error {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("GET %s failed: HTTP %d: %s", url, resp.StatusCode, string(body))
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	// UseNumber is not optional here. Decoding into map[string]interface{} turns every JSON number
+	// into a float64, which silently rounds any integer above 2^53 — and a UTxO's lovelace amount or
+	// native-token quantity routinely exceeds that. That corrupted value would then flow into Build's
+	// UTxO selection and change calculation, producing a wrong (or unbuildable) transaction. UseNumber
+	// keeps numbers as string-backed json.Number, so they re-marshal into Build losslessly.
+	dec := json.NewDecoder(resp.Body)
+	dec.UseNumber()
+	return dec.Decode(out)
 }
 
 func httpPostCBOR(url string, body []byte, headers map[string]string, out interface{}) error {
@@ -68,7 +82,7 @@ func httpPostCBOR(url string, body []byte, headers map[string]string, out interf
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

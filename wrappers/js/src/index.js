@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { existsSync } from 'fs';
 import { parse as parseYaml } from 'yaml';
+import { stringify as losslessStringify } from 'lossless-json';
 
 // Optional chain-data provider helpers (re-exported for convenience).
 export { ChainDataProvider, YaciProvider, BlockfrostProvider } from './providers.js';
@@ -635,12 +636,18 @@ export class QuickTxApi {
    * @returns {{tx_cbor: string, tx_hash: string, fee: string}}
    */
   build(txplanYaml, utxos, protocolParams, execUnits = null) {
+    // losslessStringify, not JSON.stringify: a UTxO's lovelace amount or native-token quantity can
+    // exceed 2^53, and providers parse those with lossless-json (see providers.js) so they arrive as
+    // string-backed LosslessNumber. JSON.stringify would coerce them back through a float64 and
+    // round — corrupting the amount fed into UTxO selection and change calculation. losslessStringify
+    // emits them as exact bare integers (which the native side's Jackson parses as BigInteger);
+    // regular numbers and strings pass through unchanged.
     const rc = this._b._lib.ccl_quicktx_build(
       this._b._thread,
       cstr(txplanYaml),
-      cstr(JSON.stringify(utxos)),
-      cstr(JSON.stringify(normalizeCostModels(protocolParams))),
-      execUnits != null ? cstr(JSON.stringify(execUnits)) : null,
+      cstr(losslessStringify(utxos)),
+      cstr(losslessStringify(normalizeCostModels(protocolParams))),
+      execUnits != null ? cstr(losslessStringify(execUnits)) : null,
     );
     // The build result is a YAML document.
     return parseYaml(this._b._check(rc));
