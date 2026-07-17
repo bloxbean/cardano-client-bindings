@@ -7,6 +7,7 @@ The `cardano-client-lib` crate (imported as `ccl`) brings [Cardano Client Lib (C
 | Document | Contents |
 |---|---|
 | [API reference](api.md) | Every type and method: `Bridge`, account, address, crypto, tx, plutus, script, gov, wallet, quicktx |
+| [Building transactions](transactions.md) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
 | [Providers & evaluators](providers.md) | The `providers` feature: fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
 | [Troubleshooting](troubleshooting.md) | Native library fetching, platform support, common errors |
 | [TxPlan (YAML) reference](../quicktx.md) | The transaction description format used by `quicktx().build` — shared by all four language wrappers |

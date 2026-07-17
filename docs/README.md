@@ -4,7 +4,7 @@ User documentation for the four language wrappers, plus shared references.
 
 ## Per-language user guides
 
-Each guide covers installation, a quick start, the full API reference, chain-data providers/evaluators, and troubleshooting:
+Each guide covers installation, a quick start, the full API reference, a transaction-building guide with worked examples, chain-data providers/evaluators, and troubleshooting:
 
 | Language | Guide | Package |
 |---|---|---|
@@ -17,7 +17,7 @@ The four wrappers expose the same functionality with the same semantics — same
 
 ## Shared references
 
-- [QuickTx / TxPlan (YAML)](quicktx.md) — the transaction description format used by every wrapper's `quicktx` build API: structure, intents, chain-data shapes, worked examples.
+- [QuickTx / TxPlan (YAML)](quicktx.md) — the transaction description format used by every wrapper's `quicktx` build API: structure, chain-data shapes, worked examples, and the full intent catalog (staking, governance, pools, minting, Plutus) with verified YAML shapes.
 - [Architecture Decision Records](adr/) — why things are the way they are: native shared library over FFI, offline/stateless design, Bun-only JS, provider design, Plutus evaluation, platform baselines, and more.
 
 ## For contributors

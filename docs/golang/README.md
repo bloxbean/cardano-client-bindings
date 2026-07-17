@@ -7,6 +7,7 @@ The `ccl` Go package brings [Cardano Client Lib (CCL)](https://github.com/bloxbe
 | Document | Contents |
 |---|---|
 | [API reference](api.md) | Every type and method: `Bridge`, Account, Address, Crypto, Tx, Plutus, Script, Gov, Wallet, QuickTx |
+| [Building transactions](transactions.md) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
 | [Providers & evaluators](providers.md) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
 | [Troubleshooting](troubleshooting.md) | Native library download & resolution, platform support, common errors |
 | [TxPlan (YAML) reference](../quicktx.md) | The transaction description format used by `QuickTx.Build` — shared by all four language wrappers |

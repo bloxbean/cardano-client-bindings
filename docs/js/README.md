@@ -9,6 +9,7 @@
 | Document | Contents |
 |---|---|
 | [API reference](api.md) | Every class and method: `CclBridge`, account, address, crypto, tx, plutus, script, gov, wallet, quicktx |
+| [Building transactions](transactions.md) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
 | [Providers & evaluators](providers.md) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
 | [Troubleshooting](troubleshooting.md) | Native library resolution, platform support, common errors |
 | [TxPlan (YAML) reference](../quicktx.md) | The transaction description format used by `quicktx.build` — shared by all four language wrappers |
