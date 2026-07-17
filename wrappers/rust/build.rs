@@ -15,9 +15,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// Release tag the prebuilt native lib is fetched from when it isn't available locally. Kept separate
-// from the crate version (release tags may carry a preview suffix); override with CCL_LIB_VERSION.
-const DEFAULT_LIB_VERSION: &str = "v0.1.0-preview1";
 const REPO: &str = "bloxbean/cardano-client-bindings";
 
 fn main() {
@@ -94,18 +91,36 @@ fn resolve_source_lib(lib_file: &str, out_dir: &Path) -> PathBuf {
 }
 
 fn download_lib(lib_file: &str, out_dir: &Path) -> PathBuf {
-    let version = env::var("CCL_LIB_VERSION").unwrap_or_else(|_| DEFAULT_LIB_VERSION.to_string());
+    // The release tag is *derived*, never assumed: a crate published at X was built from the tag vX
+    // (CI enforces tag == v<version>, both from gradle.properties), so vX is exactly the release
+    // holding the matching libccl. Nothing to hand-maintain, and it can't drift out of lockstep.
+    // Override with CCL_LIB_VERSION to build against a different release.
+    let version = env::var("CCL_LIB_VERSION").unwrap_or_else(|_| {
+        format!(
+            "v{}",
+            env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION")
+        )
+    });
     let platform = platform_tag();
     let tarball = format!("cardano-client-lib-{version}-{platform}.tar.gz");
     let url = format!("https://github.com/{REPO}/releases/download/{version}/{tarball}");
     let dl = out_dir.join(&tarball);
 
-    run(
-        Command::new("curl")
-            .args(["-fsSL", "-o"])
-            .arg(&dl)
-            .arg(&url),
-        &format!("download {url}"),
+    let ok = Command::new("curl")
+        .args(["-fsSL", "-o"])
+        .arg(&dl)
+        .arg(&url)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    // The usual cause is building an in-development version that has no release yet (the published
+    // path always resolves, by the argument above) — so point at the two local sources instead.
+    assert!(
+        ok,
+        "could not download libccl from {url}\n\
+         If you are building this repo from source, there is no release for an unreleased version: \
+         build the native library (./gradlew :core:nativeCompile) or set CCL_LIB_PATH to a \
+         directory containing {lib_file}."
     );
     run(
         Command::new("tar")
