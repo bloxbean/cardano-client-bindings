@@ -84,22 +84,42 @@ pub fn devkit_reset() {
     println!("devkit reset: devnet did not serve chain data after 3 attempts");
 }
 
-// Polls until the chain-data API (yaci-store, fed by the node) answers with protocol parameters.
-// /admin/devnet alone is no proof: it stays 200 while the node socket is dead.
+// Polls until the chain-data API (yaci-store, fed by the node) answers with protocol parameters
+// AND the submit path reaches the backend submit-api. /admin/devnet alone is no proof: it stays
+// 200 while the node socket is dead. The submit probe matters because a reset's bootstrap can fail
+// to start the submit-api entirely ("Network.Socket.bind: resource busy" — the previous instance
+// hadn't released port 8090); chain data then works but every submit gets "Connection refused"
+// until the next reset. Probing with a garbage body: any deserialization/ledger 400 proves the
+// submit-api is alive; a body wrapping "Connection refused" does not.
 fn devkit_wait_healthy(budget: Duration) -> bool {
     let deadline = std::time::Instant::now() + budget;
     while std::time::Instant::now() < deadline {
         thread::sleep(Duration::from_secs(3));
-        let healthy = ureq::get(&format!("{}/epochs/parameters", DEVKIT_URL))
+        let chain_data_ok = ureq::get(&format!("{}/epochs/parameters", DEVKIT_URL))
             .timeout(Duration::from_secs(5))
             .call()
             .map(|r| r.status() == 200)
             .unwrap_or(false);
-        if healthy {
+        if chain_data_ok && devkit_submit_path_alive() {
             return true;
         }
     }
     false
+}
+
+fn devkit_submit_path_alive() -> bool {
+    match ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
+        .timeout(Duration::from_secs(5))
+        .set("Content-Type", "application/cbor")
+        .send_bytes(&[0x00])
+    {
+        Ok(_) => true, // a 2xx would mean it is certainly alive
+        Err(ureq::Error::Status(_, resp)) => !resp
+            .into_string()
+            .unwrap_or_default()
+            .contains("Connection refused"),
+        Err(_) => false,
+    }
 }
 
 pub fn devkit_topup(address: &str, ada_amount: u64) {

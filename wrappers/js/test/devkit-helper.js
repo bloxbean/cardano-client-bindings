@@ -46,8 +46,13 @@ export class DevKitHelper {
     throw new Error(`devnet reset failed after ${RESET_ATTEMPTS} attempts: ${lastErr}`);
   }
 
-  // Healthy = the chain-data API (yaci-store, fed by the node) answers with protocol parameters.
-  // /admin/devnet alone is no proof: it stays 200 while the node socket is dead.
+  // Healthy = the chain-data API (yaci-store, fed by the node) answers with protocol parameters
+  // AND the submit path reaches the backend submit-api. /admin/devnet alone is no proof: it stays
+  // 200 while the node socket is dead. The submit probe matters because a reset's bootstrap can
+  // fail to start the submit-api entirely ("Network.Socket.bind: resource busy" — the previous
+  // instance hadn't released port 8090); chain data then works but every submit gets
+  // "Connection refused" until the next reset. Probing with a garbage body: any deserialization /
+  // ledger 400 proves the submit-api is alive; a body wrapping "Connection refused" does not.
   async waitHealthy(budgetMs) {
     const deadline = Date.now() + budgetMs;
     while (Date.now() < deadline) {
@@ -56,10 +61,17 @@ export class DevKitHelper {
         const resp = await fetch(`${this.baseUrl}/epochs/parameters`, {
           signal: AbortSignal.timeout(5000),
         });
-        if (resp.ok) {
-          await resp.json();
-          return true;
-        }
+        if (!resp.ok) continue;
+        await resp.json();
+
+        const submitProbe = await fetch(`${this.baseUrl}/tx/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/cbor" },
+          body: Buffer.from("00", "hex"),
+          signal: AbortSignal.timeout(5000),
+        });
+        const text = await submitProbe.text();
+        if (!text.includes("Connection refused")) return true;
       } catch {
         // keep polling
       }
