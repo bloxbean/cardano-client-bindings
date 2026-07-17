@@ -24,9 +24,11 @@ task test(type: Exec) {
 
     // Invoke `go` directly on Windows rather than via `bash` (a bare `bash` resolves to WSL on
     // Windows runners, which has no distro).
+    // -timeout 30m: the DevKit integration tests health-gate every devnet reset (waiting for the
+    // cluster to actually serve chain data), which puts the full suite past `go test`'s 10m default.
     if (org.gradle.internal.os.OperatingSystem.current().isWindows()) {
-        commandLine 'go', 'test', '-v', './...'
+        commandLine 'go', 'test', '-v', '-timeout', '30m', './...'
     } else {
-        commandLine 'bash', '-c', 'go test -v ./...'
+        commandLine 'bash', '-c', 'go test -v -timeout 30m ./...'
     }
 }
