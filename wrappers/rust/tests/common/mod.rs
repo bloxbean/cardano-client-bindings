@@ -59,18 +59,56 @@ pub fn devkit_available() -> bool {
         .unwrap_or(false)
 }
 
+// devkit_reset restarts the devnet and returns only once it serves chain data again.
+//
+// DevKit 0.12 (companion mode) re-bootstraps the whole cluster on reset, and that bootstrap can
+// wedge (e.g. the relay never syncs from the companion within its window), leaving the node socket
+// dead until the NEXT reset POST kicks the cluster back to life. So: POST the reset, poll until the
+// chain-data API answers, and if the devnet stays dead re-POST the reset. On total failure it just
+// returns — the caller's topup/build will then panic with its own error.
 pub fn devkit_reset() {
-    let _ = ureq::post(&format!("{}/admin/devnet/reset", DEVKIT_URL))
-        .timeout(Duration::from_secs(10))
-        .call();
+    for attempt in 1..=3 {
+        // The reset handler blocks while the cluster re-bootstraps (~20-30s when healthy). A client
+        // timeout is fine: the bootstrap keeps running server-side and the health poll decides.
+        let _ = ureq::post(&format!("{}/admin/devnet/reset", DEVKIT_URL))
+            .timeout(Duration::from_secs(60))
+            .call();
+        if devkit_wait_healthy(Duration::from_secs(60)) {
+            return;
+        }
+        println!(
+            "devkit reset attempt {}/3: devnet still down, re-posting reset",
+            attempt
+        );
+    }
+    println!("devkit reset: devnet did not serve chain data after 3 attempts");
+}
+
+// Polls until the chain-data API (yaci-store, fed by the node) answers with protocol parameters.
+// /admin/devnet alone is no proof: it stays 200 while the node socket is dead.
+fn devkit_wait_healthy(budget: Duration) -> bool {
+    let deadline = std::time::Instant::now() + budget;
+    while std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_secs(3));
+        let healthy = ureq::get(&format!("{}/epochs/parameters", DEVKIT_URL))
+            .timeout(Duration::from_secs(5))
+            .call()
+            .map(|r| r.status() == 200)
+            .unwrap_or(false);
+        if healthy {
+            return true;
+        }
+    }
+    false
 }
 
 pub fn devkit_topup(address: &str, ada_amount: u64) {
-    // Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
-    // node, so a topup right after reset can transiently fail. Retry with backoff.
+    // devkit_reset already health-gates the devnet, but the faucet can still transiently fail
+    // right after the hand-over to the node. Retry with backoff.
     let body = json!({"address": address, "adaAmount": ada_amount}).to_string();
     for attempt in 1..=8 {
         let resp = ureq::post(&format!("{}/addresses/topup", DEVKIT_URL))
+            .timeout(Duration::from_secs(30))
             .set("Content-Type", "application/json")
             .send_string(&body);
         match resp {
@@ -90,6 +128,7 @@ pub fn devkit_topup(address: &str, ada_amount: u64) {
 
 pub fn devkit_get_utxos(address: &str) -> Value {
     let resp = ureq::get(&format!("{}/addresses/{}/utxos", DEVKIT_URL, address))
+        .timeout(Duration::from_secs(30))
         .call()
         .expect("Failed to get utxos");
     resp.into_json::<Value>().expect("Invalid utxo JSON")
@@ -97,6 +136,7 @@ pub fn devkit_get_utxos(address: &str) -> Value {
 
 pub fn devkit_get_protocol_params() -> Value {
     let resp = ureq::get(&format!("{}/epochs/parameters", DEVKIT_URL))
+        .timeout(Duration::from_secs(30))
         .call()
         .expect("Failed to get protocol params");
     resp.into_json::<Value>().expect("Invalid PP JSON")
@@ -113,20 +153,31 @@ pub fn devnet_pp() -> Value {
 }
 
 pub fn devkit_submit_tx(tx_cbor_hex: &str) -> String {
-    let tx_bytes = hex_decode(tx_cbor_hex).expect("Invalid tx hex");
-    let resp = ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
-        .set("Content-Type", "application/cbor")
-        .send_bytes(&tx_bytes)
-        .expect("Failed to submit tx");
-    let text = resp.into_string().expect("Failed to read response");
-    text.trim().trim_matches('"').to_string()
+    devkit_try_submit(tx_cbor_hex).expect("Failed to submit tx")
 }
 
 // Submit that returns the error body instead of panicking, so callers can inspect a rejection (ureq
 // treats 4xx/5xx as Err by default).
+//
+// Retries when the devkit wraps a backend "Connection refused": after a reset, the devkit's
+// submit-api (port 8090) can lag behind the chain-data API that devkit_reset health-gates on.
+// That's the devnet still booting, not a ledger rejection — genuine rejections surface immediately.
 pub fn devkit_try_submit(tx_cbor_hex: &str) -> Result<String, String> {
+    let mut last_err = String::new();
+    for _ in 0..8 {
+        match devkit_try_submit_once(tx_cbor_hex) {
+            Err(e) if e.contains("Connection refused") => last_err = e,
+            other => return other,
+        }
+        thread::sleep(Duration::from_secs(4));
+    }
+    Err(last_err)
+}
+
+fn devkit_try_submit_once(tx_cbor_hex: &str) -> Result<String, String> {
     let tx_bytes = hex_decode(tx_cbor_hex).map_err(|e| e.to_string())?;
     match ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
+        .timeout(Duration::from_secs(30))
         .set("Content-Type", "application/cbor")
         .send_bytes(&tx_bytes)
     {

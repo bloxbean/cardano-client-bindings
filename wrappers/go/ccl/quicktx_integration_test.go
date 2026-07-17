@@ -27,6 +27,10 @@ import (
 const devkitURL = "http://localhost:10000/local-cluster/api"
 const devkitProviderURL = "http://localhost:10000/local-cluster/api"
 
+// devkitHTTP bounds every helper call so a wedged devnet fails the call fast instead of hanging
+// the test until its whole timeout budget is gone.
+var devkitHTTP = &http.Client{Timeout: 30 * time.Second}
+
 // devkitAvailable checks if Yaci DevKit is running.
 func devkitAvailable() bool {
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -38,13 +42,49 @@ func devkitAvailable() bool {
 	return resp.StatusCode == 200
 }
 
+// devkitReset restarts the devnet and returns only once it serves chain data again.
+//
+// DevKit 0.12 (companion mode) re-bootstraps the whole cluster on reset, and that bootstrap can
+// wedge (e.g. the relay never syncs from the companion within its window), leaving the node socket
+// dead until the NEXT reset POST kicks the cluster back to life. So: POST the reset, poll until the
+// chain-data API answers, and if the devnet stays dead re-POST the reset. On total failure it just
+// returns — the caller's topup/build will then fail with its own error.
 func devkitReset() {
-	req, _ := http.NewRequest("POST", devkitURL+"/admin/devnet/reset", nil)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err == nil {
-		resp.Body.Close()
+	// The reset handler blocks while the cluster re-bootstraps (~20-30s when healthy).
+	client := &http.Client{Timeout: 60 * time.Second}
+	for attempt := 1; attempt <= 3; attempt++ {
+		req, _ := http.NewRequest("POST", devkitURL+"/admin/devnet/reset", nil)
+		// A client timeout here is fine: the bootstrap keeps running server-side and the
+		// health poll below is what decides.
+		if resp, err := client.Do(req); err == nil {
+			resp.Body.Close()
+		}
+		if devkitWaitHealthy(60 * time.Second) {
+			return
+		}
+		fmt.Printf("devkit reset attempt %d/3: devnet still down, re-posting reset\n", attempt)
 	}
+	fmt.Println("devkit reset: devnet did not serve chain data after 3 attempts")
+}
+
+// devkitWaitHealthy polls until the chain-data API (yaci-store, fed by the node) answers with
+// protocol parameters. /admin/devnet alone is no proof: it stays 200 while the node socket is dead.
+func devkitWaitHealthy(budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	client := &http.Client{Timeout: 5 * time.Second}
+	for time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+		resp, err := client.Get(devkitURL + "/epochs/parameters")
+		if err != nil {
+			continue
+		}
+		ok := resp.StatusCode == 200
+		resp.Body.Close()
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 func devkitTopup(address string, adaAmount int) error {
@@ -52,12 +92,11 @@ func devkitTopup(address string, adaAmount int) error {
 		"address":   address,
 		"adaAmount": adaAmount,
 	})
-	// Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
-	// node, so a topup right after reset can transiently fail ("Topup failed"). Retry with backoff
-	// until the faucet is ready.
+	// devkitReset already health-gates the devnet, but the faucet can still transiently refuse
+	// right after the hand-over to the node ("Topup failed"). Retry with backoff.
 	var lastErr error
 	for attempt := 1; attempt <= 8; attempt++ {
-		resp, err := http.Post(devkitURL+"/addresses/topup", "application/json", bytes.NewReader(body))
+		resp, err := devkitHTTP.Post(devkitURL+"/addresses/topup", "application/json", bytes.NewReader(body))
 		if err != nil {
 			lastErr = err
 		} else {
@@ -74,7 +113,7 @@ func devkitTopup(address string, adaAmount int) error {
 }
 
 func devkitGetUtxos(address string) ([]map[string]interface{}, error) {
-	resp, err := http.Get(devkitURL + "/addresses/" + address + "/utxos")
+	resp, err := devkitHTTP.Get(devkitURL + "/addresses/" + address + "/utxos")
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +126,7 @@ func devkitGetUtxos(address string) ([]map[string]interface{}, error) {
 }
 
 func devkitGetProtocolParams() (map[string]interface{}, error) {
-	resp, err := http.Get(devkitURL + "/epochs/parameters")
+	resp, err := devkitHTTP.Get(devkitURL + "/epochs/parameters")
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +148,24 @@ func parseExpectedTreasury(submitErr string) string {
 	return ""
 }
 
+// devkitSubmitTx submits with a retry: after a reset, the devkit's backend submit-api (port 8090)
+// can lag behind the chain-data API that devkitReset health-gates on — the devkit then returns 400
+// wrapping "Connection refused". That's the devnet still booting, not a ledger rejection, so retry
+// it; genuine rejections surface immediately.
 func devkitSubmitTx(txCborHex string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 8; attempt++ {
+		hash, err := devkitSubmitTxOnce(txCborHex)
+		if err == nil || !strings.Contains(err.Error(), "Connection refused") {
+			return hash, err
+		}
+		lastErr = err
+		time.Sleep(4 * time.Second)
+	}
+	return "", lastErr
+}
+
+func devkitSubmitTxOnce(txCborHex string) (string, error) {
 	// Use raw TCP to avoid Go's strict "duplicate chunked TE" rejection
 	txBytes, err := hex.DecodeString(txCborHex)
 	if err != nil {
@@ -188,7 +244,7 @@ func devkitSubmitTx(txCborHex string) (string, error) {
 }
 
 func devkitGetTx(txHash string) (map[string]interface{}, error) {
-	resp, err := http.Get(devkitURL + "/txs/" + txHash)
+	resp, err := devkitHTTP.Get(devkitURL + "/txs/" + txHash)
 	if err != nil {
 		return nil, err
 	}

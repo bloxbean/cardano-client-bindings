@@ -15,7 +15,9 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-setDefaultTimeout(60_000);
+// Headroom includes devkit.reset() re-posting itself when the devnet bootstrap wedges (up to
+// ~2 minutes of self-healing before the test's own work starts).
+setDefaultTimeout(300_000);
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../../test-fixtures/quicktx-intents");
 
