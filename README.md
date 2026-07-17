@@ -49,9 +49,10 @@ cardano-client-bindings/
 - The pre-built native library is downloaded automatically via `make` or `-PusePrebuilt`
 
 **For core developers** (building from source):
-- **[GraalVM 25+](https://www.graalvm.org/)** (includes `native-image`)
+- **[Oracle GraalVM 25.1](https://www.graalvm.org/)** (the 25.1 "Innovation" line, on JDK 25 LTS;
+  includes `native-image`)
   ```bash
-  sdk install java 25.0.3-graal   # Oracle GraalVM, via SDKMAN
+  sdk install java 25.1.3-graal   # Oracle GraalVM, via SDKMAN
   ```
 
 **Language runtimes (install whichever you need):**

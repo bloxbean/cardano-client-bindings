@@ -17,10 +17,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: graalvm/setup-graalvm@v1
+      - uses: graalvm/setup-graalvm@v1.6.1
         with:
-          java-version: '25.0.3'
+          version: '25.1'
           distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-go@v5
         with:
@@ -102,10 +103,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: graalvm/setup-graalvm@v1
+      - uses: graalvm/setup-graalvm@v1.6.1
         with:
-          java-version: '25.0.3'
+          version: '25.1'
           distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-go@v5
         with:
