@@ -138,6 +138,8 @@ transaction:
     await devkit.waitForBlock(3000);
     const r1Utxos = await devkit.getUtxos(r1.base_address);
     expect(totalLovelace(r1Utxos)).toBe(3_000_000);
+    const r2Utxos = await devkit.getUtxos(r2.base_address);
+    expect(totalLovelace(r2Utxos)).toBe(2_000_000);
   });
 
   it("builds via a YaciProvider (buildWith) against the live devnet", async () => {

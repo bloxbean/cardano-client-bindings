@@ -1,0 +1,26 @@
+version: 1.0
+context:
+  fee_payer: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+transaction:
+- tx:
+    from: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    change_address: addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp
+    intents:
+    # Aiken redeemer_check validator (test-fixtures/aiken/redeemer-check): mint
+    # passes iff the redeemer is the integer 42. Redeemer 0 makes phase-2
+    # validation FAIL — the node must reject this transaction. Built with
+    # caller-supplied exec units (the offline Scalus evaluator would refuse to
+    # build a failing script; StaticTransactionEvaluator stamps units blindly).
+    - policyId: 526a08dea03272a2b37463135385a8f80128d041978a9cdcc66c77bf
+      type: script_minting
+      assets:
+      - name: AikenToken
+        value: 1
+      receiver: addr_test1vz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerspjrlsz
+      redeemer:
+        int: 0
+    scripts:
+    - type: validator
+      role: mint
+      cbor_hex: 5859585701010029800aba2aba1aab9eaab9dab9a4888896600264646644b30013370e900018031baa00289919b87375a6012008902a1bae300830073754005164014600c600e002600c004600c00260066ea801a29344d9590011
+      version: v3

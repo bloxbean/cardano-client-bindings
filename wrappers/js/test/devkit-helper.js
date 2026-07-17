@@ -46,8 +46,13 @@ export class DevKitHelper {
     throw new Error(`devnet reset failed after ${RESET_ATTEMPTS} attempts: ${lastErr}`);
   }
 
-  // Healthy = the chain-data API (yaci-store, fed by the node) answers with protocol parameters.
-  // /admin/devnet alone is no proof: it stays 200 while the node socket is dead.
+  // Healthy = the chain-data API (yaci-store, fed by the node) answers with protocol parameters
+  // AND the submit path reaches the backend submit-api. /admin/devnet alone is no proof: it stays
+  // 200 while the node socket is dead. The submit probe matters because a reset's bootstrap can
+  // fail to start the submit-api entirely ("Network.Socket.bind: resource busy" — the previous
+  // instance hadn't released port 8090); chain data then works but every submit gets
+  // "Connection refused" until the next reset. Probing with a garbage body: any deserialization /
+  // ledger 400 proves the submit-api is alive; a body wrapping "Connection refused" does not.
   async waitHealthy(budgetMs) {
     const deadline = Date.now() + budgetMs;
     while (Date.now() < deadline) {
@@ -56,10 +61,17 @@ export class DevKitHelper {
         const resp = await fetch(`${this.baseUrl}/epochs/parameters`, {
           signal: AbortSignal.timeout(5000),
         });
-        if (resp.ok) {
-          await resp.json();
-          return true;
-        }
+        if (!resp.ok) continue;
+        await resp.json();
+
+        const submitProbe = await fetch(`${this.baseUrl}/tx/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/cbor" },
+          body: Buffer.from("00", "hex"),
+          signal: AbortSignal.timeout(5000),
+        });
+        const text = await submitProbe.text();
+        if (!text.includes("Connection refused")) return true;
       } catch {
         // keep polling
       }
@@ -133,6 +145,19 @@ export class DevKitHelper {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     return resp.json();
+  }
+
+  // Current epoch, for intents whose certificates carry epoch bounds (e.g. pool retirement).
+  // Prefers the protocol-params response (Blockfrost-style params carry "epoch"), falls back to
+  // the Blockfrost-compatible /epochs/latest.
+  async getLatestEpoch() {
+    const pp = await this.getProtocolParams();
+    if (typeof pp.epoch === "number") return pp.epoch;
+    if (typeof pp.epoch === "string") return parseInt(pp.epoch, 10);
+    const resp = await fetch(`${this.baseUrl}/epochs/latest`);
+    const latest = await resp.json();
+    if (typeof latest.epoch !== "number") throw new Error(`no epoch in /epochs/latest: ${JSON.stringify(latest)}`);
+    return latest.epoch;
   }
 
   async waitForBlock(ms = 2000) {
