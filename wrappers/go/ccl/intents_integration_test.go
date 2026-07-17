@@ -1,7 +1,9 @@
 package ccl
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -522,4 +524,128 @@ func TestIntegrationPlutusSpend(t *testing.T) {
 
 	// Confirm the spend actually consumed the locked script UTXO.
 	assertUtxoConsumed(t, scriptAddr, lockHash)
+}
+
+func TestIntegrationStakeDeregistration(t *testing.T) {
+	skipIfNoDevKit(t)
+	// Deregistration requires the stake address to be registered first; the deregistration
+	// certificate is witnessed by the stake key (the refund address receives the deposit back).
+	setupThenSubmit(t,
+		"stake_registration.yaml", []string{"payment", "stake"},
+		"stake_deregistration.yaml", []string{"payment", "stake"})
+}
+
+// devkitCurrentEpoch returns the devnet's current epoch: from the protocol-params response when it
+// carries one (Blockfrost-style params do), else from the Blockfrost-compatible /epochs/latest.
+func devkitCurrentEpoch(t *testing.T, pp map[string]interface{}) int {
+	t.Helper()
+	if v, ok := pp["epoch"]; ok {
+		switch e := v.(type) {
+		case float64:
+			return int(e)
+		case string:
+			var n int
+			fmt.Sscanf(e, "%d", &n)
+			return n
+		}
+	}
+	resp, err := http.Get(devkitURL + "/epochs/latest")
+	if err != nil {
+		t.Fatalf("get current epoch: %v", err)
+	}
+	defer resp.Body.Close()
+	var latest map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&latest); err != nil {
+		t.Fatalf("decode /epochs/latest: %v", err)
+	}
+	if e, ok := latest["epoch"].(float64); ok {
+		return int(e)
+	}
+	t.Fatalf("no epoch in protocol params or /epochs/latest (%v)", latest)
+	return 0
+}
+
+func TestIntegrationPoolRetirement(t *testing.T) {
+	skipIfNoDevKit(t)
+	// Register the account-keyed pool, then retire it. The retirement certificate is witnessed by
+	// the pool's operator key — which pool_registration.yaml keys to the account's stake key.
+	// Conway bounds the retirement epoch to (current, current+e_max]; the fixture's hardcoded
+	// 500 is out of range on a young devnet, so repoint it at current+2.
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "stake_registration.yaml"), u, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "pool_registration.yaml"), u2, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	epoch := devkitCurrentEpoch(t, pp)
+	retireYaml := strings.ReplaceAll(readIntentFixture(t, "pool_retirement.yaml"), poolPlaceholder, accountPoolID)
+	retireYaml = strings.Replace(retireYaml, "retirement_epoch: 500",
+		fmt.Sprintf("retirement_epoch: %d", epoch+2), 1)
+
+	u3, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-pool-registration): %v", err)
+	}
+	signSubmit(t, retireYaml, u3, pp, nil, "payment", "stake")
+}
+
+// aikenExecUnits generously covers the tiny redeemer_check validator (compare the Plutus fixtures).
+func aikenExecUnits() []map[string]interface{} {
+	return []map[string]interface{}{{"mem": 2000000, "steps": 500000000}}
+}
+
+func TestIntegrationAikenMintAccepts(t *testing.T) {
+	skipIfNoDevKit(t)
+	// The Aiken redeemer_check validator (test-fixtures/aiken/redeemer-check) passes iff the
+	// redeemer is the integer 42. Happy path: redeemer 42 → the node accepts and the asset lands.
+	buildSignSubmit(t, "plutus/aiken_mint_pass.yaml", aikenExecUnits(), "payment")
+	assertMintedAssetAt(t, mintReceiver)
+}
+
+func TestIntegrationAikenMintRejects(t *testing.T) {
+	skipIfNoDevKit(t)
+	// Negative validation: redeemer 0 makes the same validator evaluate to false, so phase-2
+	// validation fails and the node must reject the tx. Exec units are supplied manually — the
+	// bridge's StaticTransactionEvaluator stamps them without running the script, which is exactly
+	// what lets a validation-failing tx reach the node.
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	result, err := bridge.QuickTx.Build(readIntentFixture(t, "plutus/aiken_mint_fail.yaml"),
+		utxos, devnetPP(t), aikenExecUnits())
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, "payment")
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if _, err := devkitSubmitTx(signed); err == nil {
+		t.Fatal("the node accepted a mint whose validator must reject (redeemer 0); " +
+			"expected a phase-2 script validation failure")
+	}
 }

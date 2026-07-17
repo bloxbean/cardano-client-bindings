@@ -138,6 +138,23 @@ class DevKitHelper:
         with urllib.request.urlopen(url, timeout=30) as resp:
             return json.loads(resp.read())
 
+    def get_latest_epoch(self):
+        """Current epoch, for intents whose certificates carry epoch bounds (e.g. pool retirement).
+
+        Prefers the protocol-params response (Blockfrost-style params carry "epoch"), falls back
+        to the Blockfrost-compatible /epochs/latest.
+        """
+        pp = self.get_protocol_params()
+        epoch = pp.get("epoch")
+        if isinstance(epoch, int):
+            return epoch
+        if isinstance(epoch, str):
+            return int(epoch)
+        url = f"{self.base_url}/epochs/latest"
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            latest = json.loads(resp.read())
+        return int(latest["epoch"])
+
     def wait_for_block(self, seconds=2):
         """Wait for a new block to be produced."""
         time.sleep(seconds)

@@ -414,3 +414,100 @@ fn test_integration_plutus_spend() {
     // Confirm the spend actually consumed the locked script UTXO.
     assert_utxo_consumed(SCRIPT_ADDR, &lock_hash);
 }
+
+// Register the stake address, then deregister it. The deregistration certificate is witnessed by
+// the stake key (the refund address receives the deposit back). Mirrors the JS suite's
+// register-then-deregister test.
+#[test]
+fn test_integration_stake_deregistration() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let bridge = Bridge::new().expect("create bridge");
+    setup_then_submit(
+        &bridge,
+        "stake_registration.yaml",
+        &["payment", "stake"],
+        "stake_deregistration.yaml",
+        &["payment", "stake"],
+    );
+}
+
+// Register the account-keyed pool, then retire it. The retirement certificate is witnessed by the
+// pool's operator key — which pool_registration.yaml keys to the account's stake key. Conway bounds
+// the retirement epoch to (current, current+e_max]; the fixture's hardcoded 500 is out of range on
+// a young devnet, so repoint it at current+2.
+#[test]
+fn test_integration_pool_retirement() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, 6000);
+    wait_for_block();
+    let pp = devnet_pp();
+
+    let bridge = Bridge::new().expect("create bridge");
+    let u = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &read_fixture("stake_registration.yaml"), &u, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+
+    let u2 = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &read_fixture("pool_registration.yaml"), &u2, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+
+    let epoch = devkit_current_epoch();
+    let retire_yaml = read_fixture("pool_retirement.yaml")
+        .replace(POOL_PLACEHOLDER, ACCOUNT_POOL_ID)
+        .replace("retirement_epoch: 500", &format!("retirement_epoch: {}", epoch + 2));
+
+    let u3 = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &retire_yaml, &u3, &pp, None, &["payment", "stake"]);
+}
+
+// The Aiken redeemer_check validator (test-fixtures/aiken/redeemer-check) passes iff the redeemer
+// is the integer 42. Happy path: redeemer 42 → the node accepts and the asset lands.
+#[test]
+fn test_integration_aiken_mint_accepts() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let bridge = Bridge::new().expect("create bridge");
+    let exec = plutus_exec_units();
+    build_sign_submit(&bridge, "plutus/aiken_mint_pass.yaml", Some(&exec), &["payment"]);
+    assert_minted_asset_at(MINT_RECEIVER);
+}
+
+// Negative validation: redeemer 0 makes the same validator evaluate to false, so phase-2 validation
+// fails and the node must reject the tx. Exec units are supplied manually — the bridge's
+// StaticTransactionEvaluator stamps them without running the script, which is exactly what lets a
+// validation-failing tx reach the node.
+#[test]
+fn test_integration_aiken_mint_rejects() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, 6000);
+    wait_for_block();
+    let pp = devnet_pp();
+
+    let bridge = Bridge::new().expect("create bridge");
+    let utxos = devkit_get_utxos(INTENT_SENDER);
+    let exec = plutus_exec_units();
+    let result = bridge
+        .quicktx()
+        .build(&read_fixture("plutus/aiken_mint_fail.yaml"), &utxos, &pp, Some(&exec))
+        .expect("build");
+    let signed = bridge
+        .account()
+        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, &["payment"])
+        .expect("sign");
+    assert!(
+        devkit_try_submit(&signed).is_err(),
+        "the node accepted a mint whose validator must reject (redeemer 0); \
+         expected a phase-2 script validation failure"
+    );
+}

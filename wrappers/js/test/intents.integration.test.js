@@ -201,6 +201,35 @@ describe("Intents Integration (DevKit)", () => {
     );
   });
 
+  // Register the account-keyed pool, then retire it. The retirement certificate is witnessed by
+  // the pool's operator key — which pool_registration.yaml keys to the account's stake key.
+  // Conway bounds the retirement epoch to (current, current+e_max]; the fixture's hardcoded 500
+  // is out of range on a young devnet, so repoint it at current+2.
+  it("retires a stake pool it registers", async () => {
+    if (skip) return;
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
+    await devkit.topup(INTENT_SENDER, 6000);
+    await devkit.waitForBlock(3000);
+    const pp = await devnetPP();
+
+    const u = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(readFixture("stake_registration.yaml"), u, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+
+    const u2 = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(readFixture("pool_registration.yaml"), u2, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+
+    const epoch = await devkit.getLatestEpoch();
+    const retireYaml = readFixture("pool_retirement.yaml")
+      .replaceAll(POOL_PLACEHOLDER, ACCOUNT_POOL_ID)
+      .replace("retirement_epoch: 500", `retirement_epoch: ${epoch + 2}`);
+
+    const u3 = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(retireYaml, u3, pp, null, ["payment", "stake"]);
+  });
+
   // Mirrors Go TestIntegrationStakeWithdrawal. Conway requires a stake address to be vote-delegated to
   // a DRep before it can withdraw, so the sequence is: register stake -> delegate voting power ->
   // withdraw the (zero) reward balance.
@@ -372,6 +401,35 @@ describe("Intents Integration (DevKit)", () => {
     await buildSignSubmit("plutus/script_minting.yaml",
       [{ mem: 2000000, steps: 500000000 }], ["payment"]);
     await assertMintedAssetAt(MINT_RECEIVER);
+  });
+
+  // The Aiken redeemer_check validator (test-fixtures/aiken/redeemer-check) passes iff the
+  // redeemer is the integer 42 — a real validator that can genuinely reject, unlike the
+  // always-succeeds blob the other Plutus fixtures use.
+  it("mints with the Aiken redeemer-check validator (redeemer 42 accepted)", async () => {
+    if (skip) return;
+    await buildSignSubmit("plutus/aiken_mint_pass.yaml",
+      [{ mem: 2000000, steps: 500000000 }], ["payment"]);
+    await assertMintedAssetAt(MINT_RECEIVER);
+  });
+
+  // Negative validation: redeemer 0 makes the same validator evaluate to false, so phase-2
+  // validation fails and the node must reject the tx. Exec units are supplied manually — the
+  // bridge's StaticTransactionEvaluator stamps them without running the script, which is exactly
+  // what lets a validation-failing tx reach the node.
+  it("rejects the Aiken redeemer-check mint with a wrong redeemer", async () => {
+    if (skip) return;
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
+    await devkit.topup(INTENT_SENDER, 6000);
+    await devkit.waitForBlock(3000);
+
+    const utxos = await devkit.getUtxos(INTENT_SENDER);
+    const result = bridge.quicktx.build(readFixture("plutus/aiken_mint_fail.yaml"),
+      utxos, await devnetPP(), [{ mem: 2000000, steps: 500000000 }]);
+    const signed = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor, ["payment"]);
+    const res = await devkit.submitTx(signed);
+    expect(TX_HASH_RE.test(res)).toBe(false); // the node must reject, not return a tx hash
   });
 
   // Mirrors Go TestIntegrationPlutusSpend. Lock a UTXO at the script address (with the datum hash),

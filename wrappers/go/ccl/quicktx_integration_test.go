@@ -407,6 +407,9 @@ transaction:
 	if total := totalLovelace(mustUtxos(t, r1.BaseAddress)); total != 3_000_000 {
 		t.Errorf("expected 3 ADA for r1, got %d", total)
 	}
+	if total := totalLovelace(mustUtxos(t, r2.BaseAddress)); total != 2_000_000 {
+		t.Errorf("expected 2 ADA for r2, got %d", total)
+	}
 }
 
 func TestIntegrationInsufficientFunds(t *testing.T) {

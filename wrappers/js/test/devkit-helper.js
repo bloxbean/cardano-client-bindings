@@ -135,6 +135,19 @@ export class DevKitHelper {
     return resp.json();
   }
 
+  // Current epoch, for intents whose certificates carry epoch bounds (e.g. pool retirement).
+  // Prefers the protocol-params response (Blockfrost-style params carry "epoch"), falls back to
+  // the Blockfrost-compatible /epochs/latest.
+  async getLatestEpoch() {
+    const pp = await this.getProtocolParams();
+    if (typeof pp.epoch === "number") return pp.epoch;
+    if (typeof pp.epoch === "string") return parseInt(pp.epoch, 10);
+    const resp = await fetch(`${this.baseUrl}/epochs/latest`);
+    const latest = await resp.json();
+    if (typeof latest.epoch !== "number") throw new Error(`no epoch in /epochs/latest: ${JSON.stringify(latest)}`);
+    return latest.epoch;
+  }
+
   async waitForBlock(ms = 2000) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }

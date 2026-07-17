@@ -219,6 +219,10 @@ transaction:
     total = sum(int(a["quantity"]) for u in r1_utxos
                 for a in u["amount"] if a["unit"] == "lovelace")
     assert total == 3_000_000
+    r2_utxos = devkit.get_utxos(r2["base_address"])
+    total2 = sum(int(a["quantity"]) for u in r2_utxos
+                 for a in u["amount"] if a["unit"] == "lovelace")
+    assert total2 == 2_000_000
 
 
 def test_insufficient_funds(ccl_lib, devkit):
@@ -420,6 +424,69 @@ def test_pool_registration(ccl_lib, devkit):
     _setup_then_submit(ccl_lib, devkit,
                        "stake_registration.yaml", ["payment", "stake"],
                        "pool_registration.yaml", ["payment", "stake"])
+
+
+def test_stake_deregistration(ccl_lib, devkit):
+    """Register the stake address, then deregister it. The deregistration certificate is witnessed
+    by the stake key (the refund address receives the deposit back). Mirrors the JS suite's
+    register-then-deregister test.
+    """
+    _setup_then_submit(ccl_lib, devkit,
+                       "stake_registration.yaml", ["payment", "stake"],
+                       "stake_deregistration.yaml", ["payment", "stake"])
+
+
+def test_pool_retirement(ccl_lib, devkit):
+    """Register the account-keyed pool, then retire it. The retirement certificate is witnessed by
+    the pool's operator key — which pool_registration.yaml keys to the account's stake key. Conway
+    bounds the retirement epoch to (current, current+e_max]; the fixture's hardcoded 500 is out of
+    range on a young devnet, so repoint it at current+2.
+    """
+    pp = _reset_and_fund(devkit)
+
+    u = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, _read_fixture("stake_registration.yaml"), u, pp,
+                 ["payment", "stake"])
+    devkit.wait_for_block(3)
+
+    u2 = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, _read_fixture("pool_registration.yaml"), u2, pp,
+                 ["payment", "stake"])
+    devkit.wait_for_block(3)
+
+    epoch = devkit.get_latest_epoch()
+    retire_yaml = (_read_fixture("pool_retirement.yaml")
+                   .replace(POOL_PLACEHOLDER, ACCOUNT_POOL_ID)
+                   .replace("retirement_epoch: 500", f"retirement_epoch: {epoch + 2}"))
+
+    u3 = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, retire_yaml, u3, pp, ["payment", "stake"])
+
+
+def test_aiken_mint_accepts(ccl_lib, devkit):
+    """The Aiken redeemer_check validator (test-fixtures/aiken/redeemer-check) passes iff the
+    redeemer is the integer 42. Happy path: redeemer 42 → the node accepts and the asset lands.
+    """
+    _build_sign_submit(ccl_lib, devkit, "plutus/aiken_mint_pass.yaml", ["payment"],
+                       exec_units=EXEC_UNITS)
+    _assert_minted_asset_at(devkit, MINT_RECEIVER)
+
+
+def test_aiken_mint_rejects(ccl_lib, devkit):
+    """Negative validation: redeemer 0 makes the same validator evaluate to false, so phase-2
+    validation fails and the node must reject the tx. Exec units are supplied manually — the
+    bridge's StaticTransactionEvaluator stamps them without running the script, which is exactly
+    what lets a validation-failing tx reach the node.
+    """
+    pp = _reset_and_fund(devkit)
+
+    utxos = devkit.get_utxos(INTENT_SENDER)
+    result = ccl_lib.quicktx.build(_read_fixture("plutus/aiken_mint_fail.yaml"),
+                                   utxos, pp, exec_units=EXEC_UNITS)
+    signed = ccl_lib.account.sign_tx_with_keys(
+        INTENT_MNEMONIC, result["tx_cbor"], ["payment"], Network.TESTNET, 0, 0)
+    with pytest.raises(RuntimeError):
+        devkit.submit_tx(signed)
 
 
 def test_stake_delegation(ccl_lib, devkit):

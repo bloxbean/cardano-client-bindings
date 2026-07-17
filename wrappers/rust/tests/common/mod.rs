@@ -391,3 +391,25 @@ pub fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
         .collect()
 }
+
+// Current epoch, for intents whose certificates carry epoch bounds (e.g. pool retirement).
+// Prefers the protocol-params response (Blockfrost-style params carry "epoch"), falls back to the
+// Blockfrost-compatible /epochs/latest.
+pub fn devkit_current_epoch() -> i64 {
+    let pp = devkit_get_protocol_params();
+    if let Some(e) = pp["epoch"].as_i64() {
+        return e;
+    }
+    if let Some(s) = pp["epoch"].as_str() {
+        if let Ok(e) = s.parse() {
+            return e;
+        }
+    }
+    let latest: Value = ureq::get(&format!("{}/epochs/latest", DEVKIT_URL))
+        .timeout(Duration::from_secs(30))
+        .call()
+        .expect("get /epochs/latest")
+        .into_json()
+        .expect("parse /epochs/latest");
+    latest["epoch"].as_i64().expect("epoch in /epochs/latest")
+}
