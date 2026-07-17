@@ -22,6 +22,17 @@ The bridge exposes CCL's **offline/local** operations:
 
 Backend/HTTP modules (Blockfrost, Koios, Ogmios) are intentionally excluded — every language has good HTTP libraries, and CCL's real value is the hard parts listed above.
 
+## Documentation
+
+Per-language user guides (installation, quick start, full API reference, transaction building, providers, troubleshooting) live under [`docs/`](docs/README.md):
+
+- **[JavaScript (Bun)](docs/js/README.md)** — `@bloxbean/cardano-client-lib`
+- **[Go](docs/golang/README.md)** — `github.com/bloxbean/cardano-client-bindings/wrappers/go`
+- **[Rust](docs/rust/README.md)** — `cardano-client-lib` crate
+- **[Python](docs/python/README.md)** — `cardano-client-lib` on PyPI
+
+Shared references: the [TxPlan (YAML) transaction format](docs/quicktx.md) with its verified intent catalog, and the [architecture decision records](docs/adr/).
+
 ## Project Structure
 
 ```
