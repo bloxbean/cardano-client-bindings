@@ -27,9 +27,10 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 // The governance multi-step sequences reset+fund the devnet and submit several txs across blocks, so
-// give them plenty of headroom. (When DevKit is down the tests return immediately, so a high default
-// is harmless.)
-setDefaultTimeout(180_000);
+// give them plenty of headroom — including for reset() re-posting itself when the devnet bootstrap
+// wedges (up to ~2 minutes of self-healing before the test's own work starts). (When DevKit is down
+// the tests return immediately, so a high default is harmless.)
+setDefaultTimeout(300_000);
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../../test-fixtures/quicktx-intents");
 
