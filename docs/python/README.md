@@ -1,0 +1,110 @@
+# Cardano Client Lib for Python
+
+The `ccl` Python package (distribution name: `cardano-client-lib`) brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Python as a native library. No JVM, no C extension: pure `ctypes` over `libccl`, a GraalVM native-image build of CCL.
+
+Requires Python ≥ 3.8. The only runtime dependency is `pyyaml`.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [API reference](api.md) | Every class and method: `CclLib`, account, address, crypto, tx, plutus, script, gov, wallet, quicktx |
+| [Providers & evaluators](providers.md) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
+| [Troubleshooting](troubleshooting.md) | Native library resolution, platform support, common errors |
+| [TxPlan (YAML) reference](../quicktx.md) | The transaction description format used by `quicktx.build` — shared by all four language wrappers |
+
+## Installation
+
+```bash
+pip install cardano-client-lib
+```
+
+> If the package is not yet available on PyPI for your platform, install a wheel from the project's [GitHub releases](https://github.com/bloxbean/cardano-client-bindings/releases), or build one locally: `./gradlew :wrappers:python:wheel` (produces `wrappers/python/dist/*.whl`). Wheels bundle the native library — nothing else to install.
+
+For development against a locally built native library, skip the wheel and point the package at it:
+
+```bash
+export PYTHONPATH=/path/to/cardano-client-bindings/wrappers/python
+export CCL_LIB_PATH=/path/to/cardano-client-bindings/core/build/native/nativeCompile
+```
+
+## Quick start
+
+```python
+from ccl import CclLib, Network
+
+with CclLib() as lib:
+    # Create a new account (24-word mnemonic, testnet addresses).
+    account = lib.account.create(Network.TESTNET)
+    print(account["base_address"])   # addr_test1...
+    print(account["stake_address"])  # stake_test1...
+
+    # Restore it later from the mnemonic.
+    restored = lib.account.from_mnemonic(account["mnemonic"], Network.TESTNET)
+```
+
+The context manager tears down the native isolate on exit; equivalently, call `lib.close()` in a `finally` block.
+
+### Build, sign, and inspect a transaction — fully offline
+
+Transactions are described as a [TxPlan YAML document](../quicktx.md). You supply the UTXOs and protocol parameters (from any source — see [providers](providers.md) for ready-made ones), and get back an unsigned transaction:
+
+```python
+yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {account["base_address"]}
+      intents:
+        - type: payment
+          address: {receiver}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+"""
+
+result = lib.quicktx.build(yaml, utxos, protocol_params)
+# result = {"tx_cbor": ..., "tx_hash": ..., "fee": ...}
+
+signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
+# submit `signed` with any HTTP client — the library never talks to the network
+```
+
+With a provider, fetching the chain data is one call:
+
+```python
+from ccl import YaciProvider
+
+provider = YaciProvider()  # local Yaci DevKit
+result = lib.quicktx.build_with(yaml, provider, account["base_address"])
+```
+
+## Design in one paragraph
+
+The native library is **offline and stateless** — it derives, builds, signs, hashes, and serializes, but never performs I/O. Anything that touches the network (fetching UTXOs, protocol parameters, submitting transactions, remote script evaluation) lives in the wrapper or in your code, where you control HTTP. Plutus execution units are computed offline in-process (via Scalus) by default, so even script transactions build without a network connection.
+
+## Threading
+
+A single `CclLib` instance is **safe to share across threads** — each OS thread is attached to the GraalVM isolate lazily and gets its own native call state, so it works naturally in threaded web servers (Flask/FastAPI/gunicorn, `ThreadPoolExecutor`). Just never use an instance after `close()`; that raises `CclClosedError`.
+
+## Networks
+
+```python
+from ccl import Network
+
+Network.MAINNET  # 0
+Network.TESTNET  # 1
+Network.PREPROD  # 2
+Network.PREVIEW  # 3
+```
+
+Every key-derivation method requires an explicit `network` argument — there is no default; omitting it raises `TypeError`. `Network` is an `IntEnum`, and out-of-range ints raise `ValueError` at the wrapper boundary. Note the values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Network.MAINNET == 0`, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api.md#networks).
+
+## Examples
+
+Runnable examples live in [`wrappers/python/examples/`](../../wrappers/python/examples):
+
+- `01_account_and_keys.py` — create/restore accounts, derive keys and DRep id
+- `02_primitives.py` — mnemonics, Blake2b hashing, Ed25519 sign/verify, address parsing
+- `03_build_and_sign_tx.py` — offline QuickTx build + sign
+- `04_plutus_evaluator.py` — Plutus mint with offline Scalus units vs. remote Blockfrost evaluation
