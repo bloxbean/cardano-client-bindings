@@ -153,19 +153,28 @@ pub fn devnet_pp() -> Value {
 }
 
 pub fn devkit_submit_tx(tx_cbor_hex: &str) -> String {
-    let tx_bytes = hex_decode(tx_cbor_hex).expect("Invalid tx hex");
-    let resp = ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
-        .timeout(Duration::from_secs(30))
-        .set("Content-Type", "application/cbor")
-        .send_bytes(&tx_bytes)
-        .expect("Failed to submit tx");
-    let text = resp.into_string().expect("Failed to read response");
-    text.trim().trim_matches('"').to_string()
+    devkit_try_submit(tx_cbor_hex).expect("Failed to submit tx")
 }
 
 // Submit that returns the error body instead of panicking, so callers can inspect a rejection (ureq
 // treats 4xx/5xx as Err by default).
+//
+// Retries when the devkit wraps a backend "Connection refused": after a reset, the devkit's
+// submit-api (port 8090) can lag behind the chain-data API that devkit_reset health-gates on.
+// That's the devnet still booting, not a ledger rejection — genuine rejections surface immediately.
 pub fn devkit_try_submit(tx_cbor_hex: &str) -> Result<String, String> {
+    let mut last_err = String::new();
+    for _ in 0..8 {
+        match devkit_try_submit_once(tx_cbor_hex) {
+            Err(e) if e.contains("Connection refused") => last_err = e,
+            other => return other,
+        }
+        thread::sleep(Duration::from_secs(4));
+    }
+    Err(last_err)
+}
+
+fn devkit_try_submit_once(tx_cbor_hex: &str) -> Result<String, String> {
     let tx_bytes = hex_decode(tx_cbor_hex).map_err(|e| e.to_string())?;
     match ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
         .timeout(Duration::from_secs(30))

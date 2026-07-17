@@ -106,20 +106,31 @@ class DevKitHelper:
         """Submit a signed transaction (CBOR hex string).
 
         Converts hex to raw bytes and POSTs as application/cbor.
+
+        After a reset, the devkit's backend submit-api (port 8090) can lag behind the chain-data
+        API that reset() health-gates on — the devkit then returns 400 wrapping "Connection
+        refused". That's the devnet still booting, not a ledger rejection, so retry it; genuine
+        rejections surface immediately.
         """
         tx_bytes = bytes.fromhex(tx_cbor_hex)
-        req = urllib.request.Request(
-            f"{self.base_url}/tx/submit",
-            method="POST",
-            data=tx_bytes,
-            headers={"Content-Type": "application/cbor"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return resp.read().decode("utf-8").strip().strip('"')
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", "replace")
-            raise RuntimeError(f"tx submit failed: HTTP {e.code}: {body}") from None
+        last_err = None
+        for _ in range(8):
+            req = urllib.request.Request(
+                f"{self.base_url}/tx/submit",
+                method="POST",
+                data=tx_bytes,
+                headers={"Content-Type": "application/cbor"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return resp.read().decode("utf-8").strip().strip('"')
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", "replace")
+                if "Connection refused" not in body:
+                    raise RuntimeError(f"tx submit failed: HTTP {e.code}: {body}") from None
+                last_err = RuntimeError(f"tx submit failed: HTTP {e.code}: {body}")
+            time.sleep(4)
+        raise last_err
 
     def get_tx(self, tx_hash):
         """Get transaction details by hash."""

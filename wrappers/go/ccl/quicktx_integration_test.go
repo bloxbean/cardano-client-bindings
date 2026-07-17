@@ -148,7 +148,24 @@ func parseExpectedTreasury(submitErr string) string {
 	return ""
 }
 
+// devkitSubmitTx submits with a retry: after a reset, the devkit's backend submit-api (port 8090)
+// can lag behind the chain-data API that devkitReset health-gates on — the devkit then returns 400
+// wrapping "Connection refused". That's the devnet still booting, not a ledger rejection, so retry
+// it; genuine rejections surface immediately.
 func devkitSubmitTx(txCborHex string) (string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= 8; attempt++ {
+		hash, err := devkitSubmitTxOnce(txCborHex)
+		if err == nil || !strings.Contains(err.Error(), "Connection refused") {
+			return hash, err
+		}
+		lastErr = err
+		time.Sleep(4 * time.Second)
+	}
+	return "", lastErr
+}
+
+func devkitSubmitTxOnce(txCborHex string) (string, error) {
 	// Use raw TCP to avoid Go's strict "duplicate chunked TE" rejection
 	txBytes, err := hex.DecodeString(txCborHex)
 	if err != nil {

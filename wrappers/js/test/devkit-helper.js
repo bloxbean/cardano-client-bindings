@@ -104,16 +104,28 @@ export class DevKitHelper {
     return resp.json();
   }
 
+  // After a reset, the devkit's backend submit-api (port 8090) can lag behind the chain-data API
+  // that reset() health-gates on — the devkit then returns 400 wrapping "Connection refused".
+  // That's the devnet still booting, not a ledger rejection, so retry it; genuine rejections
+  // surface immediately.
   async submitTx(txCborHex) {
     const txBytes = Buffer.from(txCborHex, "hex");
-    const resp = await fetch(`${this.baseUrl}/tx/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/cbor" },
-      body: txBytes,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    const text = await resp.text();
-    return text.trim().replace(/"/g, "");
+    let lastText;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      const resp = await fetch(`${this.baseUrl}/tx/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/cbor" },
+        body: txBytes,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const text = await resp.text();
+      if (resp.ok || !text.includes("Connection refused")) {
+        return text.trim().replace(/"/g, "");
+      }
+      lastText = text;
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+    return lastText.trim().replace(/"/g, "");
   }
 
   async getTx(txHash) {
