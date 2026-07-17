@@ -511,3 +511,217 @@ fn test_integration_aiken_mint_rejects() {
          expected a phase-2 script validation failure"
     );
 }
+
+// --- Ledger-effect tests: certificate deposits must move the sender's balance exactly ---
+
+// The stake-key deposit must leave on registration and come back on deregistration.
+#[test]
+fn test_integration_stake_deposit_round_trip() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let pp = reset_and_fund(6000);
+    let key_deposit = pp_lovelace(&pp, "key_deposit");
+    let bridge = Bridge::new().expect("create bridge");
+    let start = balance_at(INTENT_SENDER);
+
+    let u = devkit_get_utxos(INTENT_SENDER);
+    let fee1 = sign_submit_fee(&bridge, &read_fixture("stake_registration.yaml"), &u, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+    assert_eq!(balance_at(INTENT_SENDER), start - fee1 - key_deposit);
+
+    let u2 = devkit_get_utxos(INTENT_SENDER);
+    let fee2 = sign_submit_fee(&bridge, &read_fixture("stake_deregistration.yaml"), &u2, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+    assert_eq!(balance_at(INTENT_SENDER), start - fee1 - fee2); // deposit refunded
+}
+
+// A DRep registration must take exactly fee + drep_deposit from the sender.
+#[test]
+fn test_integration_drep_deposit_effect() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let pp = reset_and_fund(6000);
+    let drep_deposit = pp_lovelace(&pp, "drep_deposit");
+    let bridge = Bridge::new().expect("create bridge");
+    let start = balance_at(INTENT_SENDER);
+
+    let u = devkit_get_utxos(INTENT_SENDER);
+    let fee = sign_submit_fee(&bridge, &read_fixture("drep_registration.yaml"), &u, &pp, None, &["payment", "drep"]);
+    wait_for_block();
+    assert_eq!(balance_at(INTENT_SENDER), start - fee - drep_deposit);
+}
+
+// A governance proposal must take exactly fee + gov_action_deposit (after the stake registration
+// takes fee + key_deposit for the deposit-return account).
+#[test]
+fn test_integration_proposal_deposit_effect() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let pp = reset_and_fund(6000);
+    let key_deposit = pp_lovelace(&pp, "key_deposit");
+    let gov_deposit = pp_lovelace(&pp, "gov_action_deposit");
+    let bridge = Bridge::new().expect("create bridge");
+    let start = balance_at(INTENT_SENDER);
+
+    let u = devkit_get_utxos(INTENT_SENDER);
+    let fee1 = sign_submit_fee(&bridge, &read_fixture("stake_registration.yaml"), &u, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+
+    let u2 = devkit_get_utxos(INTENT_SENDER);
+    let fee2 = sign_submit_fee(&bridge, &read_fixture("governance_proposal.yaml"), &u2, &pp, None, &["payment"]);
+    wait_for_block();
+
+    assert_eq!(balance_at(INTENT_SENDER), start - fee1 - key_deposit - fee2 - gov_deposit);
+}
+
+// A pool registration must take exactly fee + pool_deposit (after the stake registration).
+#[test]
+fn test_integration_pool_deposit_effect() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let pp = reset_and_fund(6000);
+    let key_deposit = pp_lovelace(&pp, "key_deposit");
+    let pool_deposit = pp_lovelace(&pp, "pool_deposit");
+    let bridge = Bridge::new().expect("create bridge");
+    let start = balance_at(INTENT_SENDER);
+
+    let u = devkit_get_utxos(INTENT_SENDER);
+    let fee1 = sign_submit_fee(&bridge, &read_fixture("stake_registration.yaml"), &u, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+
+    let u2 = devkit_get_utxos(INTENT_SENDER);
+    let fee2 = sign_submit_fee(&bridge, &read_fixture("pool_registration.yaml"), &u2, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+
+    assert_eq!(balance_at(INTENT_SENDER), start - fee1 - key_deposit - fee2 - pool_deposit);
+}
+
+// --- Never-submitted intents from the coverage audit ---
+
+// collect_from: spend exactly the named UTXO instead of automatic selection.
+#[test]
+fn test_integration_collect_from() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let pp = reset_and_fund(6000);
+    let bridge = Bridge::new().expect("create bridge");
+
+    let utxos = devkit_get_utxos(INTENT_SENDER);
+    let target_hash = utxos[0]["tx_hash"].as_str().expect("utxo tx_hash").to_string();
+    let target_idx = utxos[0]["output_index"].as_i64().unwrap_or(0);
+
+    let mut yaml = read_fixture("collect_from.yaml").replace(&"a".repeat(64), &target_hash);
+    if target_idx != 0 {
+        yaml = yaml.replacen("output_index: 0", &format!("output_index: {}", target_idx), 1);
+    }
+    sign_submit(&bridge, &yaml, &utxos, &pp, None, &["payment"]);
+}
+
+// reference_input: a read-only reference input (CIP-31) must resolve to a real UTXO; fund the
+// second intent address and reference its UTXO (it is not spent — its balance must not change).
+#[test]
+fn test_integration_reference_input() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, 6000);
+    devkit_topup(INTENT_SENDER2, 5);
+    wait_for_block();
+    let pp = devnet_pp();
+    let bridge = Bridge::new().expect("create bridge");
+
+    let ref_utxos = devkit_get_utxos(INTENT_SENDER2);
+    let ref_hash = ref_utxos[0]["tx_hash"].as_str().expect("ref tx_hash").to_string();
+    let ref_balance = total_lovelace(&ref_utxos);
+    let yaml = read_fixture("reference_input.yaml").replace(&"c".repeat(64), &ref_hash);
+
+    let utxos = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &yaml, &utxos, &pp, None, &["payment"]);
+    wait_for_block();
+
+    assert_eq!(balance_at(INTENT_SENDER2), ref_balance); // referenced, not spent
+}
+
+// native_script: attach a native script witness to a plain payment.
+#[test]
+fn test_integration_native_script_attach() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let bridge = Bridge::new().expect("create bridge");
+    build_sign_submit(&bridge, "native_script.yaml", None, &["payment"]);
+}
+
+// pool_update: re-submit the pool's registration certificate with update semantics.
+#[test]
+fn test_integration_pool_update() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    let pp = reset_and_fund(6000);
+    let bridge = Bridge::new().expect("create bridge");
+
+    let u = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &read_fixture("stake_registration.yaml"), &u, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+
+    let u2 = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &read_fixture("pool_registration.yaml"), &u2, &pp, None, &["payment", "stake"]);
+    wait_for_block();
+
+    let u3 = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &read_fixture("pool_update.yaml"), &u3, &pp, None, &["payment", "stake"]);
+}
+
+// compose: two senders' intents composed into ONE transaction, signed once per sender's payment
+// key (same mnemonic, address_index 0 and 1); both payments must land at the receiver.
+#[test]
+fn test_integration_compose_two_senders() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, 6000);
+    devkit_topup(INTENT_SENDER2, 6000);
+    wait_for_block();
+    let pp = devnet_pp();
+    let bridge = Bridge::new().expect("create bridge");
+
+    let mut utxos = devkit_get_utxos(INTENT_SENDER)
+        .as_array()
+        .expect("utxos array")
+        .clone();
+    utxos.extend(
+        devkit_get_utxos(INTENT_SENDER2)
+            .as_array()
+            .expect("utxos array")
+            .clone(),
+    );
+    let utxos = serde_json::Value::Array(utxos);
+
+    let result = bridge
+        .quicktx()
+        .build(&read_fixture("compose.yaml"), &utxos, &pp, None)
+        .expect("build");
+    let once = bridge
+        .account()
+        .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor)
+        .expect("sign (0,0)");
+    let twice = bridge
+        .account()
+        .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 1, &once)
+        .expect("sign (0,1)");
+    devkit_try_submit(&twice).expect("submit");
+    wait_for_block();
+
+    // 5 ADA from sender1 + 3 ADA from sender2, both to the same receiver.
+    assert_eq!(balance_at(MINT_RECEIVER), 8_000_000);
+}

@@ -479,4 +479,197 @@ describe("Intents Integration (DevKit)", () => {
     // Confirm the spend actually consumed the locked script UTXO.
     await assertUtxoConsumed(SCRIPT_ADDR, lockHash);
   });
+
+  // --- Ledger-effect helpers (balance-delta read-backs) ---
+
+  function totalLovelace(utxos) {
+    return utxos.reduce((sum, u) =>
+      sum + u.amount.reduce((s, a) => (a.unit === "lovelace" ? s + Number(a.quantity) : s), 0), 0);
+  }
+
+  async function balanceAt(address) {
+    return totalLovelace(await devkit.getUtxos(address));
+  }
+
+  // signSubmit, additionally returning the tx fee so callers can assert the sender's exact
+  // balance change (the ledger read-back "submit accepted" alone can't give).
+  async function signSubmitFee(yaml, utxos, pp, execUnits, keys) {
+    const result = execUnits != null
+      ? bridge.quicktx.build(yaml, utxos, pp, execUnits)
+      : bridge.quicktx.build(yaml, utxos, pp);
+    const signed = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor, keys);
+    await submitExpectHash(signed);
+    return Number(result.fee);
+  }
+
+  async function resetAndFund(ada = 6000) {
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
+    await devkit.topup(INTENT_SENDER, ada);
+    await devkit.waitForBlock(3000);
+    return devnetPP();
+  }
+
+  // --- Ledger-effect tests: certificate deposits must move the sender's balance exactly ---
+
+  // The stake-key deposit must leave on registration and come back on deregistration.
+  it("moves the stake-key deposit out and back (registration → deregistration)", async () => {
+    if (skip) return;
+    const pp = await resetAndFund();
+    const keyDeposit = Number(pp.key_deposit);
+    const start = await balanceAt(INTENT_SENDER);
+
+    const u = await devkit.getUtxos(INTENT_SENDER);
+    const fee1 = await signSubmitFee(readFixture("stake_registration.yaml"), u, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+    expect(await balanceAt(INTENT_SENDER)).toBe(start - fee1 - keyDeposit);
+
+    const u2 = await devkit.getUtxos(INTENT_SENDER);
+    const fee2 = await signSubmitFee(readFixture("stake_deregistration.yaml"), u2, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+    expect(await balanceAt(INTENT_SENDER)).toBe(start - fee1 - fee2); // deposit refunded
+  });
+
+  // A DRep registration must take exactly fee + drep_deposit from the sender.
+  it("takes exactly fee + drep_deposit on DRep registration", async () => {
+    if (skip) return;
+    const pp = await resetAndFund();
+    const drepDeposit = Number(pp.drep_deposit);
+    const start = await balanceAt(INTENT_SENDER);
+
+    const u = await devkit.getUtxos(INTENT_SENDER);
+    const fee = await signSubmitFee(readFixture("drep_registration.yaml"), u, pp, null, ["payment", "drep"]);
+    await devkit.waitForBlock(3000);
+    expect(await balanceAt(INTENT_SENDER)).toBe(start - fee - drepDeposit);
+  });
+
+  // A governance proposal must take exactly fee + gov_action_deposit (after the stake
+  // registration takes fee + key_deposit for the deposit-return account).
+  it("takes exactly fee + gov_action_deposit on a proposal", async () => {
+    if (skip) return;
+    const pp = await resetAndFund();
+    const keyDeposit = Number(pp.key_deposit);
+    const govDeposit = Number(pp.gov_action_deposit);
+    const start = await balanceAt(INTENT_SENDER);
+
+    const u = await devkit.getUtxos(INTENT_SENDER);
+    const fee1 = await signSubmitFee(readFixture("stake_registration.yaml"), u, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+
+    const u2 = await devkit.getUtxos(INTENT_SENDER);
+    const fee2 = await signSubmitFee(readFixture("governance_proposal.yaml"), u2, pp, null, ["payment"]);
+    await devkit.waitForBlock(3000);
+
+    expect(await balanceAt(INTENT_SENDER)).toBe(start - fee1 - keyDeposit - fee2 - govDeposit);
+  });
+
+  // A pool registration must take exactly fee + pool_deposit (after the stake registration).
+  it("takes exactly fee + pool_deposit on pool registration", async () => {
+    if (skip) return;
+    const pp = await resetAndFund();
+    const keyDeposit = Number(pp.key_deposit);
+    const poolDeposit = Number(pp.pool_deposit);
+    const start = await balanceAt(INTENT_SENDER);
+
+    const u = await devkit.getUtxos(INTENT_SENDER);
+    const fee1 = await signSubmitFee(readFixture("stake_registration.yaml"), u, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+
+    const u2 = await devkit.getUtxos(INTENT_SENDER);
+    const fee2 = await signSubmitFee(readFixture("pool_registration.yaml"), u2, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+
+    expect(await balanceAt(INTENT_SENDER)).toBe(start - fee1 - keyDeposit - fee2 - poolDeposit);
+  });
+
+  // --- Never-submitted intents from the coverage audit ---
+
+  // The compose fixture's second sender: same mnemonic, address_index 1.
+  const INTENT_SENDER2 = "addr_test1qz7svwszky8gcmhrfza7a89z9u0dfzd3l7h23sqlc5yml7ejcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwqcqrvr0";
+
+  // collect_from: spend exactly the named UTXO instead of automatic selection.
+  it("spends an explicitly selected UTXO (collect_from)", async () => {
+    if (skip) return;
+    const pp = await resetAndFund();
+
+    const utxos = await devkit.getUtxos(INTENT_SENDER);
+    expect(utxos.length).toBeGreaterThan(0);
+    const target = utxos[0];
+    let yaml = readFixture("collect_from.yaml").replaceAll("a".repeat(64), target.tx_hash);
+    const idx = Number(target.output_index ?? 0);
+    if (idx !== 0) yaml = yaml.replace("output_index: 0", `output_index: ${idx}`);
+
+    await signSubmit(yaml, utxos, pp, null, ["payment"]);
+  });
+
+  // reference_input: a read-only reference input (CIP-31) must resolve to a real UTXO; fund the
+  // second intent address and reference its UTXO (it is not spent — its balance must not change).
+  it("adds a read-only reference input without spending it", async () => {
+    if (skip) return;
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
+    await devkit.topup(INTENT_SENDER, 6000);
+    await devkit.topup(INTENT_SENDER2, 5);
+    await devkit.waitForBlock(3000);
+    const pp = await devnetPP();
+
+    const refUtxos = await devkit.getUtxos(INTENT_SENDER2);
+    expect(refUtxos.length).toBeGreaterThan(0);
+    const refBalance = totalLovelace(refUtxos);
+    const yaml = readFixture("reference_input.yaml").replaceAll("c".repeat(64), refUtxos[0].tx_hash);
+
+    const utxos = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(yaml, utxos, pp, null, ["payment"]);
+    await devkit.waitForBlock(3000);
+
+    expect(await balanceAt(INTENT_SENDER2)).toBe(refBalance); // referenced, not spent
+  });
+
+  // native_script: attach a native script witness to a plain payment.
+  it("attaches a native script to a payment", async () => {
+    if (skip) return;
+    await buildSignSubmit("native_script.yaml", null, ["payment"]);
+  });
+
+  // pool_update: re-submit the pool's registration certificate with update semantics.
+  it("updates a stake pool it registers", async () => {
+    if (skip) return;
+    const pp = await resetAndFund();
+
+    const u = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(readFixture("stake_registration.yaml"), u, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+
+    const u2 = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(readFixture("pool_registration.yaml"), u2, pp, null, ["payment", "stake"]);
+    await devkit.waitForBlock(3000);
+
+    const u3 = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(readFixture("pool_update.yaml"), u3, pp, null, ["payment", "stake"]);
+  });
+
+  // compose: two senders' intents composed into ONE transaction, signed once per sender's payment
+  // key; both payments must land at the receiver.
+  it("composes two senders into one transaction (signed by both)", async () => {
+    if (skip) return;
+    await devkit.reset();
+    await devkit.waitForBlock(3000);
+    await devkit.topup(INTENT_SENDER, 6000);
+    await devkit.topup(INTENT_SENDER2, 6000);
+    await devkit.waitForBlock(3000);
+    const pp = await devnetPP();
+
+    const utxos = [
+      ...(await devkit.getUtxos(INTENT_SENDER)),
+      ...(await devkit.getUtxos(INTENT_SENDER2)),
+    ];
+    const result = bridge.quicktx.build(readFixture("compose.yaml"), utxos, pp);
+    const once = bridge.account.signTx(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor);
+    const twice = bridge.account.signTx(INTENT_MNEMONIC, TESTNET, 0, 1, once);
+    await submitExpectHash(twice);
+    await devkit.waitForBlock(3000);
+
+    // 5 ADA from sender1 + 3 ADA from sender2, both to the same receiver.
+    expect(await balanceAt(MINT_RECEIVER)).toBe(8_000_000);
+  });
 });

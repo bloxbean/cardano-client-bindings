@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -647,5 +648,350 @@ func TestIntegrationAikenMintRejects(t *testing.T) {
 	if _, err := devkitSubmitTx(signed); err == nil {
 		t.Fatal("the node accepted a mint whose validator must reject (redeemer 0); " +
 			"expected a phase-2 script validation failure")
+	}
+}
+
+// --- Ledger-effect helpers (balance-delta read-backs) ---
+
+// signSubmitFee is signSubmit, additionally returning the transaction's fee in lovelace so callers
+// can assert the sender's exact balance change (the ledger read-back "submit accepted" can't give).
+func signSubmitFee(t *testing.T, yaml string, utxos []map[string]interface{}, pp map[string]interface{}, execUnits []map[string]interface{}, keys ...string) (string, int64) {
+	t.Helper()
+	var result *TxResult
+	var err error
+	if execUnits != nil {
+		result, err = bridge.QuickTx.Build(yaml, utxos, pp, execUnits)
+	} else {
+		result, err = bridge.QuickTx.Build(yaml, utxos, pp)
+	}
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, keys...)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	txHash, err := devkitSubmitTx(signed)
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	return txHash, lovelaceOf(t, result.Fee)
+}
+
+func lovelaceOf(t *testing.T, v interface{}) int64 {
+	t.Helper()
+	switch x := v.(type) {
+	case string:
+		n, err := strconv.ParseInt(x, 10, 64)
+		if err != nil {
+			t.Fatalf("parse lovelace %q: %v", x, err)
+		}
+		return n
+	case float64:
+		return int64(x)
+	case json.Number:
+		n, err := x.Int64()
+		if err != nil {
+			t.Fatalf("parse lovelace %v: %v", x, err)
+		}
+		return n
+	default:
+		t.Fatalf("unexpected lovelace type %T (%v)", v, v)
+		return 0
+	}
+}
+
+func balanceAt(t *testing.T, address string) int64 {
+	t.Helper()
+	utxos, err := devkitGetUtxos(address)
+	if err != nil {
+		t.Fatalf("get utxos for balance: %v", err)
+	}
+	return totalLovelace(utxos)
+}
+
+// --- Ledger-effect tests: certificate deposits must move the sender's balance exactly ---
+
+// The stake-key deposit must leave on registration and come back on deregistration:
+// final balance = start - fee1 - fee2 (the deposit cancels out), with the intermediate balance
+// down by exactly fee1 + key_deposit.
+func TestIntegrationStakeDepositRoundTrip(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+	keyDeposit := lovelaceOf(t, pp["key_deposit"])
+	start := balanceAt(t, intentSender)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	_, fee1 := signSubmitFee(t, readIntentFixture(t, "stake_registration.yaml"), u, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	if got, want := balanceAt(t, intentSender), start-fee1-keyDeposit; got != want {
+		t.Fatalf("post-registration balance: got %d, want %d (start %d - fee %d - key_deposit %d)",
+			got, want, start, fee1, keyDeposit)
+	}
+
+	u2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	_, fee2 := signSubmitFee(t, readIntentFixture(t, "stake_deregistration.yaml"), u2, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	if got, want := balanceAt(t, intentSender), start-fee1-fee2; got != want {
+		t.Fatalf("post-deregistration balance: got %d, want %d (deposit not refunded?)", got, want)
+	}
+}
+
+// A DRep registration must take exactly fee + drep_deposit from the sender.
+func TestIntegrationDRepDepositEffect(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+	drepDeposit := lovelaceOf(t, pp["drep_deposit"])
+	start := balanceAt(t, intentSender)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	_, fee := signSubmitFee(t, readIntentFixture(t, "drep_registration.yaml"), u, pp, nil, "payment", "drep")
+	waitForBlock()
+
+	if got, want := balanceAt(t, intentSender), start-fee-drepDeposit; got != want {
+		t.Fatalf("post-DRep-registration balance: got %d, want %d (start %d - fee %d - drep_deposit %d)",
+			got, want, start, fee, drepDeposit)
+	}
+}
+
+// A governance proposal must take exactly fee + gov_action_deposit (after the stake registration
+// takes fee + key_deposit for the deposit-return account).
+func TestIntegrationProposalDepositEffect(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+	keyDeposit := lovelaceOf(t, pp["key_deposit"])
+	govDeposit := lovelaceOf(t, pp["gov_action_deposit"])
+	start := balanceAt(t, intentSender)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	_, fee1 := signSubmitFee(t, readIntentFixture(t, "stake_registration.yaml"), u, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	_, fee2 := signSubmitFee(t, readIntentFixture(t, "governance_proposal.yaml"), u2, pp, nil, "payment")
+	waitForBlock()
+
+	if got, want := balanceAt(t, intentSender), start-fee1-keyDeposit-fee2-govDeposit; got != want {
+		t.Fatalf("post-proposal balance: got %d, want %d", got, want)
+	}
+}
+
+// A pool registration must take exactly fee + pool_deposit (after the stake registration).
+func TestIntegrationPoolDepositEffect(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+	keyDeposit := lovelaceOf(t, pp["key_deposit"])
+	poolDeposit := lovelaceOf(t, pp["pool_deposit"])
+	start := balanceAt(t, intentSender)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	_, fee1 := signSubmitFee(t, readIntentFixture(t, "stake_registration.yaml"), u, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	_, fee2 := signSubmitFee(t, readIntentFixture(t, "pool_registration.yaml"), u2, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	if got, want := balanceAt(t, intentSender), start-fee1-keyDeposit-fee2-poolDeposit; got != want {
+		t.Fatalf("post-pool-registration balance: got %d, want %d", got, want)
+	}
+}
+
+// --- Never-submitted intents from the coverage audit ---
+
+// collect_from: spend exactly the named UTXO instead of automatic selection. The fixture's
+// placeholder utxo_ref is repointed at the sender's real UTXO.
+func TestIntegrationCollectFrom(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil || len(utxos) == 0 {
+		t.Fatalf("get utxos: %v", err)
+	}
+	target, _ := utxos[0]["tx_hash"].(string)
+	idx := 0
+	if f, ok := utxos[0]["output_index"].(float64); ok {
+		idx = int(f)
+	}
+	yaml := strings.ReplaceAll(readIntentFixture(t, "collect_from.yaml"), strings.Repeat("a", 64), target)
+	yaml = strings.Replace(yaml, "output_index: 0", fmt.Sprintf("output_index: %d", idx), 1)
+	signSubmit(t, yaml, utxos, pp, nil, "payment")
+}
+
+// reference_input: a read-only reference input (CIP-31) must resolve to a real UTXO; fund the
+// second intent address and reference its UTXO (it is not spent — its balance must not change).
+func TestIntegrationReferenceInput(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	if err := devkitTopup(intentSender2, 5); err != nil {
+		t.Fatalf("topup ref holder: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	refUtxos, err := devkitGetUtxos(intentSender2)
+	if err != nil || len(refUtxos) == 0 {
+		t.Fatalf("get ref utxos: %v", err)
+	}
+	refHash, _ := refUtxos[0]["tx_hash"].(string)
+	refBalance := totalLovelace(refUtxos)
+
+	yaml := strings.ReplaceAll(readIntentFixture(t, "reference_input.yaml"), strings.Repeat("c", 64), refHash)
+
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	signSubmit(t, yaml, utxos, pp, nil, "payment")
+	waitForBlock()
+
+	if got := balanceAt(t, intentSender2); got != refBalance {
+		t.Fatalf("reference input was spent: holder balance %d -> %d", refBalance, got)
+	}
+}
+
+// native_script: attach a native script witness to a plain payment.
+func TestIntegrationNativeScriptAttach(t *testing.T) {
+	skipIfNoDevKit(t)
+	buildSignSubmit(t, "native_script.yaml", nil, "payment")
+}
+
+// pool_update: re-submit the pool's registration certificate with update semantics. Same key
+// requirements as registration (operator keyed to the account's stake key).
+func TestIntegrationPoolUpdate(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "stake_registration.yaml"), u, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u2, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-registration): %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "pool_registration.yaml"), u2, pp, nil, "payment", "stake")
+	waitForBlock()
+
+	u3, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos (post-pool-registration): %v", err)
+	}
+	signSubmit(t, readIntentFixture(t, "pool_update.yaml"), u3, pp, nil, "payment", "stake")
+}
+
+// compose: two senders' intents composed into ONE transaction. The fixture's second sender is the
+// same mnemonic at address_index 1, so the composed tx is signed twice — once per sender's payment
+// key — and both payments must land at the receiver.
+func TestIntegrationCompose(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup sender1: %v", err)
+	}
+	if err := devkitTopup(intentSender2, 6000); err != nil {
+		t.Fatalf("topup sender2: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	u1, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos sender1: %v", err)
+	}
+	u2, err := devkitGetUtxos(intentSender2)
+	if err != nil {
+		t.Fatalf("get utxos sender2: %v", err)
+	}
+	utxos := append(append([]map[string]interface{}{}, u1...), u2...)
+
+	result, err := bridge.QuickTx.Build(readIntentFixture(t, "compose.yaml"), utxos, pp)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	once, err := bridge.Account.SignTx(intentMnemonic, Testnet, 0, 0, result.TxCbor)
+	if err != nil {
+		t.Fatalf("sign (0,0): %v", err)
+	}
+	twice, err := bridge.Account.SignTx(intentMnemonic, Testnet, 0, 1, once)
+	if err != nil {
+		t.Fatalf("sign (0,1): %v", err)
+	}
+	if _, err := devkitSubmitTx(twice); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	waitForBlock()
+
+	// 5 ADA from sender1 + 3 ADA from sender2, both to the same receiver.
+	if got := balanceAt(t, mintReceiver); got != 8_000_000 {
+		t.Fatalf("composed payments: receiver has %d lovelace, want 8000000", got)
 	}
 }

@@ -579,3 +579,184 @@ def test_voting(ccl_lib, devkit):
     u4 = devkit.get_utxos(INTENT_SENDER)
     vote_yaml = _read_fixture("voting.yaml").replace(GOV_ACTION_PLACEHOLDER, action_tx_hash)
     _sign_submit(ccl_lib, devkit, vote_yaml, u4, pp, ["payment", "drep"])
+
+
+# --- Ledger-effect helpers (balance-delta read-backs) ---
+
+# The compose fixture's second sender: same mnemonic, address_index 1.
+INTENT_SENDER2 = ("addr_test1qz7svwszky8gcmhrfza7a89z9u0dfzd3l7h23sqlc5yml7e"
+                  "jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwqcqrvr0")
+
+
+def _balance_at(devkit, address):
+    return sum(int(a["quantity"]) for u in devkit.get_utxos(address)
+               for a in u["amount"] if a["unit"] == "lovelace")
+
+
+def _sign_submit_fee(ccl_lib, devkit, yaml_str, utxos, pp, keys, exec_units=None):
+    """_sign_submit, additionally returning the tx fee so callers can assert the sender's exact
+    balance change (the ledger read-back "submit accepted" alone can't give)."""
+    result = ccl_lib.quicktx.build(yaml_str, utxos, pp, exec_units=exec_units)
+    signed = ccl_lib.account.sign_tx_with_keys(
+        INTENT_MNEMONIC, result["tx_cbor"], list(keys), Network.TESTNET, 0, 0)
+    assert devkit.submit_tx(signed)
+    return int(result["fee"])
+
+
+# --- Ledger-effect tests: certificate deposits must move the sender's balance exactly ---
+
+def test_stake_deposit_round_trip(ccl_lib, devkit):
+    """The stake-key deposit must leave on registration and come back on deregistration."""
+    pp = _reset_and_fund(devkit)
+    key_deposit = int(pp["key_deposit"])
+    start = _balance_at(devkit, INTENT_SENDER)
+
+    u = devkit.get_utxos(INTENT_SENDER)
+    fee1 = _sign_submit_fee(ccl_lib, devkit, _read_fixture("stake_registration.yaml"), u, pp,
+                            ["payment", "stake"])
+    devkit.wait_for_block(3)
+    assert _balance_at(devkit, INTENT_SENDER) == start - fee1 - key_deposit
+
+    u2 = devkit.get_utxos(INTENT_SENDER)
+    fee2 = _sign_submit_fee(ccl_lib, devkit, _read_fixture("stake_deregistration.yaml"), u2, pp,
+                            ["payment", "stake"])
+    devkit.wait_for_block(3)
+    assert _balance_at(devkit, INTENT_SENDER) == start - fee1 - fee2  # deposit refunded
+
+
+def test_drep_deposit_effect(ccl_lib, devkit):
+    """A DRep registration must take exactly fee + drep_deposit from the sender."""
+    pp = _reset_and_fund(devkit)
+    drep_deposit = int(pp["drep_deposit"])
+    start = _balance_at(devkit, INTENT_SENDER)
+
+    u = devkit.get_utxos(INTENT_SENDER)
+    fee = _sign_submit_fee(ccl_lib, devkit, _read_fixture("drep_registration.yaml"), u, pp,
+                           ["payment", "drep"])
+    devkit.wait_for_block(3)
+    assert _balance_at(devkit, INTENT_SENDER) == start - fee - drep_deposit
+
+
+def test_proposal_deposit_effect(ccl_lib, devkit):
+    """A governance proposal must take exactly fee + gov_action_deposit (after the stake
+    registration takes fee + key_deposit for the deposit-return account)."""
+    pp = _reset_and_fund(devkit)
+    key_deposit = int(pp["key_deposit"])
+    gov_deposit = int(pp["gov_action_deposit"])
+    start = _balance_at(devkit, INTENT_SENDER)
+
+    u = devkit.get_utxos(INTENT_SENDER)
+    fee1 = _sign_submit_fee(ccl_lib, devkit, _read_fixture("stake_registration.yaml"), u, pp,
+                            ["payment", "stake"])
+    devkit.wait_for_block(3)
+
+    u2 = devkit.get_utxos(INTENT_SENDER)
+    fee2 = _sign_submit_fee(ccl_lib, devkit, _read_fixture("governance_proposal.yaml"), u2, pp,
+                            ["payment"])
+    devkit.wait_for_block(3)
+
+    assert _balance_at(devkit, INTENT_SENDER) == start - fee1 - key_deposit - fee2 - gov_deposit
+
+
+def test_pool_deposit_effect(ccl_lib, devkit):
+    """A pool registration must take exactly fee + pool_deposit (after the stake registration)."""
+    pp = _reset_and_fund(devkit)
+    key_deposit = int(pp["key_deposit"])
+    pool_deposit = int(pp["pool_deposit"])
+    start = _balance_at(devkit, INTENT_SENDER)
+
+    u = devkit.get_utxos(INTENT_SENDER)
+    fee1 = _sign_submit_fee(ccl_lib, devkit, _read_fixture("stake_registration.yaml"), u, pp,
+                            ["payment", "stake"])
+    devkit.wait_for_block(3)
+
+    u2 = devkit.get_utxos(INTENT_SENDER)
+    fee2 = _sign_submit_fee(ccl_lib, devkit, _read_fixture("pool_registration.yaml"), u2, pp,
+                            ["payment", "stake"])
+    devkit.wait_for_block(3)
+
+    assert _balance_at(devkit, INTENT_SENDER) == start - fee1 - key_deposit - fee2 - pool_deposit
+
+
+# --- Never-submitted intents from the coverage audit ---
+
+def test_collect_from(ccl_lib, devkit):
+    """collect_from: spend exactly the named UTXO instead of automatic selection."""
+    pp = _reset_and_fund(devkit)
+
+    utxos = devkit.get_utxos(INTENT_SENDER)
+    assert utxos
+    target = utxos[0]
+    yaml_str = _read_fixture("collect_from.yaml").replace("a" * 64, target["tx_hash"])
+    idx = int(target.get("output_index", 0))
+    if idx != 0:
+        yaml_str = yaml_str.replace("output_index: 0", f"output_index: {idx}", 1)
+
+    _sign_submit(ccl_lib, devkit, yaml_str, utxos, pp, ["payment"])
+
+
+def test_reference_input(ccl_lib, devkit):
+    """reference_input: a read-only reference input (CIP-31) must resolve to a real UTXO; fund the
+    second intent address and reference its UTXO (it is not spent — its balance must not change)."""
+    devkit.reset()
+    devkit.wait_for_block(3)
+    devkit.topup(INTENT_SENDER, 6000)
+    devkit.topup(INTENT_SENDER2, 5)
+    devkit.wait_for_block(3)
+    pp = _devnet_pp(devkit)
+
+    ref_utxos = devkit.get_utxos(INTENT_SENDER2)
+    assert ref_utxos
+    ref_balance = _balance_at(devkit, INTENT_SENDER2)
+    yaml_str = _read_fixture("reference_input.yaml").replace("c" * 64, ref_utxos[0]["tx_hash"])
+
+    utxos = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, yaml_str, utxos, pp, ["payment"])
+    devkit.wait_for_block(3)
+
+    assert _balance_at(devkit, INTENT_SENDER2) == ref_balance  # referenced, not spent
+
+
+def test_native_script_attach(ccl_lib, devkit):
+    """native_script: attach a native script witness to a plain payment."""
+    _build_sign_submit(ccl_lib, devkit, "native_script.yaml", ["payment"])
+
+
+def test_pool_update(ccl_lib, devkit):
+    """pool_update: re-submit the pool's registration certificate with update semantics."""
+    pp = _reset_and_fund(devkit)
+
+    u = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, _read_fixture("stake_registration.yaml"), u, pp,
+                 ["payment", "stake"])
+    devkit.wait_for_block(3)
+
+    u2 = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, _read_fixture("pool_registration.yaml"), u2, pp,
+                 ["payment", "stake"])
+    devkit.wait_for_block(3)
+
+    u3 = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, _read_fixture("pool_update.yaml"), u3, pp,
+                 ["payment", "stake"])
+
+
+def test_compose_two_senders(ccl_lib, devkit):
+    """compose: two senders' intents composed into ONE transaction, signed once per sender's
+    payment key (same mnemonic, address_index 0 and 1); both payments must land at the receiver."""
+    devkit.reset()
+    devkit.wait_for_block(3)
+    devkit.topup(INTENT_SENDER, 6000)
+    devkit.topup(INTENT_SENDER2, 6000)
+    devkit.wait_for_block(3)
+    pp = _devnet_pp(devkit)
+
+    utxos = devkit.get_utxos(INTENT_SENDER) + devkit.get_utxos(INTENT_SENDER2)
+    result = ccl_lib.quicktx.build(_read_fixture("compose.yaml"), utxos, pp)
+    once = ccl_lib.account.sign_tx(INTENT_MNEMONIC, result["tx_cbor"], Network.TESTNET, 0, 0)
+    twice = ccl_lib.account.sign_tx(INTENT_MNEMONIC, once, Network.TESTNET, 0, 1)
+    assert devkit.submit_tx(twice)
+    devkit.wait_for_block(3)
+
+    # 5 ADA from sender1 + 3 ADA from sender2, both to the same receiver.
+    assert _balance_at(devkit, MINT_RECEIVER) == 8_000_000
