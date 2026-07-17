@@ -908,10 +908,112 @@ func TestIntegrationReferenceInput(t *testing.T) {
 	}
 }
 
-// native_script: attach a native script witness to a plain payment.
-func TestIntegrationNativeScriptAttach(t *testing.T) {
+// native_script: a script witness may only be attached when the transaction actually uses the
+// script — Conway rejects unused witnesses (ExtraneousScriptWitnessesUTXOW; the standalone
+// "attach" fixture proved that on its first devnet submission, which is why it stays offline-build
+// only). So exercise the real thing: lock funds at a sig(payment-key) native script address built
+// at test time, then spend them with the script attached, witnessed by the payment key. This is
+// the only test of native-script *spending* (minting is covered separately).
+func TestIntegrationNativeScriptSpend(t *testing.T) {
 	skipIfNoDevKit(t)
-	buildSignSubmit(t, "native_script.yaml", nil, "payment")
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	pp := devnetPP(t)
+
+	// Build a native script the sender's payment key satisfies, and its script address.
+	info, err := bridge.Address.Info(intentSender)
+	if err != nil {
+		t.Fatalf("address info: %v", err)
+	}
+	scriptRes, err := bridge.Script.NativeFromJson(
+		fmt.Sprintf(`{"type":"sig","keyHash":"%s"}`, info.PaymentCredentialHash))
+	if err != nil {
+		t.Fatalf("native script: %v", err)
+	}
+	var script struct {
+		ScriptHash string `json:"script_hash"`
+		CborHex    string `json:"cbor_hex"`
+	}
+	if err := json.Unmarshal([]byte(scriptRes), &script); err != nil {
+		t.Fatalf("parse native script: %v", err)
+	}
+	// NativeFromJson's cbor_hex is the hash preimage (leading 0x00 language tag); the TxPlan
+	// native_script block wants the bare script CBOR.
+	scriptHex := script.CborHex[2:]
+	scriptAddress, err := bridge.Address.FromBytes("70" + script.ScriptHash) // testnet script enterprise
+	if err != nil {
+		t.Fatalf("script address: %v", err)
+	}
+
+	// Step 1: lock 5 ADA at the script address.
+	lockYaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      change_address: %s
+      intents:
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`, intentSender, intentSender, scriptAddress)
+	u, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	signSubmit(t, lockYaml, u, pp, nil, "payment")
+	waitForBlock()
+
+	// Step 2: spend the locked UTXO with the native script attached.
+	scriptUtxos, err := devkitGetUtxos(scriptAddress)
+	if err != nil || len(scriptUtxos) == 0 {
+		t.Fatalf("no locked UTXO at script address: %v", err)
+	}
+	lockHash, _ := scriptUtxos[0]["tx_hash"].(string)
+	lockIdx := 0
+	if f, ok := scriptUtxos[0]["output_index"].(float64); ok {
+		lockIdx = int(f)
+	}
+
+	spendYaml := fmt.Sprintf(`
+version: 1.0
+context:
+  fee_payer: %s
+transaction:
+  - tx:
+      from: %s
+      change_address: %s
+      inputs:
+        - type: collect_from
+          utxo_refs:
+            - tx_hash: %s
+              output_index: %d
+      intents:
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+      scripts:
+        - type: native_script
+          script_hex: %s
+`, intentSender, intentSender, intentSender, lockHash, lockIdx, intentSender, scriptHex)
+
+	feeUtxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get fee utxos: %v", err)
+	}
+	spendUtxos := append([]map[string]interface{}{}, scriptUtxos...)
+	spendUtxos = append(spendUtxos, feeUtxos...)
+	signSubmit(t, spendYaml, spendUtxos, pp, nil, "payment")
+
+	assertUtxoConsumed(t, scriptAddress, lockHash)
 }
 
 // pool_update: re-submit the pool's registration certificate with update semantics. Same key

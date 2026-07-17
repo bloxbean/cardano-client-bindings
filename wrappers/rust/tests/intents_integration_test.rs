@@ -649,14 +649,109 @@ fn test_integration_reference_input() {
     assert_eq!(balance_at(INTENT_SENDER2), ref_balance); // referenced, not spent
 }
 
-// native_script: attach a native script witness to a plain payment.
+// native_script: a script witness may only be attached when the transaction actually uses the
+// script — Conway rejects unused witnesses (ExtraneousScriptWitnessesUTXOW; the standalone
+// "attach" fixture proved that on its first devnet submission, which is why it stays
+// offline-build only). So exercise the real thing: lock funds at a sig(payment-key) native script
+// address built at test time, then spend them with the script attached, witnessed by the payment
+// key. This is the only test of native-script *spending* (minting is covered separately).
 #[test]
-fn test_integration_native_script_attach() {
+fn test_integration_native_script_spend() {
     if skip_if_no_devkit() {
         return;
     }
+    let pp = reset_and_fund(6000);
     let bridge = Bridge::new().expect("create bridge");
-    build_sign_submit(&bridge, "native_script.yaml", None, &["payment"]);
+
+    // Build a native script the sender's payment key satisfies, and its script address.
+    let info: serde_json::Value =
+        serde_json::from_str(&bridge.address().info(INTENT_SENDER).expect("address info"))
+            .expect("parse info");
+    let key_hash = info["payment_credential_hash"].as_str().expect("payment cred");
+    let script: serde_json::Value = serde_json::from_str(
+        &bridge
+            .script()
+            .native_from_json(&format!(r#"{{"type":"sig","keyHash":"{}"}}"#, key_hash))
+            .expect("native script"),
+    )
+    .expect("parse script");
+    let script_hash = script["script_hash"].as_str().expect("script_hash");
+    // native_from_json's cbor_hex is the hash preimage (leading 0x00 language tag); the TxPlan
+    // native_script block wants the bare script CBOR.
+    let cbor_hex = &script["cbor_hex"].as_str().expect("cbor_hex")[2..];
+    let script_address = bridge
+        .address()
+        .from_bytes(&format!("70{}", script_hash)) // testnet script enterprise
+        .expect("script address");
+
+    // Step 1: lock 5 ADA at the script address.
+    let lock_yaml = format!(
+        r#"
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      change_address: {sender}
+      intents:
+        - type: payment
+          address: {script_address}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+"#,
+        sender = INTENT_SENDER,
+        script_address = script_address
+    );
+    let u = devkit_get_utxos(INTENT_SENDER);
+    sign_submit(&bridge, &lock_yaml, &u, &pp, None, &["payment"]);
+    wait_for_block();
+
+    // Step 2: spend the locked UTXO with the native script attached.
+    let script_utxos = devkit_get_utxos(&script_address);
+    let lock_hash = script_utxos[0]["tx_hash"].as_str().expect("lock hash").to_string();
+    let lock_idx = script_utxos[0]["output_index"].as_i64().unwrap_or(0);
+
+    let spend_yaml = format!(
+        r#"
+version: 1.0
+context:
+  fee_payer: {sender}
+transaction:
+  - tx:
+      from: {sender}
+      change_address: {sender}
+      inputs:
+        - type: collect_from
+          utxo_refs:
+            - tx_hash: {lock_hash}
+              output_index: {lock_idx}
+      intents:
+        - type: payment
+          address: {sender}
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+      scripts:
+        - type: native_script
+          script_hex: {cbor_hex}
+"#,
+        sender = INTENT_SENDER,
+        lock_hash = lock_hash,
+        lock_idx = lock_idx,
+        cbor_hex = cbor_hex
+    );
+
+    let mut spend_utxos = script_utxos.as_array().expect("utxos array").clone();
+    spend_utxos.extend(
+        devkit_get_utxos(INTENT_SENDER)
+            .as_array()
+            .expect("utxos array")
+            .clone(),
+    );
+    let spend_utxos = serde_json::Value::Array(spend_utxos);
+    sign_submit(&bridge, &spend_yaml, &spend_utxos, &pp, None, &["payment"]);
+
+    assert_utxo_consumed(&script_address, &lock_hash);
 }
 
 // pool_update: re-submit the pool's registration certificate with update semantics.

@@ -625,10 +625,76 @@ describe("Intents Integration (DevKit)", () => {
     expect(await balanceAt(INTENT_SENDER2)).toBe(refBalance); // referenced, not spent
   });
 
-  // native_script: attach a native script witness to a plain payment.
-  it("attaches a native script to a payment", async () => {
+  // native_script: a script witness may only be attached when the transaction actually uses the
+  // script — Conway rejects unused witnesses (ExtraneousScriptWitnessesUTXOW; the standalone
+  // "attach" fixture proved that on its first devnet submission, which is why it stays
+  // offline-build only). So exercise the real thing: lock funds at a sig(payment-key) native
+  // script address built at test time, then spend them with the script attached, witnessed by the
+  // payment key. This is the only test of native-script *spending* (minting is covered separately).
+  it("locks at and spends from a native script address (script attached)", async () => {
     if (skip) return;
-    await buildSignSubmit("native_script.yaml", null, ["payment"]);
+    const pp = await resetAndFund();
+
+    // Build a native script the sender's payment key satisfies, and its script address.
+    const info = bridge.address.info(INTENT_SENDER);
+    const script = JSON.parse(bridge.script.nativeFromJson(
+      JSON.stringify({ type: "sig", keyHash: info.payment_credential_hash })));
+    // nativeFromJson's cbor_hex is the hash preimage (leading 0x00 language tag); the TxPlan
+    // native_script block wants the bare script CBOR.
+    const scriptHex = script.cbor_hex.slice(2);
+    const scriptAddress = bridge.address.fromBytes("70" + script.script_hash); // testnet script enterprise
+
+    // Step 1: lock 5 ADA at the script address.
+    const lockYaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${INTENT_SENDER}
+      change_address: ${INTENT_SENDER}
+      intents:
+        - type: payment
+          address: ${scriptAddress}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`;
+    const u = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(lockYaml, u, pp, null, ["payment"]);
+    await devkit.waitForBlock(3000);
+
+    // Step 2: spend the locked UTXO with the native script attached.
+    const scriptUtxos = await devkit.getUtxos(scriptAddress);
+    expect(scriptUtxos.length).toBeGreaterThan(0);
+    const lockHash = scriptUtxos[0].tx_hash;
+    const lockIdx = Number(scriptUtxos[0].output_index ?? 0);
+
+    const spendYaml = `
+version: 1.0
+context:
+  fee_payer: ${INTENT_SENDER}
+transaction:
+  - tx:
+      from: ${INTENT_SENDER}
+      change_address: ${INTENT_SENDER}
+      inputs:
+        - type: collect_from
+          utxo_refs:
+            - tx_hash: ${lockHash}
+              output_index: ${lockIdx}
+      intents:
+        - type: payment
+          address: ${INTENT_SENDER}
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+      scripts:
+        - type: native_script
+          script_hex: ${scriptHex}
+`;
+    const feeUtxos = await devkit.getUtxos(INTENT_SENDER);
+    await signSubmit(spendYaml, [...scriptUtxos, ...feeUtxos], pp, null, ["payment"]);
+
+    await assertUtxoConsumed(scriptAddress, lockHash);
   });
 
   // pool_update: re-submit the pool's registration certificate with update semantics.

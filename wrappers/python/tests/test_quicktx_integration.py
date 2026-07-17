@@ -717,9 +717,77 @@ def test_reference_input(ccl_lib, devkit):
     assert _balance_at(devkit, INTENT_SENDER2) == ref_balance  # referenced, not spent
 
 
-def test_native_script_attach(ccl_lib, devkit):
-    """native_script: attach a native script witness to a plain payment."""
-    _build_sign_submit(ccl_lib, devkit, "native_script.yaml", ["payment"])
+def test_native_script_spend(ccl_lib, devkit):
+    """native_script: a script witness may only be attached when the transaction actually uses the
+    script — Conway rejects unused witnesses (ExtraneousScriptWitnessesUTXOW; the standalone
+    "attach" fixture proved that on its first devnet submission, which is why it stays
+    offline-build only). So exercise the real thing: lock funds at a sig(payment-key) native
+    script address built at test time, then spend them with the script attached, witnessed by the
+    payment key. This is the only test of native-script *spending* (minting is covered
+    separately)."""
+    import json as _json
+    pp = _reset_and_fund(devkit)
+
+    # Build a native script the sender's payment key satisfies, and its script address.
+    info = ccl_lib.address.info(INTENT_SENDER)
+    script = _json.loads(ccl_lib.script.native_from_json(
+        _json.dumps({"type": "sig", "keyHash": info["payment_credential_hash"]})))
+    # native_from_json's cbor_hex is the hash preimage (leading 0x00 language tag); the TxPlan
+    # native_script block wants the bare script CBOR.
+    script_hex = script["cbor_hex"][2:]
+    script_address = ccl_lib.address.from_bytes("70" + script["script_hash"])  # testnet script enterprise
+
+    # Step 1: lock 5 ADA at the script address.
+    lock_yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {INTENT_SENDER}
+      change_address: {INTENT_SENDER}
+      intents:
+        - type: payment
+          address: {script_address}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+"""
+    u = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, lock_yaml, u, pp, ["payment"])
+    devkit.wait_for_block(3)
+
+    # Step 2: spend the locked UTXO with the native script attached.
+    script_utxos = devkit.get_utxos(script_address)
+    assert script_utxos
+    lock_hash = script_utxos[0]["tx_hash"]
+    lock_idx = int(script_utxos[0].get("output_index", 0))
+
+    spend_yaml = f"""
+version: 1.0
+context:
+  fee_payer: {INTENT_SENDER}
+transaction:
+  - tx:
+      from: {INTENT_SENDER}
+      change_address: {INTENT_SENDER}
+      inputs:
+        - type: collect_from
+          utxo_refs:
+            - tx_hash: {lock_hash}
+              output_index: {lock_idx}
+      intents:
+        - type: payment
+          address: {INTENT_SENDER}
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+      scripts:
+        - type: native_script
+          script_hex: {script_hex}
+"""
+    fee_utxos = devkit.get_utxos(INTENT_SENDER)
+    _sign_submit(ccl_lib, devkit, spend_yaml, script_utxos + fee_utxos, pp, ["payment"])
+
+    _assert_utxo_consumed(devkit, script_address, lock_hash)
 
 
 def test_pool_update(ccl_lib, devkit):
