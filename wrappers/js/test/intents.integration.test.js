@@ -403,6 +403,16 @@ describe("Intents Integration (DevKit)", () => {
     await assertMintedAssetAt(MINT_RECEIVER);
   });
 
+  // The offline Scalus evaluator is the DEFAULT costing path: when a caller supplies no execution
+  // units, libccl computes them in-process (ADR-0013). Every other Plutus test supplies units
+  // manually (they must, to submit a failing script), so this is the only test proving the node
+  // accepts Scalus-computed budgets end-to-end — the path out-of-the-box users are on.
+  it("mints under a Plutus script with Scalus-computed units (no exec units supplied)", async () => {
+    if (skip) return;
+    await buildSignSubmit("plutus/script_minting.yaml", null, ["payment"]);
+    await assertMintedAssetAt(MINT_RECEIVER);
+  });
+
   // The Aiken redeemer_check validator (test-fixtures/aiken/redeemer-check) passes iff the
   // redeemer is the integer 42 — a real validator that can genuinely reject, unlike the
   // always-succeeds blob the other Plutus fixtures use.

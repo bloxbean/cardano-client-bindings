@@ -828,3 +828,12 @@ def test_compose_two_senders(ccl_lib, devkit):
 
     # 5 ADA from sender1 + 3 ADA from sender2, both to the same receiver.
     assert _balance_at(devkit, MINT_RECEIVER) == 8_000_000
+
+
+def test_scalus_computed_units(ccl_lib, devkit):
+    """The offline Scalus evaluator is the DEFAULT costing path: when a caller supplies no
+    execution units, libccl computes them in-process (ADR-0013). Every other Plutus test supplies
+    units manually (they must, to submit a failing script), so this is the only test proving the
+    node accepts Scalus-computed budgets end-to-end — the path out-of-the-box users are on."""
+    _build_sign_submit(ccl_lib, devkit, "plutus/script_minting.yaml", ["payment"])
+    _assert_minted_asset_at(devkit, MINT_RECEIVER)

@@ -1097,3 +1097,13 @@ func TestIntegrationCompose(t *testing.T) {
 		t.Fatalf("composed payments: receiver has %d lovelace, want 8000000", got)
 	}
 }
+
+// The offline Scalus evaluator is the DEFAULT costing path: when a caller supplies no execution
+// units, libccl computes them in-process (ADR-0013). Every other Plutus test supplies units
+// manually (they must, to submit a failing script), so this is the only test proving the node
+// accepts Scalus-computed budgets end-to-end — the path out-of-the-box users are on.
+func TestIntegrationScalusComputedUnits(t *testing.T) {
+	skipIfNoDevKit(t)
+	buildSignSubmit(t, "plutus/script_minting.yaml", nil, "payment")
+	assertMintedAssetAt(t, mintReceiver)
+}
