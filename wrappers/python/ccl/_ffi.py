@@ -2,7 +2,10 @@ import ctypes
 import os
 import sys
 import json
+import threading
 from ctypes import c_int, c_char_p, c_void_p, POINTER, byref
+
+from ccl.network import Network
 
 # Native libccl version this wrapper expects, kept in lockstep with the package version. On init the
 # wrapper compares it against ccl_version() and fails fast on a skew (see CclLib._check_version).
@@ -28,12 +31,16 @@ class CclLib:
     CCL_ERROR_INVALID_ADDRESS = -7
     CCL_ERROR_INSUFFICIENT_FUNDS = -8
     CCL_ERROR_INVALID_TRANSACTION = -9
+    # Raised for a malformed TxPlan — the most common failure on the core build path.
+    CCL_ERROR_TX_BUILD = -10
 
-    # Network IDs
-    MAINNET = 0
-    TESTNET = 1
-    PREPROD = 2
-    PREVIEW = 3
+    # Networks. Kept as aliases of the Network enum for the call sites that predate it — prefer
+    # `from ccl import Network`. NB these are CCL's enum ordinals, not Cardano's on-chain network
+    # id (MAINNET is 0 here, but a mainnet address's on-chain network_id is 1); see ccl/network.py.
+    MAINNET = Network.MAINNET
+    TESTNET = Network.TESTNET
+    PREPROD = Network.PREPROD
+    PREVIEW = Network.PREVIEW
 
     @staticmethod
     def _lib_filename():
@@ -64,6 +71,12 @@ class CclLib:
         return name
 
     def __init__(self, lib_path=None):
+        # Set first: __del__ runs even if __init__ raises below (e.g. the library fails to load), and
+        # close() must be able to tell "never opened" from "open" without tripping over a half-built
+        # object and masking the real error with an AttributeError.
+        self._closed = True
+        self._main_thread = None
+
         lib_file = self._resolve_lib_file(lib_path)
         # On Windows, register the library's directory so the loader can also find any sibling
         # DLL dependencies next to libccl.dll (no-op / absent on Unix).
@@ -81,10 +94,18 @@ class CclLib:
             ) from None
         self._setup_functions()
         self._isolate = c_void_p()
-        self._thread = c_void_p()
-        rc = self._lib.graal_create_isolate(None, byref(self._isolate), byref(self._thread))
+        main_thread = c_void_p()
+        rc = self._lib.graal_create_isolate(None, byref(self._isolate), byref(main_thread))
         if rc != 0:
             raise RuntimeError(f"Failed to create GraalVM isolate: {rc}")
+        self._main_thread = main_thread
+
+        # A GraalVM IsolateThread is bound to the OS thread that created it, so it cannot be shared
+        # across threads — every thread needs its own, obtained via graal_attach_thread. See the
+        # _thread property, which attaches lazily and keeps each thread's handle here.
+        self._local = threading.local()
+        self._local.thread = main_thread
+        self._closed = False
 
         self._check_version()
 
@@ -118,6 +139,14 @@ class CclLib:
 
         lib.graal_tear_down_isolate.argtypes = [c_void_p]
         lib.graal_tear_down_isolate.restype = c_int
+
+        # Per-thread isolate attachment (see the _thread property) and a teardown that first detaches
+        # every thread that attached itself.
+        lib.graal_attach_thread.argtypes = [c_void_p, POINTER(c_void_p)]
+        lib.graal_attach_thread.restype = c_int
+
+        lib.graal_detach_all_threads_and_tear_down_isolate.argtypes = [c_void_p]
+        lib.graal_detach_all_threads_and_tear_down_isolate.restype = c_int
 
         lib.ccl_version.argtypes = [c_void_p]
         lib.ccl_version.restype = c_int
@@ -241,6 +270,36 @@ class CclLib:
         lib.ccl_quicktx_build.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p]
         lib.ccl_quicktx_build.restype = c_int
 
+    @property
+    def _thread(self):
+        """The GraalVM IsolateThread for the *calling* thread, attaching it on first use.
+
+        Every FFI call in this package reaches the native library through this property, so it is the
+        one place that can enforce both invariants:
+
+        1. **Closed.** After close() the isolate is gone; passing its stale handle to the native side
+           aborts the process with an uncatchable GraalVM fatal error ("Failed to enter the specified
+           IsolateThread context"), not a Python exception. Raise instead.
+        2. **Thread affinity.** An IsolateThread belongs to the OS thread that created it and carries
+           that thread's stack bounds and VM thread-locals. Reusing one handle from another thread —
+           which is what this class used to do — corrupts the VM: sharing a CclLib across a
+           ThreadPoolExecutor killed the interpreter with "Must either be at a safepoint or in native
+           mode". Each thread therefore gets its own handle via graal_attach_thread. The Java side's
+           result/error state is thread-local too, so concurrent calls stay independent.
+        """
+        if self._closed:
+            raise CclClosedError(
+                "CclLib is closed; create a new instance (or don't call it outside its `with` block)"
+            )
+        thread = getattr(self._local, "thread", None)
+        if thread is None:
+            thread = c_void_p()
+            rc = self._lib.graal_attach_thread(self._isolate, byref(thread))
+            if rc != 0:
+                raise CclError(rc, f"failed to attach thread to the GraalVM isolate (code {rc})")
+            self._local.thread = thread
+        return thread
+
     def _get_result(self):
         """Get the last result string and free it."""
         ptr = self._lib.ccl_get_result(self._thread)
@@ -273,9 +332,22 @@ class CclLib:
         return s
 
     def close(self):
-        if self._thread:
-            self._lib.graal_tear_down_isolate(self._thread)
-            self._thread = None
+        """Tear down the isolate. Idempotent; further calls raise CclClosedError.
+
+        Uses graal_detach_all_threads_and_tear_down_isolate rather than graal_tear_down_isolate:
+        other threads may have attached themselves (see the _thread property), and tearing down an
+        isolate that still has threads attached is undefined.
+        """
+        # Guarded with getattr: if __init__ raised before these were set (e.g. the library failed to
+        # load), __del__ still calls close(), and a bare attribute access would raise a confusing
+        # AttributeError on top of the real error.
+        if getattr(self, "_closed", True):
+            return
+        self._closed = True
+        main_thread = getattr(self, "_main_thread", None)
+        if main_thread:
+            self._lib.graal_detach_all_threads_and_tear_down_isolate(main_thread)
+            self._main_thread = None
 
     def __del__(self):
         self.close()
@@ -311,3 +383,12 @@ class CclError(Exception):
         self.code = code
         self.message = message
         super().__init__(f"CCL Error {code}: {message}")
+
+
+class CclClosedError(RuntimeError):
+    """Raised when a CclLib is used after close().
+
+    Without this, the stale isolate handle reaches the native library and GraalVM aborts the whole
+    process ("Failed to enter the specified IsolateThread context") — not a Python exception, so it
+    cannot be caught, and no traceback points at the offending call.
+    """

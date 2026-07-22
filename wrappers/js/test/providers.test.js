@@ -5,6 +5,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { YaciProvider, BlockfrostProvider, TransactionEvaluator, BlockfrostEvaluator, parseEvaluation } from "../src/providers.js";
 import { QuickTxApi } from "../src/index.js";
+import { stringify as losslessStringify } from "lossless-json";
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -14,7 +15,9 @@ function stubFetch(handler) {
   globalThis.fetch = async (url, opts) => {
     calls.push({ url, opts });
     const body = handler(url, opts);
-    return { ok: true, status: 200, json: async () => body, text: async () => "" };
+    // The providers read the body via .text() and parse it losslessly, so text() must return the
+    // serialized JSON like a real Response — not an empty string.
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
   };
   return calls;
 }
@@ -140,5 +143,25 @@ describe("BlockfrostEvaluator", () => {
 
   it("throws on an unknown network without baseUrl", () => {
     expect(() => new BlockfrostEvaluator("proj", { network: "nope" })).toThrow();
+  });
+});
+
+describe("numeric precision", () => {
+  it("preserves a UTxO quantity above 2^53 through the provider and into build's serialization", async () => {
+    // 2^53 + 1 is not representable exactly as a float64; a native-token quantity (and lovelace on a
+    // large UTxO) routinely exceeds 2^53. The response must be fed as raw JSON *text* — writing the
+    // value as a JS number literal would already round it to ...992 (which is exactly why the
+    // provider must not go through resp.json()/JSON.parse). The provider parses losslessly and
+    // build() serializes with lossless-json, so the exact digits survive.
+    const big = "9007199254740993";
+    const rawBody = `[{"tx_hash":"aa","output_index":0,"amount":[{"unit":"lovelace","quantity":${big}}]}]`;
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => rawBody });
+
+    const utxos = await new YaciProvider("http://x").utxos("addr_test1abc");
+
+    // Serialize exactly as build() does (lossless-json), and assert the digits survived intact.
+    const serialized = losslessStringify(utxos);
+    expect(serialized).toContain(big);
+    expect(serialized).not.toContain("9007199254740992"); // the rounded value
   });
 });

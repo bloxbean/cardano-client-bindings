@@ -8,7 +8,13 @@ class Address:
         self._b = bridge
 
     def info(self, bech32_address):
-        """Get address info. Returns dict with type, network_id, credential hashes."""
+        """Get address info. Returns dict with type, network_id, credential hashes.
+
+        ``network_id`` is Cardano's genuine **on-chain** network id (1 = mainnet, 0 = testnet). It is
+        not the same number as the :class:`ccl.Network` ordinal used to derive the address, and must
+        not be passed back into the ``network`` parameter of the account/wallet/gov calls — the two
+        are inverted for mainnet/testnet. See ``ccl/network.py``.
+        """
         rc = self._b._lib.ccl_address_info(self._b._thread, self._b._encode(bech32_address))
         return json.loads(self._b._check(rc))
 

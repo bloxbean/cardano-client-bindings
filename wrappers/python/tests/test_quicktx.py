@@ -1,6 +1,7 @@
 import pytest
 
-from ccl._ffi import CclLib, CclError
+from ccl._ffi import CclError
+from ccl.network import Network
 
 # Minimal protocol parameters (CCL ProtocolParams model).
 PROTOCOL_PARAMS = {
@@ -47,16 +48,16 @@ def _assert_built(result):
 
 
 def test_simple_payment(ccl):
-    sender = ccl.account.create(CclLib.TESTNET)
-    receiver = ccl.account.create(CclLib.TESTNET)
+    sender = ccl.account.create(Network.TESTNET)
+    receiver = ccl.account.create(Network.TESTNET)
     yaml_str = _payment_yaml(sender["base_address"], receiver["base_address"], "5000000")
     _assert_built(ccl.quicktx.build(yaml_str, _utxos(sender["base_address"]), PROTOCOL_PARAMS))
 
 
 def test_multiple_payments(ccl):
-    sender = ccl.account.create(CclLib.TESTNET)
-    r1 = ccl.account.create(CclLib.TESTNET)
-    r2 = ccl.account.create(CclLib.TESTNET)
+    sender = ccl.account.create(Network.TESTNET)
+    r1 = ccl.account.create(Network.TESTNET)
+    r2 = ccl.account.create(Network.TESTNET)
     yaml_str = f"""
 version: 1.0
 transaction:
@@ -78,8 +79,8 @@ transaction:
 
 
 def test_variable_substitution(ccl):
-    sender = ccl.account.create(CclLib.TESTNET)
-    receiver = ccl.account.create(CclLib.TESTNET)
+    sender = ccl.account.create(Network.TESTNET)
+    receiver = ccl.account.create(Network.TESTNET)
     yaml_str = f"""
 version: 1.0
 variables:
@@ -99,8 +100,8 @@ transaction:
 
 
 def test_insufficient_funds(ccl):
-    sender = ccl.account.create(CclLib.TESTNET)
-    receiver = ccl.account.create(CclLib.TESTNET)
+    sender = ccl.account.create(Network.TESTNET)
+    receiver = ccl.account.create(Network.TESTNET)
     yaml_str = _payment_yaml(sender["base_address"], receiver["base_address"], "200000000")
     with pytest.raises(CclError):
         ccl.quicktx.build(yaml_str, _utxos(sender["base_address"], 1_000_000), PROTOCOL_PARAMS)

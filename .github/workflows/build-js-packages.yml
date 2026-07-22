@@ -146,6 +146,7 @@ jobs:
             "description": "CCL Bridge native library for ${{ matrix.platform }}",
             "os": ["linux"],
             "cpu": ["${{ matrix.npm_cpu }}"],
+            "libc": ["glibc"],
             "files": ["libccl.so"],
             "license": "MIT",
             "repository": {
@@ -161,8 +162,91 @@ jobs:
           name: npmpkg-${{ matrix.platform }}
           path: platform-${{ matrix.platform }}.tgz
 
+  # Linux/musl (Alpine): the glibc .so above cannot load on musl, so ship a separate package built
+  # with native-image --libc=musl. Without this an Alpine user installs the glibc package — `os` and
+  # `cpu` both match on Alpine, and only the `libc` field distinguishes them — and gets a load error.
+  #
+  # x86_64 only: GraalVM's --libc=musl hardcodes the x86_64-linux-musl-gcc compiler name and never
+  # looks for an aarch64 one, so musl/aarch64 cannot be built. See ADR-0008.
+  pkg-musl:
+    name: npm pkg (linux-musl-x86_64)
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      PKG_VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz \
+            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+
+      - name: Install musl toolchain (musl-gcc + musl-linked zlib)
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+          # native-image --libc=musl needs a musl-linked static zlib (libz.a).
+          ZV=1.3.1
+          curl -fsSL -o /tmp/zlib.tar.gz \
+            "https://github.com/madler/zlib/releases/download/v${ZV}/zlib-${ZV}.tar.gz"
+          tar xzf /tmp/zlib.tar.gz -C /tmp
+          cd "/tmp/zlib-${ZV}"
+          CC=musl-gcc ./configure --static --prefix=/usr/local/musl
+          make -j"$(nproc)"
+          sudo make install
+          sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
+
+      - name: Build libccl.so against musl
+        run: ./gradlew :core:nativeCompile -PmuslBuild --no-daemon --stacktrace
+
+      - name: Assert it really is musl-linked
+        run: |
+          set -eux
+          SO=core/build/native/nativeCompile/libccl.so
+          # A glibc build NEEDs libc.so.6; the musl one must not. Guards against silently shipping a
+          # glibc .so under a musl package name — which would fail only on a user's Alpine box.
+          if readelf -d "$SO" | grep -q 'libc.so.6'; then
+            echo "FAIL: glibc-linked .so in the musl package" >&2
+            exit 1
+          fi
+
+      - name: Assemble the platform package tarball
+        run: |
+          set -eux
+          ND=core/build/native/nativeCompile
+          rm -rf package && mkdir -p package
+          cp "$ND/libccl.so" package/
+          cat > package/package.json <<JSON
+          {
+            "name": "@bloxbean/cardano-client-lib-linux-musl-x86_64",
+            "version": "${PKG_VERSION}",
+            "description": "CCL Bridge native library for linux-musl-x86_64 (Alpine)",
+            "os": ["linux"],
+            "cpu": ["x64"],
+            "libc": ["musl"],
+            "files": ["libccl.so"],
+            "license": "MIT",
+            "repository": {
+              "type": "git",
+              "url": "git+https://github.com/bloxbean/cardano-client-bindings.git"
+            }
+          }
+          JSON
+          echo "CCL Bridge native library for linux-musl-x86_64 (Alpine / musl). Installed automatically as an optionalDependency of @bloxbean/cardano-client-lib." > package/README.md
+          tar czf "platform-linux-musl-x86_64.tgz" package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npmpkg-linux-musl-x86_64
+          path: platform-linux-musl-x86_64.tgz
+
   verify:
-    needs: [validate, pkg-native, pkg-linux]
+    needs: [validate, pkg-native, pkg-linux, pkg-musl]
     runs-on: ubuntu-latest
     env:
       PKG_VERSION: ${{ needs.validate.outputs.version }}

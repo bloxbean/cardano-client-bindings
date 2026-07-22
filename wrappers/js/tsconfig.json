@@ -1,0 +1,14 @@
+{
+  "//": "Typecheck-only config: `bun run typecheck` compiles test/types.test-d.ts against src/index.d.ts, so the shipped types cannot drift from the runtime API.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "ESNext.Disposable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "types": []
+  },
+  "include": ["src/index.d.ts", "test/types.test-d.ts"]
+}

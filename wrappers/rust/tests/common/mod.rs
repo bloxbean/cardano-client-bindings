@@ -59,18 +59,76 @@ pub fn devkit_available() -> bool {
         .unwrap_or(false)
 }
 
+// devkit_reset restarts the devnet and returns only once it serves chain data again.
+//
+// DevKit 0.12 (companion mode) re-bootstraps the whole cluster on reset, and that bootstrap can
+// wedge (e.g. the relay never syncs from the companion within its window), leaving the node socket
+// dead until the NEXT reset POST kicks the cluster back to life. So: POST the reset, poll until the
+// chain-data API answers, and if the devnet stays dead re-POST the reset. On total failure it just
+// returns — the caller's topup/build will then panic with its own error.
 pub fn devkit_reset() {
-    let _ = ureq::post(&format!("{}/admin/devnet/reset", DEVKIT_URL))
-        .timeout(Duration::from_secs(10))
-        .call();
+    for attempt in 1..=3 {
+        // The reset handler blocks while the cluster re-bootstraps (~20-30s when healthy). A client
+        // timeout is fine: the bootstrap keeps running server-side and the health poll decides.
+        let _ = ureq::post(&format!("{}/admin/devnet/reset", DEVKIT_URL))
+            .timeout(Duration::from_secs(60))
+            .call();
+        if devkit_wait_healthy(Duration::from_secs(60)) {
+            return;
+        }
+        println!(
+            "devkit reset attempt {}/3: devnet still down, re-posting reset",
+            attempt
+        );
+    }
+    println!("devkit reset: devnet did not serve chain data after 3 attempts");
+}
+
+// Polls until the chain-data API (yaci-store, fed by the node) answers with protocol parameters
+// AND the submit path reaches the backend submit-api. /admin/devnet alone is no proof: it stays
+// 200 while the node socket is dead. The submit probe matters because a reset's bootstrap can fail
+// to start the submit-api entirely ("Network.Socket.bind: resource busy" — the previous instance
+// hadn't released port 8090); chain data then works but every submit gets "Connection refused"
+// until the next reset. Probing with a garbage body: any deserialization/ledger 400 proves the
+// submit-api is alive; a body wrapping "Connection refused" does not.
+fn devkit_wait_healthy(budget: Duration) -> bool {
+    let deadline = std::time::Instant::now() + budget;
+    while std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_secs(3));
+        let chain_data_ok = ureq::get(&format!("{}/epochs/parameters", DEVKIT_URL))
+            .timeout(Duration::from_secs(5))
+            .call()
+            .map(|r| r.status() == 200)
+            .unwrap_or(false);
+        if chain_data_ok && devkit_submit_path_alive() {
+            return true;
+        }
+    }
+    false
+}
+
+fn devkit_submit_path_alive() -> bool {
+    match ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
+        .timeout(Duration::from_secs(5))
+        .set("Content-Type", "application/cbor")
+        .send_bytes(&[0x00])
+    {
+        Ok(_) => true, // a 2xx would mean it is certainly alive
+        Err(ureq::Error::Status(_, resp)) => !resp
+            .into_string()
+            .unwrap_or_default()
+            .contains("Connection refused"),
+        Err(_) => false,
+    }
 }
 
 pub fn devkit_topup(address: &str, ada_amount: u64) {
-    // Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
-    // node, so a topup right after reset can transiently fail. Retry with backoff.
+    // devkit_reset already health-gates the devnet, but the faucet can still transiently fail
+    // right after the hand-over to the node. Retry with backoff.
     let body = json!({"address": address, "adaAmount": ada_amount}).to_string();
     for attempt in 1..=8 {
         let resp = ureq::post(&format!("{}/addresses/topup", DEVKIT_URL))
+            .timeout(Duration::from_secs(30))
             .set("Content-Type", "application/json")
             .send_string(&body);
         match resp {
@@ -90,6 +148,7 @@ pub fn devkit_topup(address: &str, ada_amount: u64) {
 
 pub fn devkit_get_utxos(address: &str) -> Value {
     let resp = ureq::get(&format!("{}/addresses/{}/utxos", DEVKIT_URL, address))
+        .timeout(Duration::from_secs(30))
         .call()
         .expect("Failed to get utxos");
     resp.into_json::<Value>().expect("Invalid utxo JSON")
@@ -97,6 +156,7 @@ pub fn devkit_get_utxos(address: &str) -> Value {
 
 pub fn devkit_get_protocol_params() -> Value {
     let resp = ureq::get(&format!("{}/epochs/parameters", DEVKIT_URL))
+        .timeout(Duration::from_secs(30))
         .call()
         .expect("Failed to get protocol params");
     resp.into_json::<Value>().expect("Invalid PP JSON")
@@ -113,20 +173,31 @@ pub fn devnet_pp() -> Value {
 }
 
 pub fn devkit_submit_tx(tx_cbor_hex: &str) -> String {
-    let tx_bytes = hex_decode(tx_cbor_hex).expect("Invalid tx hex");
-    let resp = ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
-        .set("Content-Type", "application/cbor")
-        .send_bytes(&tx_bytes)
-        .expect("Failed to submit tx");
-    let text = resp.into_string().expect("Failed to read response");
-    text.trim().trim_matches('"').to_string()
+    devkit_try_submit(tx_cbor_hex).expect("Failed to submit tx")
 }
 
 // Submit that returns the error body instead of panicking, so callers can inspect a rejection (ureq
 // treats 4xx/5xx as Err by default).
+//
+// Retries when the devkit wraps a backend "Connection refused": after a reset, the devkit's
+// submit-api (port 8090) can lag behind the chain-data API that devkit_reset health-gates on.
+// That's the devnet still booting, not a ledger rejection — genuine rejections surface immediately.
 pub fn devkit_try_submit(tx_cbor_hex: &str) -> Result<String, String> {
+    let mut last_err = String::new();
+    for _ in 0..8 {
+        match devkit_try_submit_once(tx_cbor_hex) {
+            Err(e) if e.contains("Connection refused") => last_err = e,
+            other => return other,
+        }
+        thread::sleep(Duration::from_secs(4));
+    }
+    Err(last_err)
+}
+
+fn devkit_try_submit_once(tx_cbor_hex: &str) -> Result<String, String> {
     let tx_bytes = hex_decode(tx_cbor_hex).map_err(|e| e.to_string())?;
     match ureq::post(&format!("{}/tx/submit", DEVKIT_URL))
+        .timeout(Duration::from_secs(30))
         .set("Content-Type", "application/cbor")
         .send_bytes(&tx_bytes)
     {
@@ -175,7 +246,7 @@ pub fn skip_if_no_devkit() -> bool {
 pub fn get_testnet_account(bridge: &Bridge) -> (String, String, String) {
     let result = bridge
         .account()
-        .create(ccl::network::TESTNET)
+        .create(ccl::Network::Testnet)
         .expect("create account");
     let json: Value = serde_json::from_str(&result).expect("parse account");
     let addr = json["base_address"].as_str().unwrap().to_string();
@@ -245,7 +316,7 @@ pub fn sign_submit(
         .expect("build");
     let signed = bridge
         .account()
-        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::network::TESTNET, 0, 0, &result.tx_cbor, keys)
+        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, keys)
         .expect("sign");
     match devkit_try_submit(&signed) {
         Ok(hash) => hash,
@@ -339,4 +410,77 @@ pub fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
         .collect()
+}
+
+// Current epoch, for intents whose certificates carry epoch bounds (e.g. pool retirement).
+// Prefers the protocol-params response (Blockfrost-style params carry "epoch"), falls back to the
+// Blockfrost-compatible /epochs/latest.
+pub fn devkit_current_epoch() -> i64 {
+    let pp = devkit_get_protocol_params();
+    if let Some(e) = pp["epoch"].as_i64() {
+        return e;
+    }
+    if let Some(s) = pp["epoch"].as_str() {
+        if let Ok(e) = s.parse() {
+            return e;
+        }
+    }
+    let latest: Value = ureq::get(&format!("{}/epochs/latest", DEVKIT_URL))
+        .timeout(Duration::from_secs(30))
+        .call()
+        .expect("get /epochs/latest")
+        .into_json()
+        .expect("parse /epochs/latest");
+    latest["epoch"].as_i64().expect("epoch in /epochs/latest")
+}
+
+// --- Ledger-effect helpers (balance-delta read-backs) ---
+
+// The compose fixture's second sender: same mnemonic, address_index 1.
+pub const INTENT_SENDER2: &str = "addr_test1qz7svwszky8gcmhrfza7a89z9u0dfzd3l7h23sqlc5yml7ejcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwqcqrvr0";
+
+pub fn balance_at(address: &str) -> u64 {
+    total_lovelace(&devkit_get_utxos(address))
+}
+
+pub fn pp_lovelace(pp: &Value, key: &str) -> u64 {
+    if let Some(n) = pp[key].as_u64() {
+        return n;
+    }
+    pp[key]
+        .as_str()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| panic!("no lovelace value for pp[{}] ({:?})", key, pp[key]))
+}
+
+// sign_submit, additionally returning the tx fee so callers can assert the sender's exact balance
+// change (the ledger read-back "submit accepted" alone can't give).
+pub fn sign_submit_fee(
+    bridge: &Bridge,
+    yaml: &str,
+    utxos: &Value,
+    pp: &Value,
+    exec_units: Option<&Value>,
+    keys: &[&str],
+) -> u64 {
+    let result = bridge
+        .quicktx()
+        .build(yaml, utxos, pp, exec_units)
+        .expect("build");
+    let signed = bridge
+        .account()
+        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, keys)
+        .expect("sign");
+    match devkit_try_submit(&signed) {
+        Ok(_) => result.fee.parse().expect("parse fee"),
+        Err(e) => panic!("submit: {}", e),
+    }
+}
+
+pub fn reset_and_fund(ada: u64) -> Value {
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, ada);
+    wait_for_block();
+    devnet_pp()
 }

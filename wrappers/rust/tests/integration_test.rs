@@ -7,7 +7,7 @@ const SAMPLE_TX_CBOR: &str = "84a300d901028182582073198b7ad003862b9798106b88fbcc
 fn get_mnemonic(bridge: &Bridge) -> String {
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     json["mnemonic"].as_str().unwrap().to_string()
@@ -16,7 +16,7 @@ fn get_mnemonic(bridge: &Bridge) -> String {
 fn get_testnet_mnemonic(bridge: &Bridge) -> String {
     let result = bridge
         .account()
-        .create(ccl::network::TESTNET)
+        .create(ccl::Network::Testnet)
         .expect("Failed to create account");
     let json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     json["mnemonic"].as_str().unwrap().to_string()
@@ -34,7 +34,7 @@ fn test_account_create() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
 
     let json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
@@ -55,14 +55,14 @@ fn test_account_from_mnemonic() {
 
     let created = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let created_json: serde_json::Value = serde_json::from_str(&created).expect("Invalid JSON");
     let mnemonic = created_json["mnemonic"].as_str().unwrap();
 
     let restored = bridge
         .account()
-        .from_mnemonic(mnemonic, ccl::network::MAINNET, 0, 0)
+        .from_mnemonic(mnemonic, ccl::Network::Mainnet, 0, 0)
         .expect("Failed to restore account");
     let restored_json: serde_json::Value = serde_json::from_str(&restored).expect("Invalid JSON");
 
@@ -79,7 +79,7 @@ fn test_account_get_private_key() {
 
     let priv_key = bridge
         .account()
-        .get_private_key(&mnemonic, ccl::network::MAINNET, 0, 0)
+        .get_private_key(&mnemonic, ccl::Network::Mainnet, 0, 0)
         .expect("Failed to get private key");
     assert_eq!(priv_key.len(), 128); // 64 bytes extended BIP32-ED25519
 }
@@ -91,7 +91,7 @@ fn test_account_get_drep_id() {
 
     let drep_id = bridge
         .account()
-        .get_drep_id(&mnemonic, ccl::network::MAINNET, 0)
+        .get_drep_id(&mnemonic, ccl::Network::Mainnet, 0)
         .expect("Failed to get DRep ID");
     assert!(drep_id.starts_with("drep1"));
 }
@@ -103,7 +103,7 @@ fn test_account_sign_tx() {
 
     let signed = bridge
         .account()
-        .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, SAMPLE_TX_CBOR)
+        .sign_tx(&mnemonic, ccl::Network::Testnet, 0, 0, SAMPLE_TX_CBOR)
         .expect("Failed to sign tx");
     assert!(signed.len() > SAMPLE_TX_CBOR.len());
 }
@@ -113,7 +113,7 @@ fn test_address_info() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     let addr = json["base_address"].as_str().unwrap();
@@ -124,12 +124,48 @@ fn test_address_info() {
     assert_eq!(info["network_id"].as_i64().unwrap(), 1);
 }
 
+/// Pins the confusing-but-correct relationship between `Network` and the on-chain network id.
+///
+/// `Network`'s discriminants are **CCL's enum ordinals** (`Mainnet = 0`), while Cardano's *on-chain*
+/// network id — the one in the address and in `AddressApi::info()`'s `network_id` field — is the
+/// inverse (mainnet = 1, testnet = 0). Both halves are asserted here so that nobody "fixes" the
+/// inversion back into a bug: renumbering `Network` to match the on-chain ids would make every
+/// caller silently derive keys for the *wrong network*, and this test is what stops that landing.
+#[test]
+fn test_network_ordinals_are_ccl_not_onchain() {
+    // The CCL ordinals the native library expects. Do not renumber to match on-chain ids.
+    assert_eq!(ccl::Network::Mainnet as i32, 0);
+    assert_eq!(ccl::Network::Testnet as i32, 1);
+    assert_eq!(ccl::Network::Preprod as i32, 2);
+    assert_eq!(ccl::Network::Preview as i32, 3);
+    assert_eq!(ccl::Network::Mainnet.as_i32(), 0);
+    assert_eq!(i32::from(ccl::Network::Testnet), 1);
+
+    let bridge = Bridge::new().expect("Failed to create bridge");
+
+    let on_chain_network_id = |network: ccl::Network| -> i64 {
+        let created = bridge
+            .account()
+            .create(network)
+            .expect("Failed to create account");
+        let json: serde_json::Value = serde_json::from_str(&created).expect("Invalid JSON");
+        let addr = json["base_address"].as_str().unwrap();
+        let info_str = bridge.address().info(addr).expect("Failed to get address info");
+        let info: serde_json::Value = serde_json::from_str(&info_str).expect("Invalid JSON");
+        info["network_id"].as_i64().expect("missing network_id")
+    };
+
+    // Inverted on purpose: Network::Mainnet is ordinal 0, but a mainnet address is on-chain id 1.
+    assert_eq!(on_chain_network_id(ccl::Network::Mainnet), 1);
+    assert_eq!(on_chain_network_id(ccl::Network::Testnet), 0);
+}
+
 #[test]
 fn test_address_to_from_bytes() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     let addr = json["base_address"].as_str().unwrap();
@@ -153,7 +189,7 @@ fn test_address_validate() {
 
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     let addr = json["base_address"].as_str().unwrap();
@@ -201,7 +237,7 @@ fn test_crypto_sign() {
 
     let priv_key = bridge
         .account()
-        .get_private_key(&mnemonic, ccl::network::MAINNET, 0, 0)
+        .get_private_key(&mnemonic, ccl::Network::Mainnet, 0, 0)
         .expect("Failed to get private key");
     // Use first 32 bytes (64 hex chars) for standard Ed25519
     let priv_key_32 = &priv_key[..64];
@@ -221,7 +257,7 @@ fn test_crypto_verify_rejects_wrong_signature() {
 
     let pub_key = bridge
         .account()
-        .get_public_key(&mnemonic, ccl::network::MAINNET, 0, 0)
+        .get_public_key(&mnemonic, ccl::Network::Mainnet, 0, 0)
         .expect("Failed to get public key");
 
     let fake_sig = "00".repeat(64);
@@ -280,7 +316,7 @@ fn test_script_native_from_json() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let acct_json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     let addr = acct_json["base_address"].as_str().unwrap();
@@ -307,7 +343,7 @@ fn test_script_hash() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let acct_json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     let addr = acct_json["base_address"].as_str().unwrap();
@@ -338,7 +374,7 @@ fn test_gov_drep_key_from_mnemonic() {
 
     let gov_result = bridge
         .gov()
-        .drep_key_from_mnemonic(&mnemonic, ccl::network::MAINNET, 0)
+        .drep_key_from_mnemonic(&mnemonic, ccl::Network::Mainnet, 0)
         .expect("Failed to get DRep key");
     let parsed: serde_json::Value = serde_json::from_str(&gov_result).expect("Invalid JSON");
     assert!(parsed["drep_id"].as_str().unwrap().starts_with("drep1"));
@@ -352,7 +388,7 @@ fn test_gov_committee_cold_key_from_mnemonic() {
 
     let gov_result = bridge
         .gov()
-        .committee_cold_key_from_mnemonic(&mnemonic, ccl::network::MAINNET, 0)
+        .committee_cold_key_from_mnemonic(&mnemonic, ccl::Network::Mainnet, 0)
         .expect("Failed to get committee cold key");
     let parsed: serde_json::Value = serde_json::from_str(&gov_result).expect("Invalid JSON");
     assert!(parsed["id"].as_str().unwrap().starts_with("cc_cold1"));
@@ -366,7 +402,7 @@ fn test_gov_committee_hot_key_from_mnemonic() {
 
     let gov_result = bridge
         .gov()
-        .committee_hot_key_from_mnemonic(&mnemonic, ccl::network::MAINNET, 0)
+        .committee_hot_key_from_mnemonic(&mnemonic, ccl::Network::Mainnet, 0)
         .expect("Failed to get committee hot key");
     let parsed: serde_json::Value = serde_json::from_str(&gov_result).expect("Invalid JSON");
     assert!(parsed["id"].as_str().unwrap().starts_with("cc_hot1"));
@@ -378,7 +414,7 @@ fn test_wallet_create() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let result = bridge
         .wallet()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create wallet");
     let json: serde_json::Value = serde_json::from_str(&result).expect("Invalid JSON");
     assert_eq!(
@@ -397,14 +433,14 @@ fn test_wallet_from_mnemonic() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let created = bridge
         .wallet()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create wallet");
     let created_json: serde_json::Value = serde_json::from_str(&created).expect("Invalid JSON");
     let mnemonic = created_json["mnemonic"].as_str().unwrap();
 
     let restored = bridge
         .wallet()
-        .from_mnemonic(mnemonic, ccl::network::MAINNET)
+        .from_mnemonic(mnemonic, ccl::Network::Mainnet)
         .expect("Failed to restore wallet");
     let restored_json: serde_json::Value = serde_json::from_str(&restored).expect("Invalid JSON");
 
@@ -419,20 +455,20 @@ fn test_wallet_get_address() {
     let bridge = Bridge::new().expect("Failed to create bridge");
     let created = bridge
         .wallet()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create wallet");
     let created_json: serde_json::Value = serde_json::from_str(&created).expect("Invalid JSON");
     let mnemonic = created_json["mnemonic"].as_str().unwrap();
 
     let addr0 = bridge
         .wallet()
-        .get_address(mnemonic, ccl::network::MAINNET, 0)
+        .get_address(mnemonic, ccl::Network::Mainnet, 0)
         .expect("Failed to get address 0");
     assert!(addr0.starts_with("addr1"));
 
     let addr1 = bridge
         .wallet()
-        .get_address(mnemonic, ccl::network::MAINNET, 1)
+        .get_address(mnemonic, ccl::Network::Mainnet, 1)
         .expect("Failed to get address 1");
     assert_ne!(addr0, addr1);
 }
@@ -504,7 +540,7 @@ fn make_utxos(address: &str, lovelace: u64) -> Value {
 fn get_testnet_address(bridge: &Bridge) -> (String, String) {
     let result = bridge
         .account()
-        .create(ccl::network::TESTNET)
+        .create(ccl::Network::Testnet)
         .expect("Failed to create account");
     let json: Value = serde_json::from_str(&result).expect("Invalid JSON");
     let addr = json["base_address"].as_str().unwrap().to_string();

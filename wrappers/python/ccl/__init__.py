@@ -1,4 +1,5 @@
-from ccl._ffi import CclLib, CclError
+from ccl.network import Network
+from ccl._ffi import CclLib, CclError, CclClosedError
 from ccl.account import Account
 from ccl.address import Address
 from ccl.crypto import Crypto
@@ -13,7 +14,8 @@ from ccl.providers import (
     TransactionEvaluator, BlockfrostEvaluator,
 )
 
-__all__ = ['CclLib', 'CclError', 'Account', 'Address', 'Crypto', 'Transaction',
+__all__ = ['CclLib', 'CclError', 'CclClosedError', 'Network',
+           'Account', 'Address', 'Crypto', 'Transaction',
            'Plutus', 'Script', 'Governance', 'Wallet', 'QuickTx',
            'ChainDataProvider', 'YaciProvider', 'BlockfrostProvider',
            'TransactionEvaluator', 'BlockfrostEvaluator']

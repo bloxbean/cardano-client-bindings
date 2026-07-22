@@ -15,7 +15,9 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
-setDefaultTimeout(60_000);
+// Headroom includes devkit.reset() re-posting itself when the devnet bootstrap wedges (up to
+// ~2 minutes of self-healing before the test's own work starts).
+setDefaultTimeout(300_000);
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../../test-fixtures/quicktx-intents");
 
@@ -136,6 +138,8 @@ transaction:
     await devkit.waitForBlock(3000);
     const r1Utxos = await devkit.getUtxos(r1.base_address);
     expect(totalLovelace(r1Utxos)).toBe(3_000_000);
+    const r2Utxos = await devkit.getUtxos(r2.base_address);
+    expect(totalLovelace(r2Utxos)).toBe(2_000_000);
   });
 
   it("builds via a YaciProvider (buildWith) against the live devnet", async () => {

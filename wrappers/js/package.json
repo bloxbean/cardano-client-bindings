@@ -27,18 +27,24 @@
     "README.md"
   ],
   "scripts": {
-    "test": "bun test test/ccl.test.js"
+    "test": "bun test test/ccl.test.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "lossless-json": "^4.3.0",
     "yaml": "^2.3.0"
   },
   "optionalDependencies": {
     "@bloxbean/cardano-client-lib-linux-x86_64": "0.1.0-pre2-ci1",
     "@bloxbean/cardano-client-lib-linux-aarch64": "0.1.0-pre2-ci1",
+    "@bloxbean/cardano-client-lib-linux-musl-x86_64": "0.1.0-pre2-ci1",
     "@bloxbean/cardano-client-lib-macos-aarch64": "0.1.0-pre2-ci1",
     "@bloxbean/cardano-client-lib-windows-x86_64": "0.1.0-pre2-ci1"
   },
   "engines": {
     "bun": ">=1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }

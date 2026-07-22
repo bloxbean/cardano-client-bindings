@@ -13,7 +13,7 @@ fn bridge() -> Bridge {
 fn mnemonic(bridge: &Bridge) -> String {
     let result = bridge
         .account()
-        .create(ccl::network::MAINNET)
+        .create(ccl::Network::Mainnet)
         .expect("Failed to create account");
     let json: Value = serde_json::from_str(&result).expect("Invalid JSON");
     json["mnemonic"].as_str().unwrap().to_string()
@@ -25,7 +25,7 @@ fn test_gov_drep_key_has_verification_key_hash() {
     let m = mnemonic(&b);
     let result = b
         .gov()
-        .drep_key_from_mnemonic(&m, ccl::network::MAINNET, 0)
+        .drep_key_from_mnemonic(&m, ccl::Network::Mainnet, 0)
         .expect("Failed to get DRep key");
     let parsed: Value = serde_json::from_str(&result).expect("Invalid JSON");
     assert!(parsed["verification_key_hash"].is_string());
@@ -37,7 +37,7 @@ fn test_gov_committee_cold_key_has_verification_key_hash() {
     let m = mnemonic(&b);
     let result = b
         .gov()
-        .committee_cold_key_from_mnemonic(&m, ccl::network::MAINNET, 0)
+        .committee_cold_key_from_mnemonic(&m, ccl::Network::Mainnet, 0)
         .expect("Failed to get committee cold key");
     let parsed: Value = serde_json::from_str(&result).expect("Invalid JSON");
     assert!(parsed["verification_key_hash"].is_string());
@@ -49,7 +49,7 @@ fn test_gov_committee_hot_key_has_verification_key_hash() {
     let m = mnemonic(&b);
     let result = b
         .gov()
-        .committee_hot_key_from_mnemonic(&m, ccl::network::MAINNET, 0)
+        .committee_hot_key_from_mnemonic(&m, ccl::Network::Mainnet, 0)
         .expect("Failed to get committee hot key");
     let parsed: Value = serde_json::from_str(&result).expect("Invalid JSON");
     assert!(parsed["verification_key_hash"].is_string());
@@ -62,6 +62,6 @@ fn test_gov_drep_key_from_invalid_mnemonic() {
     let b = bridge();
     let result = b
         .gov()
-        .drep_key_from_mnemonic("not a valid mnemonic", ccl::network::MAINNET, 0);
+        .drep_key_from_mnemonic("not a valid mnemonic", ccl::Network::Mainnet, 0);
     assert!(result.is_err(), "expected error for invalid mnemonic");
 }

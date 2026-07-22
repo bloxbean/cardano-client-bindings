@@ -1,25 +1,87 @@
 /**
  * Yaci DevKit HTTP helper for integration tests.
  * Uses Bun's built-in fetch API.
+ *
+ * Every request carries an AbortSignal timeout so a wedged devnet fails the call fast (with a
+ * clear TimeoutError) instead of hanging until the test's whole timeout budget is gone.
  */
 
 const DEVKIT_URL = "http://localhost:10000/local-cluster/api";
+
+// General bound for chain-data calls. The reset POST gets a larger bound because DevKit 0.12's
+// reset handler blocks while it re-bootstraps the cluster (~20-30s when healthy).
+const REQUEST_TIMEOUT_MS = 30_000;
+const RESET_TIMEOUT_MS = 60_000;
+// How long reset() polls for the devnet to serve chain data again before re-POSTing the reset.
+const HEALTH_BUDGET_MS = 60_000;
+const RESET_ATTEMPTS = 3;
 
 export class DevKitHelper {
   constructor(baseUrl = DEVKIT_URL) {
     this.baseUrl = baseUrl;
   }
 
+  // reset restarts the devnet and returns only once it serves chain data again.
+  //
+  // DevKit 0.12 (companion mode) re-bootstraps the whole cluster on reset, and that bootstrap can
+  // wedge (e.g. the relay never syncs from the companion within its window), leaving the node
+  // socket dead until the NEXT reset POST kicks the cluster back to life. So: POST the reset, poll
+  // until the chain-data API answers, and if the devnet stays dead re-POST the reset.
   async reset() {
-    const resp = await fetch(`${this.baseUrl}/admin/devnet/reset`, {
-      method: "POST",
-    });
-    return resp.status;
+    let lastErr;
+    for (let attempt = 1; attempt <= RESET_ATTEMPTS; attempt++) {
+      try {
+        await fetch(`${this.baseUrl}/admin/devnet/reset`, {
+          method: "POST",
+          signal: AbortSignal.timeout(RESET_TIMEOUT_MS),
+        });
+      } catch (e) {
+        // The bootstrap keeps running server-side; the health poll below is what decides.
+        lastErr = e;
+      }
+      if (await this.waitHealthy(HEALTH_BUDGET_MS)) return;
+      lastErr = new Error("devnet did not serve chain data after reset");
+      console.log(`devkit reset attempt ${attempt}/${RESET_ATTEMPTS}: devnet still down, re-posting reset`);
+    }
+    throw new Error(`devnet reset failed after ${RESET_ATTEMPTS} attempts: ${lastErr}`);
+  }
+
+  // Healthy = the chain-data API (yaci-store, fed by the node) answers with protocol parameters
+  // AND the submit path reaches the backend submit-api. /admin/devnet alone is no proof: it stays
+  // 200 while the node socket is dead. The submit probe matters because a reset's bootstrap can
+  // fail to start the submit-api entirely ("Network.Socket.bind: resource busy" — the previous
+  // instance hadn't released port 8090); chain data then works but every submit gets
+  // "Connection refused" until the next reset. Probing with a garbage body: any deserialization /
+  // ledger 400 proves the submit-api is alive; a body wrapping "Connection refused" does not.
+  async waitHealthy(budgetMs) {
+    const deadline = Date.now() + budgetMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        const resp = await fetch(`${this.baseUrl}/epochs/parameters`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!resp.ok) continue;
+        await resp.json();
+
+        const submitProbe = await fetch(`${this.baseUrl}/tx/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/cbor" },
+          body: Buffer.from("00", "hex"),
+          signal: AbortSignal.timeout(5000),
+        });
+        const text = await submitProbe.text();
+        if (!text.includes("Connection refused")) return true;
+      } catch {
+        // keep polling
+      }
+    }
+    return false;
   }
 
   async topup(address, adaAmount = 100) {
-    // Yaci DevKit 0.12 (companion mode) re-bootstraps the devnet on reset before handing over to the
-    // node, so a topup right after reset can transiently fail. Retry with backoff.
+    // reset() already health-gates the devnet, but the faucet can still transiently refuse right
+    // after the hand-over to the node. Retry with backoff.
     let lastErr;
     for (let attempt = 1; attempt <= 8; attempt++) {
       try {
@@ -27,6 +89,7 @@ export class DevKitHelper {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ address, adaAmount }),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
         const result = await resp.json();
         if (resp.ok && !(result && result.status === false)) return result;
@@ -40,29 +103,61 @@ export class DevKitHelper {
   }
 
   async getUtxos(address) {
-    const resp = await fetch(`${this.baseUrl}/addresses/${address}/utxos`);
+    const resp = await fetch(`${this.baseUrl}/addresses/${address}/utxos`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     return resp.json();
   }
 
   async getProtocolParams() {
-    const resp = await fetch(`${this.baseUrl}/epochs/parameters`);
+    const resp = await fetch(`${this.baseUrl}/epochs/parameters`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     return resp.json();
   }
 
+  // After a reset, the devkit's backend submit-api (port 8090) can lag behind the chain-data API
+  // that reset() health-gates on — the devkit then returns 400 wrapping "Connection refused".
+  // That's the devnet still booting, not a ledger rejection, so retry it; genuine rejections
+  // surface immediately.
   async submitTx(txCborHex) {
     const txBytes = Buffer.from(txCborHex, "hex");
-    const resp = await fetch(`${this.baseUrl}/tx/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/cbor" },
-      body: txBytes,
-    });
-    const text = await resp.text();
-    return text.trim().replace(/"/g, "");
+    let lastText;
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      const resp = await fetch(`${this.baseUrl}/tx/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/cbor" },
+        body: txBytes,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      const text = await resp.text();
+      if (resp.ok || !text.includes("Connection refused")) {
+        return text.trim().replace(/"/g, "");
+      }
+      lastText = text;
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+    return lastText.trim().replace(/"/g, "");
   }
 
   async getTx(txHash) {
-    const resp = await fetch(`${this.baseUrl}/txs/${txHash}`);
+    const resp = await fetch(`${this.baseUrl}/txs/${txHash}`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     return resp.json();
+  }
+
+  // Current epoch, for intents whose certificates carry epoch bounds (e.g. pool retirement).
+  // Prefers the protocol-params response (Blockfrost-style params carry "epoch"), falls back to
+  // the Blockfrost-compatible /epochs/latest.
+  async getLatestEpoch() {
+    const pp = await this.getProtocolParams();
+    if (typeof pp.epoch === "number") return pp.epoch;
+    if (typeof pp.epoch === "string") return parseInt(pp.epoch, 10);
+    const resp = await fetch(`${this.baseUrl}/epochs/latest`);
+    const latest = await resp.json();
+    if (typeof latest.epoch !== "number") throw new Error(`no epoch in /epochs/latest: ${JSON.stringify(latest)}`);
+    return latest.epoch;
   }
 
   async waitForBlock(ms = 2000) {

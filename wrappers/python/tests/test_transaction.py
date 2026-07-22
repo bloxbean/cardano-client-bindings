@@ -1,6 +1,7 @@
 import json
 import pytest
-from ccl._ffi import CclLib, CclError
+from ccl._ffi import CclError
+from ccl.network import Network
 
 # A known valid transaction CBOR hex (built from Java tests)
 SAMPLE_TX_CBOR = "84a300d901028182582073198b7ad003862b9798106b88fbccfca464b1a38afb34958275c4a7d7d8d002010181825839009493315cd92eb5d8c4304e67b7e16ae36d61d34502694657811a2c8e32c728d3861e164cab28cb8f006448139c8f1740ffb8e7aa9e5232dc1a001e8480021a00029810a0f5f6"
@@ -26,10 +27,10 @@ def test_tx_deserialize(ccl):
 
 
 def test_account_sign_tx(ccl):
-    created = ccl.account.create(CclLib.TESTNET)
+    created = ccl.account.create(Network.TESTNET)
     mnemonic = created['mnemonic']
 
-    signed_tx = ccl.account.sign_tx(mnemonic, SAMPLE_TX_CBOR, CclLib.TESTNET)
+    signed_tx = ccl.account.sign_tx(mnemonic, SAMPLE_TX_CBOR, Network.TESTNET)
     assert len(signed_tx) > len(SAMPLE_TX_CBOR)
 
 
@@ -42,8 +43,8 @@ def test_tx_from_json(ccl):
 
 @pytest.mark.skip(reason="tx_sign_with_secret_key expects CBOR-encoded SecretKey, not raw private key hex")
 def test_tx_sign_with_secret_key(ccl):
-    created = ccl.account.create(CclLib.TESTNET)
-    private_key = ccl.account.get_private_key(created['mnemonic'], CclLib.TESTNET)
+    created = ccl.account.create(Network.TESTNET)
+    private_key = ccl.account.get_private_key(created['mnemonic'], Network.TESTNET)
     signed_tx = ccl.tx.sign_with_secret_key(SAMPLE_TX_CBOR, private_key)
     assert len(signed_tx) > len(SAMPLE_TX_CBOR)
 
