@@ -28,16 +28,26 @@ GitHub Release for the tag.
 
 ## 2. Keep the pinned versions in lockstep
 
-Two wrappers **fetch** the native library from that release and pin its version in source. **Bump
-both to the new tag before (or as part of) the release**, or they will download the wrong version:
+**`gradle.properties` `version` is the single source of truth.** After changing it, run:
 
-| Wrapper | Constant | File |
+```bash
+./gradlew syncVersions
+```
+
+The task updates every checked-in wrapper manifest, lockfile pin, download version, and native-library
+compatibility constant. `./gradlew checkVersions` guards the invariant in wrapper test runs. JS and
+Rust are also stamped again from `gradle.properties` in publish CI as a defensive check. On a `v*`
+tag the tag must equal `v<version>`, so a mistyped tag can't publish a mismatched version.
+
+| Wrapper | Fields synchronized by `syncVersions` | Manual bump needed? |
 |---|---|---|
-| Rust | `DEFAULT_LIB_VERSION` | [`wrappers/rust/build.rs`](wrappers/rust/build.rs) |
-| Go   | `defaultLibVersion`   | [`wrappers/go/ccl/loader.go`](wrappers/go/ccl/loader.go) |
+| **Rust** | `Cargo.toml` + the crate entry in `Cargo.lock`; `build.rs` derives the release tag as `v$CARGO_PKG_VERSION` | **No** — run the root task |
+| **JS** | `package.json` version + platform `optionalDependencies`, matching `bun.lock` pins, and the base compatibility version in `src/index.js` | **No** — run the root task |
+| **Go** | `defaultLibVersion` (full release tag) + `expectedLibVersion` (base compatibility version) | **No** — run the root task |
+| **Python** | `pyproject.toml` version + `EXPECTED_LIB_VERSION` (base compatibility version) | **No** — run the root task |
 
-Both accept a `CCL_LIB_VERSION` environment override (build time for Rust, run time for Go) — useful
-for testing against a release before pinning it.
+Rust and Go both accept a `CCL_LIB_VERSION` environment override (build time for Rust, run time for
+Go) — useful for testing against a release before pinning it.
 
 **Version-skew check.** On init each wrapper calls `ccl_version` and fails fast if it doesn't match
 the wrapper's expected version (bypass with `CCL_SKIP_VERSION_CHECK`). The lib side is single-sourced —
@@ -46,10 +56,10 @@ for the native lib. The wrapper's *expected* version must be bumped in lockstep 
 
 | Wrapper | Expected-version source | Bump needed? |
 |---|---|---|
-| Rust | `CARGO_PKG_VERSION` (`Cargo.toml` `version`) | automatic with the package version |
-| Python | `EXPECTED_LIB_VERSION` in [`wrappers/python/ccl/_ffi.py`](wrappers/python/ccl/_ffi.py) | **yes**, alongside `pyproject.toml` |
-| JS | `EXPECTED_LIB_VERSION` in [`wrappers/js/src/index.js`](wrappers/js/src/index.js) | **yes**, alongside `package.json` |
-| Go | `expectedLibVersion` in [`wrappers/go/ccl/ccl.go`](wrappers/go/ccl/ccl.go) | **yes** (Go has no package-version field) |
+| Rust | `CARGO_PKG_VERSION` (`Cargo.toml` `version`, itself stamped from `gradle.properties`) | **no** — fully derived |
+| Python | `EXPECTED_LIB_VERSION` in [`wrappers/python/ccl/_ffi.py`](wrappers/python/ccl/_ffi.py) | **no** — synchronized by `syncVersions` |
+| JS | `EXPECTED_LIB_VERSION` in [`wrappers/js/src/index.js`](wrappers/js/src/index.js) | **no** — synchronized by `syncVersions` |
+| Go | `expectedLibVersion` in [`wrappers/go/ccl/ccl.go`](wrappers/go/ccl/ccl.go) | **no** — synchronized by `syncVersions` |
 
 (Only the base semver is compared, so a `-preview1`-style suffix on the release/tag doesn't matter.)
 
@@ -112,20 +122,23 @@ git push origin wrappers/go/v0.2.0
 
 Nobody pushes `v*` tags by hand — direct tag pushes are blocked by a repository ruleset. Instead:
 
-1. Open a PR that bumps `version` in `gradle.properties` (plus the lockstep constants in step 2
-   above, in the same PR).
+1. Open a PR that bumps `version` in `gradle.properties`, run `./gradlew syncVersions`, and commit
+   the synchronized wrapper files in the same PR.
 2. A **release code owner** (`@satran004`, `@matiwinnetou`, `@fabianbormann`) reviews and merges it
    to `main`. This is enforced by [`.github/CODEOWNERS`](.github/CODEOWNERS) + the `main` branch
    ruleset.
 3. On merge, [`tag-release.yml`](.github/workflows/tag-release.yml) creates and pushes
    `v<version>` (using a GitHub App token so the tag fires the downstream workflows), which triggers
-   `release.yml` and `publish-js.yml`.
-4. `publish-js.yml` pauses on the `npm-release` environment until a release code owner approves the
-   final npm publish.
+   `release.yml`, `publish-js.yml`, and `publish-rust.yml`.
+4. `publish-js.yml` and `publish-rust.yml` each build, then **pause** on their environment
+   (`npm-release` / `crates-release`) until a release code owner approves the final publish. Both
+   registries are irreversible — a published version can never be overwritten, only unpublished
+   (npm, within a window) or yanked (crates.io) — so the approval is the last chance to stop.
 
 Why a GitHub App token (not the default `GITHUB_TOKEN`): GitHub does not fire `on: push` workflows
 for refs pushed by `GITHUB_TOKEN` (a recursion guard), so a `GITHUB_TOKEN`-pushed tag would not
-trigger `release.yml` / `publish-js.yml`. The App token is a normal actor, so the tag fans out.
+trigger `release.yml` / `publish-js.yml` / `publish-rust.yml`. The App token is a normal actor, so
+the tag fans out.
 
 ### One-time repo settings (admin)
 
@@ -137,19 +150,28 @@ These enforce the flow and are configured in GitHub settings, not code:
   bypass list empty (do not add `Maintain`/`Write` roles — anyone on it skips code-owner review).
 - **`v*` tag ruleset**: restrict tag creation; bypass list = the release App only, so a `v*` tag can
   only come from the approved-PR auto-tag.
-- **`npm-release` environment**: required reviewers = the release code owners; enable
-  "Prevent self-review".
+- **`npm-release` / `crates-release` environments**: required reviewers = the release code owners;
+  enable "Prevent self-review". These are the human gates on the two irreversible publishes.
+- **Trusted publishing** (no API-token secrets — both registries mint a short-lived token from the
+  GitHub OIDC identity): configure the publisher on
+  [npmjs.com](https://docs.npmjs.com/trusted-publishers) against `publish-js.yml` + `npm-release`,
+  and on [crates.io](https://crates.io/crates/cardano-client-lib/settings) against
+  `publish-rust.yml` + `crates-release`. crates.io needs the crate to exist, so the **first** Rust
+  release is a one-off manual `cargo publish` from a maintainer's machine (see step 3).
 
 ## Release checklist
 
-1. [ ] Open a PR bumping `version` in `gradle.properties`, plus `DEFAULT_LIB_VERSION` (Rust) and
-       `defaultLibVersion` (Go), and the `EXPECTED_LIB_VERSION` constants (Python/JS) to the new
-       version. Get it approved by a release code owner and merge to `main`.
+1. [ ] Open a PR bumping `version` in `gradle.properties`, run `./gradlew syncVersions`, and commit
+       every resulting wrapper manifest, lockfile, and constant update. Confirm
+       `./gradlew checkVersions` passes, get the PR approved by a release code owner, and merge it
+       to `main`.
 2. [ ] Merge auto-creates `vX.Y.Z` → `release.yml` builds + uploads the 5 platform tarballs +
-       `SHA256SUMS`; `publish-js.yml` builds and then waits on the `npm-release` approval.
-3. [ ] Verify the release assets are named `cardano-client-lib-vX.Y.Z-<platform>.tar.gz`.
-4. [ ] Approve the `npm-release` environment to publish JS (npm). Publish Python (PyPI) and Rust
-       (`cargo publish`) via their (still manual) steps.
+       `SHA256SUMS`; `publish-js.yml` and `publish-rust.yml` build, then wait on their approvals.
+3. [ ] Verify the release assets are named `cardano-client-lib-vX.Y.Z-<platform>.tar.gz`. **The Rust
+       crate is source-only** — its `build.rs` downloads these at the consumer's build time, so they
+       must be uploaded *before* approving the crates.io publish, or a `cargo add` will fail.
+4. [ ] Approve `npm-release` (npm) and `crates-release` (crates.io) to publish. Publish Python
+       (PyPI) via its (still manual) step.
 5. [ ] Tag `wrappers/go/vX.Y.Z` and push (Go module release — no build step, separate tag).
 6. [ ] Smoke-test each: a clean `pip install` / `npm install` / `cargo add` / `go get` with no
        `CCL_LIB_PATH` set.

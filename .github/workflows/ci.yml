@@ -57,9 +57,10 @@ jobs:
         run: |
           set -eux
           (cd wrappers/go && CGO_ENABLED=0 go build ./...)
+          VERSION="$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')"
           case "$RUNNER_OS" in
-            Linux) CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/cardano-client-bindings/v0.1.0-preview1"; LIB=libccl.so ;;
-            macOS) CACHE="$HOME/Library/Caches/cardano-client-bindings/v0.1.0-preview1"; LIB=libccl.dylib ;;
+            Linux) CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/cardano-client-bindings/v$VERSION"; LIB=libccl.so ;;
+            macOS) CACHE="$HOME/Library/Caches/cardano-client-bindings/v$VERSION"; LIB=libccl.dylib ;;
           esac
           mkdir -p "$CACHE"
           cp "core/build/native/nativeCompile/$LIB" "$CACHE/$LIB"
