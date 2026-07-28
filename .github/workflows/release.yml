@@ -156,3 +156,25 @@ jobs:
             cardano-client-lib-*.tar.gz
             SHA256SUMS
           generate_release_notes: true
+
+  # A version-bump PR cannot resolve these URLs because its release does not exist yet. Verify the
+  # Go loader's real per-platform URL only after all release assets have been uploaded.
+  verify-go-release-asset:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Verify Go loader release asset
+        working-directory: wrappers/go
+        env:
+          CCL_VERIFY_RELEASE_ASSET: '1'
+        run: go test ./ccl -run '^TestReleaseAssetURLResolves$' -count=1 -v
