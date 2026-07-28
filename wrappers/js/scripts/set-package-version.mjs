@@ -5,6 +5,9 @@
 // so versions are never hand-maintained in package.json. Mirrors bloxbean/yano's
 // npm/scripts/set-package-version.mjs.
 //
+// This is the narrow publish-CI helper. For a checked-in release bump across every wrapper, edit
+// gradle.properties and run `./gradlew syncVersions` from the repository root.
+//
 // Usage: node set-package-version.mjs <version>
 import fs from "node:fs";
 import path from "node:path";

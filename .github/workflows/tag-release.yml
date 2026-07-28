@@ -38,6 +38,8 @@ jobs:
           # override the App-token remote URL below, so the push would run as github-actions[bot]
           # (which only has contents:read here) and be denied. With this off, the App token is used.
           persist-credentials: false
+      - name: Verify synchronized wrapper versions
+        run: ./gradlew checkVersions --console=plain
       - name: Resolve version and whether to tag
         id: v
         run: |
