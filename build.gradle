@@ -1,5 +1,178 @@
+import groovy.json.JsonSlurper
+import java.util.regex.Pattern
+
 plugins {
     id 'org.graalvm.buildtools.native' version '0.10.6' apply false
+}
+
+def releaseVersion = providers.gradleProperty('version').get()
+def semverPattern = Pattern.compile(
+        '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)' +
+        '(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?' +
+        '(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$')
+if (!semverPattern.matcher(releaseVersion).matches()) {
+    throw new GradleException(
+            "gradle.properties version '${releaseVersion}' is not valid SemVer")
+}
+def baseReleaseVersion = releaseVersion.split(/[-+]/, 2)[0]
+
+// Each pattern must capture exactly one version value in group 1. Keeping the replacements
+// structural and narrowly targeted preserves each ecosystem's native manifest/lockfile formatting.
+def versionTarget = { String path, String description, Pattern pattern, String expected ->
+    [
+            file       : file(path),
+            description: description,
+            pattern    : pattern,
+            expected   : expected
+    ]
+}
+
+def versionTargets = [
+        versionTarget(
+                'wrappers/rust/Cargo.toml',
+                'Rust crate version',
+                Pattern.compile('^version = "([^"]+)"$', Pattern.MULTILINE),
+                releaseVersion),
+        versionTarget(
+                'wrappers/rust/Cargo.lock',
+                'Rust lockfile package version',
+                Pattern.compile(
+                        '^\\[\\[package\\]\\]\\Rname = "cardano-client-lib"\\Rversion = "([^"]+)"',
+                        Pattern.MULTILINE),
+                releaseVersion),
+        versionTarget(
+                'wrappers/js/package.json',
+                'npm package version',
+                Pattern.compile('^  "version": "([^"]+)",?$', Pattern.MULTILINE),
+                releaseVersion),
+        versionTarget(
+                'wrappers/js/src/index.js',
+                'JavaScript native-library compatibility version',
+                Pattern.compile(
+                        '''^const EXPECTED_LIB_VERSION = '([^']+)';$''',
+                        Pattern.MULTILINE),
+                baseReleaseVersion),
+        versionTarget(
+                'wrappers/python/pyproject.toml',
+                'Python package version',
+                Pattern.compile('^version = "([^"]+)"$', Pattern.MULTILINE),
+                releaseVersion),
+        versionTarget(
+                'wrappers/python/ccl/_ffi.py',
+                'Python native-library compatibility version',
+                Pattern.compile('^EXPECTED_LIB_VERSION = "([^"]+)"$', Pattern.MULTILINE),
+                baseReleaseVersion),
+        versionTarget(
+                'wrappers/go/ccl/loader.go',
+                'Go native-library release pin',
+                Pattern.compile('^const defaultLibVersion = "([^"]+)"$', Pattern.MULTILINE),
+                "v${releaseVersion}"),
+        versionTarget(
+                'wrappers/go/ccl/ccl.go',
+                'Go native-library compatibility version',
+                Pattern.compile('^const expectedLibVersion = "([^"]+)"$', Pattern.MULTILINE),
+                baseReleaseVersion)
+]
+
+def jsPackageFile = file('wrappers/js/package.json')
+def jsPackage = new JsonSlurper().parse(jsPackageFile)
+def platformPackagePrefix = '@bloxbean/cardano-client-lib-'
+def platformPackages = (jsPackage.optionalDependencies ?: [:]).keySet()
+        .findAll { it.startsWith(platformPackagePrefix) }
+        .sort()
+if (platformPackages.isEmpty()) {
+    throw new GradleException(
+            "${jsPackageFile} has no ${platformPackagePrefix}* optionalDependencies to synchronize")
+}
+platformPackages.each { packageName ->
+    def packagePattern = Pattern.compile(
+            '^\\s+"' + Pattern.quote(packageName) + '": "([^"]+)",?$',
+            Pattern.MULTILINE)
+    versionTargets.add(versionTarget(
+            'wrappers/js/package.json',
+            "npm optionalDependency ${packageName}",
+            packagePattern,
+            releaseVersion))
+    versionTargets.add(versionTarget(
+            'wrappers/js/bun.lock',
+            "Bun lockfile optionalDependency ${packageName}",
+            packagePattern,
+            releaseVersion))
+}
+
+def findVersionMatch = { target, String text ->
+    def matcher = target.pattern.matcher(text)
+    if (!matcher.find()) {
+        throw new GradleException(
+                "Could not find ${target.description} in ${target.file}")
+    }
+    def match = [
+            value: matcher.group(1),
+            start: matcher.start(1),
+            end  : matcher.end(1)
+    ]
+    if (matcher.find()) {
+        throw new GradleException(
+                "Found more than one ${target.description} in ${target.file}; refusing an ambiguous update")
+    }
+    match
+}
+
+tasks.register('syncVersions') {
+    group = 'release'
+    description = 'Synchronizes every wrapper version from gradle.properties.'
+
+    doLast {
+        def changed = []
+        versionTargets.each { target ->
+            if (!target.file.isFile()) {
+                throw new GradleException("Version file does not exist: ${target.file}")
+            }
+            def text = target.file.getText('UTF-8')
+            def match = findVersionMatch(target, text)
+            if (match.value != target.expected) {
+                def updated = text.substring(0, match.start) +
+                        target.expected +
+                        text.substring(match.end)
+                target.file.setText(updated, 'UTF-8')
+                changed.add("${target.description}: ${match.value} -> ${target.expected}")
+            }
+        }
+
+        if (changed.isEmpty()) {
+            logger.lifecycle("All wrapper versions already match ${releaseVersion}.")
+        } else {
+            logger.lifecycle("Synchronized wrapper versions to ${releaseVersion}:")
+            changed.each { logger.lifecycle("  - ${it}") }
+        }
+    }
+}
+
+tasks.register('checkVersions') {
+    group = 'verification'
+    description = 'Checks that every wrapper version matches gradle.properties.'
+
+    doLast {
+        def mismatches = []
+        versionTargets.each { target ->
+            if (!target.file.isFile()) {
+                mismatches.add("${target.description}: missing file ${target.file}")
+            } else {
+                def match = findVersionMatch(target, target.file.getText('UTF-8'))
+                if (match.value != target.expected) {
+                    mismatches.add(
+                            "${target.description}: ${match.value} (expected ${target.expected})")
+                }
+            }
+        }
+        if (!mismatches.isEmpty()) {
+            throw new GradleException(
+                    "Version fields do not match gradle.properties version=${releaseVersion}:\n  - " +
+                    mismatches.join('\n  - ') +
+                    '\nRun ./gradlew syncVersions and commit the resulting files.')
+        }
+        logger.lifecycle("All wrapper versions match ${releaseVersion}.")
+    }
 }
 
 subprojects {
@@ -7,5 +180,12 @@ subprojects {
 
     repositories {
         mavenCentral()
+    }
+
+    // Every wrapper test invocation gets the same fast, cross-ecosystem drift guard.
+    tasks.configureEach { task ->
+        if (project.path.startsWith(':wrappers:') && task.name == 'test') {
+            task.dependsOn(rootProject.tasks.named('checkVersions'))
+        }
     }
 }

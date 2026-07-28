@@ -1,0 +1,19 @@
+name: Rust crate dry run
+
+# PR validation of the crates.io publish pipeline: runs the shared build workflow (which packages +
+# verify-builds the crate exactly as `cargo publish` would) with no publish step anywhere. Triggers
+# only on PRs targeting develop that touch the pipeline or the crate, so develop -> main promotion
+# PRs carrying these changes don't re-run it.
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/publish-rust.yml'
+      - '.github/workflows/build-rust-crate.yml'
+      - '.github/workflows/publish-rust-dry-run.yml'
+      - 'wrappers/rust/**'
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-rust-crate.yml

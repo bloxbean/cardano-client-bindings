@@ -1,0 +1,69 @@
+name: Build Rust crate
+
+# Reusable (workflow_call) build + validation of the `cardano-client-lib` crate — everything except
+# publishing. Called by publish-rust.yml (release) and publish-rust-dry-run.yml (PR validation).
+#
+# The version comes from `version` in gradle.properties (single source of truth); on a v* tag the tag
+# must match it. Cargo.toml's `version` is stamped from it at build time (scripts/set-crate-version.sh)
+# — never hand-maintained. The release tag build.rs fetches libccl from is derived from that in turn,
+# so the crate has exactly one version site. Mirrors build-js-packages.yml.
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: Crate version read from gradle.properties
+        value: ${{ jobs.validate.outputs.version }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from gradle.properties
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "No version found in gradle.properties" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Git tag $GITHUB_REF_NAME does not match gradle.properties version $VERSION (expected tag v$VERSION)" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  # Package + verify-build the crate exactly as `cargo publish` would, without uploading.
+  package:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      CRATE_VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25.0.3'
+          distribution: 'graalvm'
+      - uses: dtolnay/rust-toolchain@stable
+
+      # cargo's verification build runs build.rs, which needs libccl. Build it here and point
+      # CCL_LIB_PATH at it, so the verify uses the in-tree lib rather than downloading a release
+      # (which, for an unreleased version, doesn't exist yet).
+      - name: Build native library (for the verification build)
+        run: ./gradlew :core:nativeCompile
+      - name: Point build.rs at the in-tree lib
+        run: echo "CCL_LIB_PATH=$PWD/core/build/native/nativeCompile" >> "$GITHUB_ENV"
+
+      # Single source of truth: stamp the crate version; build.rs derives the release tag from it.
+      - name: Stamp crate version from gradle.properties
+        run: ./wrappers/rust/scripts/set-crate-version.sh "$CRATE_VERSION"
+
+      - name: Validate the crate (dry-run publish)
+        working-directory: wrappers/rust
+        # --allow-dirty: the stamp above modifies Cargo.toml in the checkout.
+        run: cargo publish --dry-run --allow-dirty

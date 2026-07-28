@@ -167,8 +167,8 @@ export LD_LIBRARY_PATH=/usr/local/lib
 export DYLD_LIBRARY_PATH=/usr/local/lib
 ```
 
-> **Maintainers:** see [RELEASING.md](RELEASING.md) for how a release goes out — the native-library
-> tag comes first, then the per-wrapper packages (and why Go needs only a git tag, not a registry push).
+> **Maintainers:** after changing `version` in `gradle.properties`, run `./gradlew syncVersions`;
+> see [RELEASING.md](RELEASING.md) for the complete release flow.
 
 ## Running Tests Without Gradle
 
