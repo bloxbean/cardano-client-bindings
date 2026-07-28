@@ -28,17 +28,23 @@ GitHub Release for the tag.
 
 ## 2. Keep the pinned versions in lockstep
 
-**`gradle.properties` `version` is the single source of truth.** It generates the native lib's
-`ccl_version`, and the **JS** and **Rust** packages are **stamped from it in CI** — their versions are
-never hand-maintained. On a `v*` tag the tag must equal `v<version>`, so a mistyped tag can't publish
-a mismatched version.
+**`gradle.properties` `version` is the single source of truth.** After changing it, run:
 
-| Wrapper | Version + release-tag pin | Manual bump needed? |
+```bash
+./gradlew syncVersions
+```
+
+The task updates every checked-in wrapper manifest, lockfile pin, download version, and native-library
+compatibility constant. `./gradlew checkVersions` guards the invariant in wrapper test runs. JS and
+Rust are also stamped again from `gradle.properties` in publish CI as a defensive check. On a `v*`
+tag the tag must equal `v<version>`, so a mistyped tag can't publish a mismatched version.
+
+| Wrapper | Fields synchronized by `syncVersions` | Manual bump needed? |
 |---|---|---|
-| **Rust** | `Cargo.toml` `version` — stamped by [`set-crate-version.sh`](wrappers/rust/scripts/set-crate-version.sh) at publish time. The release tag `build.rs` fetches libccl from is *derived* from it (`v$CARGO_PKG_VERSION`), not stored | **Scripted** — publishing needs nothing, but the *committed* `Cargo.toml` must be re-stamped in the bump PR (run the script, commit `Cargo.toml` + `Cargo.lock`); `version_sync_test.rs` fails CI with that instruction if it's forgotten |
-| **JS** | `package.json` version + `optionalDependencies` pins — stamped by [`wrappers/js/scripts/set-package-version.mjs`](wrappers/js/scripts/set-package-version.mjs) | **No** — `gradle.properties` only |
-| **Go** | `defaultLibVersion` in [`wrappers/go/ccl/loader.go`](wrappers/go/ccl/loader.go) (the release tag it downloads) | **Yes** — Go has no build step to stamp it |
-| **Python** | `pyproject.toml` `version` | **Yes** (until stamped like the others) |
+| **Rust** | `Cargo.toml` + the crate entry in `Cargo.lock`; `build.rs` derives the release tag as `v$CARGO_PKG_VERSION` | **No** — run the root task |
+| **JS** | `package.json` version + platform `optionalDependencies`, matching `bun.lock` pins, and the base compatibility version in `src/index.js` | **No** — run the root task |
+| **Go** | `defaultLibVersion` (full release tag) + `expectedLibVersion` (base compatibility version) | **No** — run the root task |
+| **Python** | `pyproject.toml` version + `EXPECTED_LIB_VERSION` (base compatibility version) | **No** — run the root task |
 
 Rust and Go both accept a `CCL_LIB_VERSION` environment override (build time for Rust, run time for
 Go) — useful for testing against a release before pinning it.
@@ -51,9 +57,9 @@ for the native lib. The wrapper's *expected* version must be bumped in lockstep 
 | Wrapper | Expected-version source | Bump needed? |
 |---|---|---|
 | Rust | `CARGO_PKG_VERSION` (`Cargo.toml` `version`, itself stamped from `gradle.properties`) | **no** — fully derived |
-| Python | `EXPECTED_LIB_VERSION` in [`wrappers/python/ccl/_ffi.py`](wrappers/python/ccl/_ffi.py) | **yes**, alongside `pyproject.toml` |
-| JS | `EXPECTED_LIB_VERSION` in [`wrappers/js/src/index.js`](wrappers/js/src/index.js) | **yes**, alongside `package.json` |
-| Go | `expectedLibVersion` in [`wrappers/go/ccl/ccl.go`](wrappers/go/ccl/ccl.go) | **yes** (Go has no package-version field) |
+| Python | `EXPECTED_LIB_VERSION` in [`wrappers/python/ccl/_ffi.py`](wrappers/python/ccl/_ffi.py) | **no** — synchronized by `syncVersions` |
+| JS | `EXPECTED_LIB_VERSION` in [`wrappers/js/src/index.js`](wrappers/js/src/index.js) | **no** — synchronized by `syncVersions` |
+| Go | `expectedLibVersion` in [`wrappers/go/ccl/ccl.go`](wrappers/go/ccl/ccl.go) | **no** — synchronized by `syncVersions` |
 
 (Only the base semver is compared, so a `-preview1`-style suffix on the release/tag doesn't matter.)
 
@@ -116,8 +122,8 @@ git push origin wrappers/go/v0.2.0
 
 Nobody pushes `v*` tags by hand — direct tag pushes are blocked by a repository ruleset. Instead:
 
-1. Open a PR that bumps `version` in `gradle.properties` (plus the lockstep constants in step 2
-   above, in the same PR).
+1. Open a PR that bumps `version` in `gradle.properties`, run `./gradlew syncVersions`, and commit
+   the synchronized wrapper files in the same PR.
 2. A **release code owner** (`@satran004`, `@matiwinnetou`, `@fabianbormann`) reviews and merges it
    to `main`. This is enforced by [`.github/CODEOWNERS`](.github/CODEOWNERS) + the `main` branch
    ruleset.
@@ -155,13 +161,10 @@ These enforce the flow and are configured in GitHub settings, not code:
 
 ## Release checklist
 
-1. [ ] Open a PR bumping `version` in `gradle.properties` — plus, in the same PR, the constants that
-       aren't stamped yet: `defaultLibVersion` + `expectedLibVersion` (Go), `version` +
-       `EXPECTED_LIB_VERSION` (Python), and `EXPECTED_LIB_VERSION` (JS). For Rust, run
-       `./wrappers/rust/scripts/set-crate-version.sh <version>` and commit `Cargo.toml` +
-       `Cargo.lock` — one command; `version_sync_test.rs` fails CI if it's skipped (the published
-       crate itself derives everything and needs no manual pin). Get it approved by a release code
-       owner and merge to `main`.
+1. [ ] Open a PR bumping `version` in `gradle.properties`, run `./gradlew syncVersions`, and commit
+       every resulting wrapper manifest, lockfile, and constant update. Confirm
+       `./gradlew checkVersions` passes, get the PR approved by a release code owner, and merge it
+       to `main`.
 2. [ ] Merge auto-creates `vX.Y.Z` → `release.yml` builds + uploads the 5 platform tarballs +
        `SHA256SUMS`; `publish-js.yml` and `publish-rust.yml` build, then wait on their approvals.
 3. [ ] Verify the release assets are named `cardano-client-lib-vX.Y.Z-<platform>.tar.gz`. **The Rust

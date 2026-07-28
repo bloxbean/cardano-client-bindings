@@ -8,6 +8,9 @@
 #   - the version-skew check's expected version — reads CARGO_PKG_VERSION;
 #   - the GitHub release tag build.rs fetches libccl from — derived as v<CARGO_PKG_VERSION>.
 #
+# This is the narrow publish-CI helper. For a checked-in release bump across every wrapper, edit
+# gradle.properties and run `./gradlew syncVersions` from the repository root.
+#
 # Usage: set-crate-version.sh <version>      e.g. set-crate-version.sh 0.1.0-pre4
 
 set -euo pipefail

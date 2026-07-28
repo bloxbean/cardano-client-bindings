@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// The Go wrapper is the only one that hand-maintains its version constants: the module is served
-// straight from git source, so there is no build step that could stamp them from gradle.properties
-// (Rust's build.rs does exactly that). Hand-maintained meant they rotted — defaultLibVersion sat at
+// The Go module is served straight from git source, so its consumer build has no step that can
+// derive constants from gradle.properties. The repository's `syncVersions` Gradle task writes the
+// committed values instead. Before that task existed they rotted — defaultLibVersion sat at
 // v0.1.0-preview1, the one release whose assets still used the old `ccl-bridge-*` names, so the
 // loader built a `cardano-client-lib-*` URL against it and every `go get` user got a bare HTTP 404.
 //
@@ -42,13 +42,14 @@ func TestVersionConstantsMatchGradle(t *testing.T) {
 	if want := "v" + version; defaultLibVersion != want {
 		t.Errorf("defaultLibVersion = %q, want %q (from gradle.properties version=%s).\n"+
 			"A stale pin makes the loader request a release asset that does not exist, so `go get` "+
-			"users get an HTTP 404 on first call. Bump it in lockstep with gradle.properties.",
+			"users get an HTTP 404 on first call. Run ./gradlew syncVersions from the repository root.",
 			defaultLibVersion, want, version)
 	}
 
 	// The skew check compares base semver, so expectedLibVersion drops any -pre/-rc suffix.
 	if want := baseVersion(version); expectedLibVersion != want {
-		t.Errorf("expectedLibVersion = %q, want %q (base semver of gradle.properties version=%s)",
+		t.Errorf("expectedLibVersion = %q, want %q (base semver of gradle.properties version=%s). "+
+			"Run ./gradlew syncVersions from the repository root.",
 			expectedLibVersion, want, version)
 	}
 }
