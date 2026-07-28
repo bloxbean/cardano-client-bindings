@@ -55,10 +55,15 @@ func TestVersionConstantsMatchGradle(t *testing.T) {
 }
 
 // TestReleaseAssetURLResolves is the test that would have caught the 404: it asks GitHub whether the
-// asset the loader will actually request exists. Network-dependent, so it is skipped under -short.
+// asset the loader will actually request exists. A version-bump PR necessarily runs before its tag
+// and assets exist, so normal branch/PR CI cannot make this assertion. release.yml opts in after the
+// GitHub Release has been published.
 func TestReleaseAssetURLResolves(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network test")
+	}
+	if os.Getenv("CCL_VERIFY_RELEASE_ASSET") != "1" {
+		t.Skip("release asset is verified after publishing; set CCL_VERIFY_RELEASE_ASSET=1 to run")
 	}
 	slug, err := platformSlug()
 	if err != nil {
@@ -72,7 +77,7 @@ func TestReleaseAssetURLResolves(t *testing.T) {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Skipf("no network: %v", err)
+		t.Fatalf("HEAD %s: %v", url, err)
 	}
 	defer resp.Body.Close()
 
