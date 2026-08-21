@@ -170,18 +170,20 @@ const features = [
         <a href="https://github.com/txpipe/pallas" class="text-[#5b8dd6] hover:text-[#a8c7f0]">pallas</a>,
         <a href="https://github.com/blinklabs-io/gouroboros" class="text-[#5b8dd6] hover:text-[#a8c7f0]">gOuroboros</a>,
         <a href="https://github.com/Salvionied/apollo" class="text-[#5b8dd6] hover:text-[#a8c7f0]">Apollo</a>, and more.
-        If one of them serves you well, use it. These bindings exist for a narrower reason: reusing
-        Cardano Client Lib's exact, well-tested semantics outside the JVM, identically in four languages —
-        and as a maintained fallback if a library you depend on goes quiet.
+        If one of them serves you well, use it. These bindings shine when it doesn't quite: when a
+        native library is missing a capability you need, or its API doesn't fit how you work, you get
+        Cardano Client Lib's exact, well-tested semantics — identically in four languages — without
+        leaving your stack. Being offline and stateless, they slot in <em>alongside</em> an existing
+        library for just the missing pieces.
       </p>
       <div class="grid gap-6 md:grid-cols-2">
         <div class="rounded-xl border border-white/10 p-5">
           <h3 class="mb-3 font-semibold text-white">Choose these bindings when…</h3>
           <ul class="list-disc space-y-2 pl-5 text-sm leading-relaxed text-[#a1a1aa]">
-            <li>you want <strong class="text-[#d4d4d8]">identical transaction-building behavior</strong> across several languages or services</li>
-            <li>you already use Cardano Client Lib on the JVM and want the same semantics elsewhere</li>
-            <li>you want offline TxPlan-YAML building backed by CCL's test suite and devnet-verified intent shapes</li>
-            <li>you want insurance against a native library becoming unmaintained</li>
+            <li>your native library is <strong class="text-[#d4d4d8]">missing functionality you need</strong> — e.g. Conway governance operations, offline Plutus costing, HD-wallet or DRep key derivation — use these bindings for just those pieces, alongside it</li>
+            <li>you're <strong class="text-[#d4d4d8]">not happy with an API</strong> and prefer CCL's model — declarative TxPlan YAML instead of imperative builders</li>
+            <li>you want <strong class="text-[#d4d4d8]">identical transaction-building behavior</strong> across several languages or services, or already use CCL on the JVM</li>
+            <li>you want offline building backed by CCL's test suite and devnet-verified intent shapes, and insurance against a library going unmaintained</li>
           </ul>
         </div>
         <div class="rounded-xl border border-white/10 p-5">

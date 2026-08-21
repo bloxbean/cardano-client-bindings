@@ -13,8 +13,10 @@ Cardano Client Lib is a mature, feature-rich Cardano SDK covering key derivation
 
 To be clear about what this is *not*: Cardano has excellent native libraries in all four of these languages — [pycardano](https://github.com/Python-Cardano/pycardano) (Python), [MeshJS](https://meshjs.dev) and [Lucid Evolution](https://github.com/Anastasia-Labs/lucid-evolution) (TypeScript), [pallas](https://github.com/txpipe/pallas) (Rust), [gOuroboros](https://github.com/blinklabs-io/gouroboros) and [Apollo](https://github.com/Salvionied/apollo) (Go), among others. If one of them serves your needs, use it — these bindings are not trying to replace them.
 
-The bindings exist for a narrower purpose:
+The bindings exist for the cases where a native library doesn't quite fit:
 
+- **Filling functionality gaps.** When your library is missing a capability — Conway-era governance operations, offline Plutus execution-unit costing, DRep/committee key derivation, HD wallets — the bindings give you CCL's full offline surface for exactly those pieces. Because they're offline and stateless, they slot in *alongside* your existing library; no rip-and-replace.
+- **A different API model.** If you're not happy with an imperative builder API, CCL's declarative [TxPlan YAML](../reference/txplan/) — describe the transaction, let the library select UTXOs, compute fees, and handle change — may fit you better.
 - **One behavior, four languages.** When the same transaction-building semantics must hold across polyglot services, a single core beats four independent implementations that can drift.
 - **CCL semantics outside the JVM.** Teams already using Cardano Client Lib get the same behavior — same test suite, same edge cases — in their non-JVM code.
 - **A maintained fallback.** Native libraries have occasionally gone unmaintained; these bindings ride on CCL's active maintenance.
