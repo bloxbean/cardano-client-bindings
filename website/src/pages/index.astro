@@ -1,0 +1,187 @@
+---
+import '../styles/landing.css';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const docs = (p: string) => `${base}${p}`;
+
+const languages = [
+  {
+    name: 'JavaScript',
+    sub: 'Bun FFI',
+    install: 'bun add @bloxbean/cardano-client-lib',
+    href: docs('/js/'),
+    code: `import { CclBridge, TESTNET } from '@bloxbean/cardano-client-lib';
+
+const bridge = new CclBridge();
+const account = bridge.account.create(TESTNET);
+const result = bridge.quicktx.build(yaml, utxos, params);
+const signed = bridge.account.signTx(mnemonic, TESTNET, 0, 0, result.tx_cbor);`,
+  },
+  {
+    name: 'Go',
+    sub: 'purego · no cgo',
+    install: 'go get github.com/bloxbean/cardano-client-bindings/wrappers/go',
+    href: docs('/go/'),
+    code: `bridge, _ := ccl.New()
+defer bridge.Close()
+
+account, _ := bridge.Account.Create(ccl.Testnet)
+result, _ := bridge.QuickTx.Build(yaml, utxos, params)
+signed, _ := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, result.TxCbor)`,
+  },
+  {
+    name: 'Rust',
+    sub: 'cardano-client-lib crate',
+    install: 'cargo add cardano-client-lib',
+    href: docs('/rust/'),
+    code: `let bridge = ccl::Bridge::new()?;
+
+let account = bridge.account().create(ccl::network::TESTNET)?;
+let result = bridge.quicktx().build(&yaml, &utxos, &params)?;
+let signed = bridge.account()
+    .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)?;`,
+  },
+  {
+    name: 'Python',
+    sub: 'ctypes',
+    install: 'pip install cardano-client-lib',
+    href: docs('/python/'),
+    code: `from ccl import CclLib, Network
+
+with CclLib() as lib:
+    account = lib.account.create(Network.TESTNET)
+    result = lib.quicktx.build(yaml, utxos, params)
+    signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], Network.TESTNET)`,
+  },
+];
+
+const features = [
+  {
+    title: 'No JVM at runtime',
+    body: 'Cardano Client Lib compiled to a native shared library with GraalVM native-image. Native startup, small footprint, a plain C ABI.',
+  },
+  {
+    title: 'Fully offline by design',
+    body: 'Key derivation, transaction building, signing, Plutus data — no network calls, no submission, no secrets in the library. You bring chain data; optional providers fetch it for you.',
+  },
+  {
+    title: 'One YAML transaction format',
+    body: "Describe payments, staking, governance, minting, and Plutus operations as TxPlan YAML — identical across all four languages, with a verified intent catalog.",
+  },
+  {
+    title: 'Offline Plutus costing',
+    body: 'The embedded Scalus UPLC evaluator computes execution units in-process. Override with explicit units or a remote evaluator when you want node-backed costing.',
+  },
+  {
+    title: 'Four first-class wrappers',
+    body: 'Python, Go, Rust, and JavaScript (Bun) are kept at strict parity — same API groups, same error codes, enforced by CI. No second-class language.',
+  },
+  {
+    title: 'AI-friendly from day one',
+    body: 'llms.txt, a full-docs dump, and an AI Starter Pack distilled for agents: point Claude Code or Cursor at one URL and generate correct code immediately.',
+  },
+];
+---
+
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cardano Client Bindings — CCL as a native library for Python, Go, Rust & JavaScript</title>
+  <meta name="description" content="Cardano Client Lib compiled to a native shared library. Offline Cardano key derivation, transaction building, signing, Plutus and governance — from Python, Go, Rust, and JavaScript. No JVM." />
+  <link rel="icon" type="image/svg+xml" href={`${base}/favicon.svg`} />
+</head>
+<body class="bg-[#0a0f1e] text-[#e4e4e7] font-[system-ui,sans-serif] antialiased">
+  <header class="border-b border-white/10">
+    <nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <a href={base + '/'} class="flex items-center gap-2 font-semibold text-white">
+        <img src={`${base}/favicon.svg`} alt="" class="h-7 w-7" />
+        Cardano Client Bindings
+      </a>
+      <div class="flex items-center gap-6 text-sm text-[#a1a1aa]">
+        <a href={docs('/overview/')} class="hover:text-white">Docs</a>
+        <a href={docs('/ai/')} class="hover:text-white">AI</a>
+        <a href="https://github.com/bloxbean/cardano-client-bindings" class="hover:text-white">GitHub</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="mx-auto max-w-6xl px-6 pb-16 pt-20 text-center sm:pt-28">
+      <p class="mb-4 text-sm font-medium uppercase tracking-widest text-[#5b8dd6]">Cardano Client Lib · native · offline</p>
+      <h1 class="mx-auto max-w-3xl text-4xl font-bold tracking-tight text-white sm:text-5xl">
+        One battle-tested Cardano SDK.<br />Four languages. No JVM.
+      </h1>
+      <p class="mx-auto mt-6 max-w-2xl text-lg text-[#a1a1aa]">
+        Cardano Client Lib compiled to a native shared library with GraalVM.
+        Offline key derivation, transaction building, signing, Plutus, and governance —
+        from Python, Go, Rust, and JavaScript.
+      </p>
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
+        <a href={docs('/getting-started/')} class="rounded-lg bg-[#2f6fce] px-5 py-2.5 font-medium text-white hover:bg-[#3d7edb]">Get started</a>
+        <a href={docs('/ai/starter-pack/')} class="rounded-lg border border-white/20 px-5 py-2.5 font-medium text-white hover:border-white/40">AI Starter Pack</a>
+      </div>
+    </section>
+
+    <!-- Language cards -->
+    <section class="mx-auto max-w-6xl px-6 py-16">
+      <h2 class="mb-2 text-center text-3xl font-bold text-white">Same semantics in every language</h2>
+      <p class="mx-auto mb-10 max-w-2xl text-center text-[#a1a1aa]">
+        Same API groups, same error codes, same TxPlan YAML — kept at parity and enforced by CI.
+      </p>
+      <div class="grid gap-6 md:grid-cols-2">
+        {languages.map((lang) => (
+          <div class="flex flex-col rounded-xl border border-white/10 bg-white/[0.03] p-5">
+            <div class="mb-3 flex items-baseline justify-between">
+              <a href={lang.href} class="text-lg font-semibold text-white hover:text-[#a8c7f0]">{lang.name}</a>
+              <span class="text-xs text-[#71717a]">{lang.sub}</span>
+            </div>
+            <code class="mb-3 block overflow-x-auto rounded-md bg-black/40 px-3 py-2 text-xs text-[#8fd18f]">{lang.install}</code>
+            <pre class="grow overflow-x-auto rounded-md bg-black/40 p-3 text-xs leading-relaxed text-[#d4d4d8]"><code>{lang.code}</code></pre>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section class="border-t border-white/10 bg-white/[0.02] py-16">
+      <div class="mx-auto max-w-6xl px-6">
+        <h2 class="mb-10 text-center text-3xl font-bold text-white">Why these bindings</h2>
+        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {features.map((f) => (
+            <div class="rounded-xl border border-white/10 p-5">
+              <h3 class="mb-2 font-semibold text-white">{f.title}</h3>
+              <p class="text-sm leading-relaxed text-[#a1a1aa]">{f.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- AI section -->
+    <section class="mx-auto max-w-4xl px-6 py-16 text-center">
+      <h2 class="text-3xl font-bold text-white">Bring your AI agent</h2>
+      <p class="mx-auto mt-4 max-w-2xl text-[#a1a1aa]">
+        The docsite ships <code class="text-[#a8c7f0]">llms.txt</code>, a full-docs dump, and a distilled
+        Starter Pack. One <code class="text-[#a8c7f0]">curl</code> and Claude Code, Cursor, or any agent
+        writes correct code against the bindings.
+      </p>
+      <pre class="mx-auto mt-6 max-w-2xl overflow-x-auto rounded-lg bg-black/40 p-4 text-left text-sm text-[#d4d4d8]"><code>curl -o CLAUDE.md https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack.md</code></pre>
+      <a href={docs('/ai/')} class="mt-6 inline-block text-[#5b8dd6] hover:text-[#a8c7f0]">Set up your tool →</a>
+    </section>
+  </main>
+
+  <footer class="border-t border-white/10 py-8">
+    <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 text-sm text-[#71717a]">
+      <span>© {new Date().getFullYear()} BloxBean — Apache-2.0</span>
+      <div class="flex gap-5">
+        <a href={docs('/overview/')} class="hover:text-white">Documentation</a>
+        <a href={docs('/reference/txplan/')} class="hover:text-white">TxPlan</a>
+        <a href="https://github.com/bloxbean/cardano-client-lib" class="hover:text-white">Cardano Client Lib</a>
+        <a href="https://github.com/bloxbean/cardano-client-bindings" class="hover:text-white">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

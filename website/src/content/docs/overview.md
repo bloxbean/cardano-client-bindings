@@ -1,0 +1,50 @@
+---
+title: Overview
+description: Cardano Client Lib as a native shared library, callable from Python, Go, Rust, and JavaScript — no JVM required.
+---
+
+Cardano Client Bindings compiles [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib) into a native shared library (`libccl.so` / `libccl.dylib` / `libccl.dll`) using GraalVM native-image. Any language can call CCL's offline Cardano operations via FFI — **no JVM required at runtime**.
+
+## Why?
+
+Cardano Client Lib is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. Other ecosystems rely on their own native implementations, which vary in completeness and can stop being maintained abruptly. Cardano Client Bindings makes selected CCL modules available as a **native shared library with a C ABI**, so Python, Go, Rust, and JavaScript reuse CCL's exact, well-tested behavior — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
+
+## What's included
+
+The bindings expose CCL's **offline/local** operations:
+
+| Area | Operations |
+|---|---|
+| **Account** | Create accounts, derive keys, export public/private keys, sign transactions |
+| **Address** | Parse, validate, convert between bech32 and bytes |
+| **Crypto** | Blake2b hashing, mnemonic generation/validation, Ed25519 sign/verify |
+| **Transaction** | Serialize, deserialize, hash, sign transactions |
+| **Plutus** | PlutusData CBOR/JSON conversion, datum hashing |
+| **Script** | Native script parsing, script hashing |
+| **Governance** | DRep, committee cold/hot key derivation |
+| **HD Wallet** | Create wallets, derive addresses |
+| **QuickTx** | [TxPlan YAML](../reference/txplan/)-driven offline transaction builder: payments, staking, governance, Plutus scripts, multi-party compose |
+
+Backend/HTTP modules (Blockfrost, Koios, Ogmios) are **intentionally excluded** from the native library — every language has good HTTP clients, and each wrapper ships optional [provider helpers](../reference/limitations/#offline-by-design) instead.
+
+## The four wrappers
+
+All four wrappers are first-class and kept at strict parity — same API groups, same error codes, same TxPlan format — differing only in language idiom:
+
+| Language | Guide | Package |
+|---|---|---|
+| JavaScript (Bun) | [docs](../js/) | `@bloxbean/cardano-client-lib` (npm) |
+| Go | [docs](../go/) | `github.com/bloxbean/cardano-client-bindings/wrappers/go` |
+| Rust | [docs](../rust/) | `cardano-client-lib` (crate, imported as `ccl`) |
+| Python | [docs](../python/) | `cardano-client-lib` (PyPI, imported as `ccl`) |
+
+## How big is it?
+
+The native library is a **~50–60 MB** platform-specific binary (the embedded [Scalus](https://scalus.org) UPLC evaluator for offline Plutus costing accounts for ~12 MB of that). Wrapper packages that bundle it (Python wheels, npm platform packages) are correspondingly large; Go and Rust fetch it once and cache it. See [Platforms & Packages](../reference/platforms/) for the full story, and [Caveats & Limitations](../reference/limitations/) before relying on specific functions.
+
+## Where to next
+
+- [Getting Started](../getting-started/) — install and run a first example in your language
+- [AI Agents](../ai/) — point Claude Code, Cursor, or any agent at the AI Starter Pack
+- [TxPlan (YAML) reference](../reference/txplan/) — the transaction format shared by all wrappers
+- [Architecture](../reference/architecture/) — the ADRs behind the design
