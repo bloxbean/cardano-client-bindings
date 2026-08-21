@@ -12,7 +12,8 @@ The whole interface is YAML: **TxPlan YAML in → YAML result out**.
 - **Single function**: `ccl_quicktx_build(thread, yaml, utxos_json, protocol_params_json, exec_units_json)` → returns `0` on success.
 - **Result**: a YAML document with `tx_cbor` (unsigned transaction), `tx_hash`, and `fee`.
 - **Fully offline**: the caller supplies UTXOs and protocol parameters — the native library makes no
-  HTTP calls and never submits. (There is no provider mode; fetching chain data is the caller's job.)
+  HTTP calls and never submits. (The native entry point has no provider mode; each wrapper offers a
+  `build_with` convenience that fetches the chain data from a [wrapper-side provider](adr/0011-wrapper-side-chain-data-providers.md) first.)
 - **Client-side chain data**: UTXOs and protocol parameters are passed as JSON (the standard CCL
   `Utxo` / `ProtocolParams` models).
 
@@ -24,7 +25,7 @@ int ccl_quicktx_build(
     const char* yaml,                  // TxPlan YAML
     const char* utxos_json,            // JSON array of UTXOs
     const char* protocol_params_json,  // JSON protocol parameters
-    const char* exec_units_json        // JSON [{mem, steps}] per redeemer, or null (Plutus only)
+    const char* exec_units_json        // JSON [{mem, steps}] per redeemer, or null (Plutus only; null = compute offline with the embedded Scalus evaluator)
 );
 ```
 
@@ -101,15 +102,16 @@ Each intent has a `type` discriminator. The full set supported by CCL's TxPlan:
 
 > The exact YAML fields for each intent come from CCL's TxPlan serialization. This bridge passes the
 > YAML through unchanged, so the authoritative field reference is the CCL `quicktx` module
-> (`intent/*Intent.java` and the `TxMetadataSerializationTest` / TxPlan tests at `v0.8.0-pre4`).
-> Verified `payment` and `metadata` shapes are shown below.
+> (`intent/*Intent.java` and the TxPlan tests at `v0.8.0-pre4`). Known-good shapes for every intent
+> are cataloged in [Intent catalog — verified shapes](#intent-catalog--verified-shapes) below.
 
-> **Plutus script transactions** build offline when you pass the redeemers' **execution units** in
-> `exec_units_json` — a JSON array of `[{mem, steps}]`, one per redeemer in transaction order. The
-> bridge wires CCL's `StaticTransactionEvaluator` to stamp them on; it never runs the script. You
-> compute the units with any UPLC evaluator (Ogmios, Blockfrost, Aiken, Scalus) and pass them in,
-> exactly as you pass UTXOs and protocol parameters. A script transaction built with no execution
-> units fails with `-10` (no offline evaluator runs the script).
+> **Plutus script transactions** build fully offline with no extra input: when `exec_units_json` is
+> null, the native library computes the redeemers' **execution units** itself with the embedded
+> [Scalus](https://scalus.org) UPLC evaluator (see [ADR-0013](adr/0013-transaction-evaluators.md)).
+> To supply your own units instead — from Ogmios, Blockfrost, Aiken, or any other evaluator — pass
+> `exec_units_json`, a JSON array of `[{mem, steps}]`, one per redeemer in transaction order; the
+> bridge then wires CCL's `StaticTransactionEvaluator` to stamp them on without running the script.
+> Explicit units always take precedence over the Scalus default.
 
 ---
 
@@ -218,8 +220,9 @@ transaction:
 
 ### 5. Plutus mint (with caller-supplied execution units)
 
-A script intent goes under `scripts:` (the validator) with the operation in `intents:`. Pass the
-redeemer's execution units alongside — the bridge does not run the script.
+A script intent goes under `scripts:` (the validator) with the operation in `intents:`. Execution
+units are optional — omitted, the embedded Scalus evaluator computes them offline; this example
+supplies them explicitly, in which case the bridge stamps them on without running the script.
 
 ```yaml
 version: 1.0
@@ -243,7 +246,7 @@ transaction:
 ```
 
 …built with `exec_units_json = [{"mem": 2000000, "steps": 500000000}]` (one entry for the single
-mint redeemer).
+mint redeemer), or with `exec_units_json = null` to let Scalus compute the units.
 
 ### 6. Compose (multiple senders into one transaction)
 
@@ -495,10 +498,12 @@ Mint under a Plutus policy (`script_minting`, shown in [example 5](#5-plutus-min
 
 ## Using it from the wrappers
 
-Each wrapper exposes a thin `build(yaml, utxos, protocolParams)` that marshals the chain data to JSON,
-calls `ccl_quicktx_build`, and parses the YAML result. The result is an object/dict/struct with
-`tx_cbor`, `tx_hash`, and `fee`. `ccl_quicktx_build` returns an **unsigned** transaction — sign
-`tx_cbor` with the account sign API, then submit it yourself.
+Each wrapper exposes a thin `build(yaml, utxos, protocolParams, execUnits?)` that marshals the chain
+data to JSON, calls `ccl_quicktx_build`, and parses the YAML result — plus a `build_with(yaml,
+provider, sender, evaluator?)` convenience that fetches the chain data from a provider first (see
+each wrapper's providers guide). The result is an object/dict/struct with `tx_cbor`, `tx_hash`, and
+`fee`. Both return an **unsigned** transaction — sign `tx_cbor` with the account sign API, then
+submit it yourself.
 
 > **Signing stake/governance transactions.** `sign_tx` adds only the **payment** key. Certificates
 > in stake registration/deregistration/delegation, reward withdrawal, and DRep/vote operations must
