@@ -7,7 +7,19 @@ Cardano Client Bindings compiles [Cardano Client Lib (CCL)](https://github.com/b
 
 ## Why?
 
-Cardano Client Lib is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. Other ecosystems rely on their own native implementations, which vary in completeness and can stop being maintained abruptly. Cardano Client Bindings makes selected CCL modules available as a **native shared library with a C ABI**, so Python, Go, Rust, and JavaScript reuse CCL's exact, well-tested behavior — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
+Cardano Client Lib is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. Cardano Client Bindings makes selected CCL modules available as a **native shared library with a C ABI**, so Python, Go, Rust, and JavaScript reuse CCL's exact, well-tested behavior — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
+
+## Where this fits in the ecosystem
+
+To be clear about what this is *not*: Cardano has excellent native libraries in all four of these languages — [pycardano](https://github.com/Python-Cardano/pycardano) (Python), [MeshJS](https://meshjs.dev) and [Lucid Evolution](https://github.com/Anastasia-Labs/lucid-evolution) (TypeScript), [pallas](https://github.com/txpipe/pallas) (Rust), [gOuroboros](https://github.com/blinklabs-io/gouroboros) and [Apollo](https://github.com/Salvionied/apollo) (Go), among others. If one of them serves your needs, use it — these bindings are not trying to replace them.
+
+The bindings exist for a narrower purpose:
+
+- **One behavior, four languages.** When the same transaction-building semantics must hold across polyglot services, a single core beats four independent implementations that can drift.
+- **CCL semantics outside the JVM.** Teams already using Cardano Client Lib get the same behavior — same test suite, same edge cases — in their non-JVM code.
+- **A maintained fallback.** Native libraries have occasionally gone unmaintained; these bindings ride on CCL's active maintenance.
+
+The honest costs of this approach: a ~50 MB platform-specific native binary in your dependency tree, no node-protocol/chain-sync support (offline operations only, by design), and [platform gaps](../reference/platforms/) a pure-language library wouldn't have.
 
 ## What's included
 
