@@ -17,7 +17,8 @@ undo them.
 ## Status legend
 
 `Proposed` → under discussion · `Accepted` → in effect · `Superseded` → replaced by a later ADR ·
-`Deprecated` → no longer relevant.
+`Deprecated` → no longer relevant · `Withdrawn` → removed as not an architectural decision (number
+stays reserved).
 
 ## Index
 
@@ -31,6 +32,7 @@ undo them.
 | [0006](0006-txplan-yaml-transaction-format.md) | TxPlan (YAML) transaction format, replacing the bespoke JSON spec | Accepted | 2026-06-11 |
 | [0007](0007-caller-supplied-plutus-exec-units.md) | Plutus execution units are caller-supplied; evaluator-agnostic | Accepted | 2026-06-11 |
 | [0008](0008-linux-glibc-baseline-portability.md) | Linux portability — glibc-baseline build + `-march=compatibility` (not static) | Accepted | 2026-06-25 |
+| 0009 | *Withdrawn* — branch & release process; a workflow, not an architectural decision (see [RELEASING.md](../../RELEASING.md)). The number stays reserved rather than renumbering. | Withdrawn | — |
 | [0010](0010-go-isolate-thread-affinity.md) | Go wrapper isolate thread-affinity — all FFI on one dedicated OS thread | Accepted | 2026-06-10 |
 | [0011](0011-wrapper-side-chain-data-providers.md) | Wrapper-side chain-data provider helpers (UTxOs + protocol params) | Accepted | 2026-06-30 |
 | [0012](0012-native-lib-bundled-in-wrapper-packages.md) | Distribute the native library bundled in per-wrapper platform packages | Accepted | 2026-07-01 |

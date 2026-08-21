@@ -26,8 +26,10 @@ using each language's own HTTP client — never inside `libccl`.
 - Submission/broadcast is the caller's responsibility, with their own client.
 - Callers must obtain UTxOs / params / exec units themselves — friction, mitigated by wrapper-side
   helpers: chain-data providers (UTxOs + protocol params) are **implemented** in all four wrappers
-  ([ADR-0011](0011-wrapper-side-chain-data-providers.md)); exec-unit evaluators are still planned
-  (TODO §2b). The native lib remains untouched.
+  ([ADR-0011](0011-wrapper-side-chain-data-providers.md)), and exec-unit evaluators are too — an
+  offline Scalus default in the core plus pluggable remote evaluators in the wrappers
+  ([ADR-0013](0013-transaction-evaluators.md)). The native lib remains offline: Scalus runs
+  in-process, and the remote path lives wrapper-side.
 - No lazy fetching; integration tests pass static data in.
 
 ## Alternatives considered
