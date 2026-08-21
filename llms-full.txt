@@ -1,0 +1,4024 @@
+# Cardano Client Bindings — full documentation
+
+> Generated from the docsite. One file, all pages, for AI ingestion.
+
+
+---
+
+# Using Cardano Client Bindings with AI Agents
+
+Source: https://bloxbean.github.io/cardano-client-bindings/ai/
+
+Cardano Client Bindings is designed to be **AI-friendly**: the API surface is small and identical across all four languages, transactions are plain YAML, and everything an agent needs fits in one document. Point your AI tool at the artifacts below and it can write correct code against the bindings without any training data about them.
+
+## TL;DR
+
+Point your AI agent at the **[AI Starter Pack](../starter-pack/)** or the full docs dump:
+
+| File | When to use it |
+|---|---|
+| **[`/ai/starter-pack.md`](../starter-pack/)** | The single highest-leverage artifact. Distills the offline contract, the API groups, TxPlan YAML with the intent catalog, error codes, signing roles, and the known limitations agents trip over. |
+| **[`/llms.txt`](https://bloxbean.github.io/cardano-client-bindings/llms.txt)** | Curated index of this docsite, following [llmstxt.org](https://llmstxt.org/). Small, agent-friendly. |
+| **[`/llms-full.txt`](https://bloxbean.github.io/cardano-client-bindings/llms-full.txt)** | The full docsite concatenated as a single markdown file, for full-coverage ingestion. |
+
+## Per-tool setup
+
+### Claude Code (CLI)
+
+Drop the starter pack into your project as `CLAUDE.md` (or append it to an existing one):
+
+```bash
+curl -o CLAUDE.md https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack.md
+```
+
+Claude Code reads `CLAUDE.md` at the start of every session, so the agent always has the bindings' contract in context. For multi-project setups, reference the hosted version from your global `~/.claude/CLAUDE.md`:
+
+```markdown
+When working with cardano-client-lib bindings (Python/Go/Rust/JS `ccl` packages),
+follow https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack/
+```
+
+### Cursor
+
+Add a project rule:
+
+```bash
+mkdir -p .cursor/rules
+curl -o .cursor/rules/ccl-bindings.mdc https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack.md
+```
+
+### Continue (VS Code / JetBrains)
+
+Add a URL context provider in `.continue/config.json`:
+
+```json
+{
+  "contextProviders": [
+    { "name": "url", "params": { "url": "https://bloxbean.github.io/cardano-client-bindings/llms-full.txt" } }
+  ]
+}
+```
+
+### ChatGPT / Claude.ai / other chat UIs
+
+Paste the starter pack (or attach it as a file) at the start of the conversation, then ask for what you need — e.g. *"Using cardano-client-lib for Python as described above, build and sign a stake-delegation transaction."*
+
+## What agents get wrong without context
+
+These are the failure modes the starter pack exists to prevent:
+
+1. **Inventing an online API** — the library never fetches or submits; chain data is an input, submission is your job.
+2. **Calling the broken functions** — `tx.from_json`, `tx.sign_with_secret_key`, and `plutus.data_to_json`/`data_from_json` fail in the current release (GraalVM reflection gaps).
+3. **Signing with the wrong keys** — certificates need `sign_tx_with_keys` with explicit roles, or the node rejects the transaction.
+4. **Confusing `Network` values with on-chain network ids** — they're inverted for mainnet.
+5. **Guessing TxPlan field names** — the intent catalog in the starter pack has the verified YAML shapes.
+6. **Using Node.js for the JS wrapper** — it's Bun-only.
+
+
+---
+
+# Cardano Client Bindings — AI Starter Pack
+
+Source: https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack/
+
+> **Read this entire document before generating code that uses these bindings.** It distills the offline contract, the API surface, the TxPlan YAML transaction format, error codes, signing rules, and the known limitations that AI agents most commonly get wrong. This pack is optimized for AI ingestion; the human-friendly guides are on the docsite.
+
+## 1. What this is
+
+Cardano Client Bindings compiles the Java [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib) into a native shared library (`libccl`) via GraalVM native-image, with four wrappers exposing the same functionality:
+
+| Language | Package | Entry object | Naming |
+|---|---|---|---|
+| Python ≥ 3.8 | `pip install cardano-client-lib`, `from ccl import CclLib` | `CclLib()` | `snake_case` |
+| Go ≥ 1.21 | `go get github.com/bloxbean/cardano-client-bindings/wrappers/go` | `ccl.New()` → `Bridge` | `PascalCase` |
+| Rust ≥ 1.70 | crate `cardano-client-lib` (import as `ccl`) | `ccl::Bridge::new()` | `snake_case`, methods return `Result` |
+| JavaScript | `bun add @bloxbean/cardano-client-lib` — **Bun only, never Node.js** | `new CclBridge()` | `camelCase` |
+
+All four have the same nine API groups — `account`, `address`, `crypto`, `tx`, `plutus`, `script`, `gov`, `wallet`, `quicktx` — the same error codes, and the same TxPlan YAML format. Semantics are identical; only naming idiom differs.
+
+## 2. The offline contract (never violate this)
+
+- The library makes **no network calls** and **never submits transactions**. Do not invent fetch/submit methods on it.
+- Chain data (UTXOs, protocol parameters) is an **input** you pass to `quicktx.build`. Optional wrapper-side `Provider` objects (YaciProvider, BlockfrostProvider) fetch it for `quicktx.build_with` — those are plain HTTP helpers in the wrapper, not the native library.
+- Submission: POST the signed CBOR hex (as bytes) to any Blockfrost-compatible `/tx/submit` with `Content-Type: application/cbor`, using the language's own HTTP client.
+- Keys/mnemonics are inputs to each call; the library holds no state between calls beyond the loaded isolate.
+
+## 3. Core workflow (build → sign → submit)
+
+```python
+from ccl import CclLib, Network, YaciProvider
+
+with CclLib() as lib:                                # context manager; or lib.close()
+    account = lib.account.create(Network.TESTNET)    # {"mnemonic","base_address","enterprise_address","stake_address"}
+    provider = YaciProvider()                        # or BlockfrostProvider(project_id, network="preprod")
+
+    yaml = f"""
+    version: 1.0
+    transaction:
+      - tx:
+          from: {account["base_address"]}
+          intents:
+            - type: payment
+              address: addr_test1qz...
+              amounts:
+                - unit: lovelace
+                  quantity: "5000000"
+    """
+    result = lib.quicktx.build_with(yaml, provider, account["base_address"])
+    # or fully offline: lib.quicktx.build(yaml, utxos, protocol_params, exec_units=None)
+    # result = {"tx_cbor": str, "tx_hash": str, "fee": str}
+
+    signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
+    # submit `signed` yourself (bytes.fromhex → POST /tx/submit)
+```
+
+Go: `bridge.QuickTx.Build(yaml, utxos, params)` / `bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, txCbor)`.
+JS: `bridge.quicktx.build(yaml, utxos, params)` / `bridge.account.signTx(mnemonic, TESTNET, 0, 0, txCbor)`.
+Rust: `bridge.quicktx().build(&yaml, &utxos, &params)?` / `bridge.account().sign_tx(&mnemonic, TESTNET, 0, 0, &tx_cbor)?`.
+
+**Argument-order gotcha:** Python's `sign_tx(mnemonic, tx_cbor, network, ...)` puts the transaction *before* the network; Go/JS/Rust use `(mnemonic, network, account_index, address_index, tx_cbor)`.
+
+## 4. Networks
+
+`MAINNET = 0`, `TESTNET = 1`, `PREPROD = 2`, `PREVIEW = 3`. Required for every key-deriving call; validated before the FFI call.
+
+**These are CCL enum ordinals, NOT on-chain network ids** — inverted for mainnet: `Network.MAINNET == 0` but a mainnet address's on-chain `network_id` is `1`. Never feed `address.info()["network_id"]` into a `network` parameter.
+
+## 5. Chain-data shapes
+
+UTXOs (list; quantities are **strings**):
+
+```json
+[{ "tx_hash": "…64hex", "output_index": 0, "address": "addr_test1…",
+   "amount": [ { "unit": "lovelace", "quantity": "100000000" },
+               { "unit": "<policyIdHex><assetNameHex>", "quantity": "500" } ] }]
+```
+
+Protocol parameters: the standard Blockfrost-style object (`min_fee_a`, `min_fee_b`, `max_tx_size`, `key_deposit`, `pool_deposit`, `coins_per_utxo_size`, `price_mem`, `price_step`, `collateral_percent`, cost models, …). Unknown fields are ignored. Keep quantities as strings end-to-end (JS: avoid parsing them into `number`).
+
+## 6. TxPlan YAML — transaction format
+
+One format for all wrappers. Skeleton:
+
+```yaml
+version: 1.0
+variables:            # optional ${name} substitution
+  to: addr_test1...
+context:              # optional; for multi-sender compose
+  fee_payer: addr_test1...
+transaction:
+  - tx:
+      from: addr_test1...        # sender / default fee payer
+      intents:
+        - type: payment
+          address: ${to}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+      # inputs:  — collect_from / reference_input / script_collect_from
+      # scripts: — native_script / validator
+```
+
+Verified intent shapes (field names matter — do not guess):
+
+```yaml
+# Staking (sign with payment+stake)
+- type: stake_registration
+  stake_address: stake_test1uq...
+- type: stake_deregistration
+  stake_address: stake_test1uq...
+  refund_address: addr_test1qz...
+- type: stake_delegation
+  stake_address: stake_test1uq...
+  pool_id: pool1...
+- type: stake_withdrawal
+  reward_address: stake_test1uq...
+  amount: 0                        # full balance must be withdrawn; 0 when empty
+
+# DRep lifecycle (sign with payment+drep); credential = gov API verification_key_hash
+- type: drep_registration          # drep_update identical; drep_deregistration drops anchors
+  drep_credential_hex: <56hex>
+  drep_credential_type: key_hash
+  anchor_url: https://example.com/meta.json
+  anchor_hash: <64hex>
+
+# Voting
+- type: voting_delegation          # sign payment+stake
+  address: stake_test1uq...
+  drep_hex: "8102"                 # serialized DRep
+  drep_type: abstain               # abstain | no_confidence | key DRep
+- type: governance_proposal        # sign payment
+  gov_action_hex: "8106"           # serialized GovAction (8106 = info)
+  return_address: stake_test1uq...
+  anchor_url: ...
+  anchor_hash: <64hex>
+- type: voting                     # sign payment+drep
+  voter_hex: 8202581c<28bytehex>   # serialized Voter
+  gov_action_tx_hash: <64hex>
+  gov_action_index: 0
+  vote: "YES"                      # YES | NO | ABSTAIN
+
+# Native-script mint (sign payment; plus policy key if sig-keyed)
+- type: minting
+  assets: [{ name: TestNFT, value: 1 }]   # negative value burns
+  receiver: addr_test1vz...
+  script_hex: "820180"
+  script_type: 0
+
+# Metadata (value is a JSON string; labels are top-level keys)
+- type: metadata
+  metadata: '{"674": {"msg": "hello"}}'
+
+# Treasury donation
+- type: donation
+  current_treasury_value: 0
+  donation_amount: 1000000
+
+# Explicit inputs (under `inputs:`, beside `intents:`)
+- type: collect_from
+  utxo_refs: [{ tx_hash: <64hex>, output_index: 0 }]
+- type: reference_input
+  refs: [{ tx_hash: <64hex>, output_index: 0 }]
+
+# Plutus spend (inputs + validator under scripts:)
+inputs:
+  - type: script_collect_from
+    utxo_refs: [{ tx_hash: <64hex>, output_index: 0 }]
+    redeemer: { int: 0 }           # PlutusData in JSON form
+    datum: { int: 42 }             # must hash to the locked output's datum_hash
+scripts:
+  - type: validator
+    role: spend                    # or: mint (with script_minting intent + policyId)
+    cbor_hex: <script cbor>
+    version: v2
+```
+
+Multiple `- tx:` entries compose into one transaction (set `context.fee_payer`; supply UTXOs for every sender).
+
+**Plutus execution units:** omit them — the embedded Scalus evaluator computes them offline. Supply `exec_units=[{"mem": …, "steps": …}]` (one per redeemer, transaction order) only to override, or pass a remote `Evaluator` for node-backed costing. For a script spend, supply the locked UTXO (with its `data_hash`) plus a separate UTXO for fee/collateral.
+
+## 7. Signing rules (agents get this wrong most)
+
+`sign_tx` adds the **payment key witness only**. Certificates need more, via `sign_tx_with_keys(mnemonic, tx_cbor, keys, network)` (Python order) with roles in order:
+
+| Transaction contains | keys |
+|---|---|
+| payment / metadata / minting / Plutus ops | `["payment"]` |
+| stake_registration / deregistration / delegation / withdrawal / voting_delegation | `["payment", "stake"]` |
+| drep_registration / drep_update / drep_deregistration / voting | `["payment", "drep"]` |
+| governance_proposal | `["payment"]` |
+| pool operations (keyed to the account's stake key) | `["payment", "stake"]` |
+
+Missing witness ⇒ node rejects with `MissingVKeyWitnessesUTXOW`. Available roles: `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`.
+
+## 8. API groups (complete surface)
+
+- **account**: `create(network)`, `from_mnemonic(mnemonic, network, account_index=0, address_index=0)` → `{mnemonic, base_address, enterprise_address, stake_address}`; `get_private_key` (128-hex extended key — first 64 hex chars are the raw Ed25519 key for `crypto.sign`), `get_public_key`, `get_drep_id`, `sign_tx`, `sign_tx_with_keys`.
+- **address**: `info(bech32)` → `{type, network_id, payment_credential_hash, …}`; `validate` (bool, never raises), `to_bytes`, `from_bytes`.
+- **crypto**: `blake2b_256(hex)`, `blake2b_224(hex)`, `generate_mnemonic(word_count=24)`, `validate_mnemonic`, `sign(message_hex, sk_hex)` (32-byte key), `verify`.
+- **tx**: `hash(tx_cbor)`, `to_json`, `deserialize`. ⚠️ `from_json` and `sign_with_secret_key` are **broken in the current release** — use `account.sign_tx`.
+- **plutus**: `data_hash(cbor_hex)`. ⚠️ `data_to_json` / `data_from_json` are **broken in the current release** — keep PlutusData as CBOR hex.
+- **script**: `native_from_json(json)` → `{policy_id, script_hash, cbor_hex}`; `hash(cbor_hex, script_type)` (0=native, 1..3=PlutusV1..V3).
+- **gov**: `drep_key_from_mnemonic` → `{drep_id, verification_key, verification_key_hash}`; `committee_cold_key_from_mnemonic`, `committee_hot_key_from_mnemonic`.
+- **wallet**: `create(network)`, `from_mnemonic`, `get_address(mnemonic, network, index)` — HD wallet, sequential addresses.
+- **quicktx**: `build(yaml, utxos, protocol_params, exec_units=None)`, `build_with(yaml, provider, sender, evaluator=None)` → `{tx_cbor, tx_hash, fee}` (unsigned).
+
+## 9. Errors
+
+Native errors carry a code (Python raises `CclError` with `.code`/`.message`; Go/Rust return errors; JS throws):
+
+| Code | Meaning | Typical fix |
+|---|---|---|
+| -1 | general | — |
+| -2 | invalid argument | check required inputs |
+| -3 | serialization | malformed CBOR/JSON |
+| -4 | crypto failure | check key material |
+| -5 | invalid network | use enum 0–3 |
+| -6 | invalid mnemonic | validate first |
+| -7 | invalid address | |
+| -8 | insufficient funds | UTXOs can't cover outputs + fee |
+| -9 | invalid transaction | |
+| -10 | tx build failure | malformed TxPlan — check intent field names against §6 |
+
+Predicates (`validate`, `validate_mnemonic`, `verify`) return false instead of raising. Calling after `close()` raises a catchable closed-error (never reuse a closed instance).
+
+## 10. Hard limitations — do not fight these
+
+1. **No networking in the library.** Never generate code expecting `lib.submit(...)` or `lib.fetch_utxos(...)` on the core API.
+2. **Broken functions** (GraalVM reflection gaps, all languages): `tx.from_json`, `tx.sign_with_secret_key`, `plutus.data_to_json`, `plutus.data_from_json`.
+3. **JS = Bun only.** Never scaffold the JS wrapper with Node.js/`npm run` — use `bun`.
+4. **Go calls are serialized** per `Bridge` (one OS thread owns the isolate). For parallelism use multiple `Bridge` instances.
+5. **Version lock**: wrapper and native lib must match base semver; local dev uses `CCL_LIB_PATH` to point at a built library.
+6. **Pre-1.0** against CCL `0.8.0-pre4` — APIs may change.
+7. **Platforms**: no macOS Intel, no Windows ARM64; Alpine Python is source-install for now.
+
+## 11. Doc links (for deeper retrieval)
+
+- Full docsite dump: `/llms-full.txt` · Index: `/llms.txt`
+- TxPlan reference with the complete verified intent catalog: `/reference/txplan/`
+- Per-language API references: `/python/api/`, `/go/api/`, `/rust/api/`, `/js/api/`
+- Caveats: `/reference/limitations/` · Platform matrix: `/reference/platforms/`
+
+
+---
+
+# Overview
+
+Source: https://bloxbean.github.io/cardano-client-bindings/overview/
+
+Cardano Client Bindings compiles [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib) into a native shared library (`libccl.so` / `libccl.dylib` / `libccl.dll`) using GraalVM native-image. Any language can call CCL's offline Cardano operations via FFI — **no JVM required at runtime**.
+
+## Why?
+
+Cardano Client Lib is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. Cardano Client Bindings makes selected CCL modules available as a **native shared library with a C ABI**, so Python, Go, Rust, and JavaScript reuse CCL's exact, well-tested behavior — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
+
+## Where this fits in the ecosystem
+
+To be clear about what this is *not*: Cardano has excellent native libraries in all four of these languages — [pycardano](https://github.com/Python-Cardano/pycardano) (Python), [MeshJS](https://meshjs.dev) and [Lucid Evolution](https://github.com/Anastasia-Labs/lucid-evolution) (TypeScript), [pallas](https://github.com/txpipe/pallas) (Rust), [gOuroboros](https://github.com/blinklabs-io/gouroboros) and [Apollo](https://github.com/Salvionied/apollo) (Go), among others. If one of them serves your needs, use it — these bindings are not trying to replace them.
+
+The bindings exist for the cases where a native library doesn't quite fit:
+
+- **Filling functionality gaps.** When your library is missing a capability — Conway-era governance operations, offline Plutus execution-unit costing, DRep/committee key derivation, HD wallets — the bindings give you CCL's full offline surface for exactly those pieces. Because they're offline and stateless, they slot in *alongside* your existing library; no rip-and-replace.
+- **A different API model.** If you're not happy with an imperative builder API, CCL's declarative [TxPlan YAML](../reference/txplan/) — describe the transaction, let the library select UTXOs, compute fees, and handle change — may fit you better.
+- **One behavior, four languages.** When the same transaction-building semantics must hold across polyglot services, a single core beats four independent implementations that can drift.
+- **CCL semantics outside the JVM.** Teams already using Cardano Client Lib get the same behavior — same test suite, same edge cases — in their non-JVM code.
+- **A maintained fallback.** Native libraries have occasionally gone unmaintained; these bindings ride on CCL's active maintenance.
+
+The honest costs of this approach: a ~50 MB platform-specific native binary in your dependency tree, no node-protocol/chain-sync support (offline operations only, by design), and [platform gaps](../reference/platforms/) a pure-language library wouldn't have.
+
+## What's included
+
+The bindings expose CCL's **offline/local** operations:
+
+| Area | Operations |
+|---|---|
+| **Account** | Create accounts, derive keys, export public/private keys, sign transactions |
+| **Address** | Parse, validate, convert between bech32 and bytes |
+| **Crypto** | Blake2b hashing, mnemonic generation/validation, Ed25519 sign/verify |
+| **Transaction** | Serialize, deserialize, hash, sign transactions |
+| **Plutus** | PlutusData CBOR/JSON conversion, datum hashing |
+| **Script** | Native script parsing, script hashing |
+| **Governance** | DRep, committee cold/hot key derivation |
+| **HD Wallet** | Create wallets, derive addresses |
+| **QuickTx** | [TxPlan YAML](../reference/txplan/)-driven offline transaction builder: payments, staking, governance, Plutus scripts, multi-party compose |
+
+Backend/HTTP modules (Blockfrost, Koios, Ogmios) are **intentionally excluded** from the native library — every language has good HTTP clients, and each wrapper ships optional [provider helpers](../reference/limitations/#offline-by-design) instead.
+
+## The four wrappers
+
+All four wrappers are first-class and kept at strict parity — same API groups, same error codes, same TxPlan format — differing only in language idiom:
+
+| Language | Guide | Package |
+|---|---|---|
+| JavaScript (Bun) | [docs](../js/) | `@bloxbean/cardano-client-lib` (npm) |
+| Go | [docs](../go/) | `github.com/bloxbean/cardano-client-bindings/wrappers/go` |
+| Rust | [docs](../rust/) | `cardano-client-lib` (crate, imported as `ccl`) |
+| Python | [docs](../python/) | `cardano-client-lib` (PyPI, imported as `ccl`) |
+
+## How big is it?
+
+The native library is a **~50–60 MB** platform-specific binary (the embedded [Scalus](https://scalus.org) UPLC evaluator for offline Plutus costing accounts for ~12 MB of that). Wrapper packages that bundle it (Python wheels, npm platform packages) are correspondingly large; Go and Rust fetch it once and cache it. See [Platforms & Packages](../reference/platforms/) for the full story, and [Caveats & Limitations](../reference/limitations/) before relying on specific functions.
+
+## Where to next
+
+- [Getting Started](../getting-started/) — install and run a first example in your language
+- [AI Agents](../ai/) — point Claude Code, Cursor, or any agent at the AI Starter Pack
+- [TxPlan (YAML) reference](../reference/txplan/) — the transaction format shared by all wrappers
+- [Architecture](../reference/architecture/) — the ADRs behind the design
+
+
+---
+
+# Getting Started
+
+Source: https://bloxbean.github.io/cardano-client-bindings/getting-started/
+
+Pick your language, install the package, and you're building transactions offline in minutes — the native library comes bundled or is fetched automatically; there is nothing else to install and **no JVM**.
+
+## Install
+
+### JavaScript (Bun)
+
+```bash
+bun add @bloxbean/cardano-client-lib
+```
+
+Requires [Bun](https://bun.sh) 1.0+ — Node.js is [not supported](../reference/limitations/#javascript-runs-on-bun-only). The platform-specific native library arrives via `optionalDependencies`.
+
+### Go
+
+```bash
+go get github.com/bloxbean/cardano-client-bindings/wrappers/go
+```
+
+Go 1.21+. Pure Go (no cgo, no C toolchain): the module loads `libccl` with purego and downloads it once on first use (then cached). Set `CCL_LIB_PATH` to use a local build instead.
+
+### Rust
+
+```toml
+[dependencies]
+ccl = { package = "cardano-client-lib", version = "0.1" }
+```
+
+Rust 1.70+. `build.rs` fetches the matching native library at first build. Add `features = ["providers"]` for the HTTP provider/evaluator helpers.
+
+### Python
+
+```bash
+pip install cardano-client-lib
+```
+
+Python 3.8+. Platform wheels bundle the native library; the only dependency is `pyyaml`.
+
+## First program
+
+Create an account and build a payment, fully offline (Python shown — the [other guides](../overview/#the-four-wrappers) have the same example idiomatically):
+
+```python
+from ccl import CclLib, Network
+
+with CclLib() as lib:
+    account = lib.account.create(Network.TESTNET)
+    print(account["base_address"])   # addr_test1...
+
+    yaml = f"""
+    version: 1.0
+    transaction:
+      - tx:
+          from: {account["base_address"]}
+          intents:
+            - type: payment
+              address: addr_test1qz...
+              amounts:
+                - unit: lovelace
+                  quantity: "5000000"
+    """
+    # Supply UTXOs + protocol params yourself, or use a provider (see below)
+    result = lib.quicktx.build(yaml, utxos, protocol_params)
+    signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
+    # Submit `signed` with any HTTP client — the library never submits
+```
+
+The transaction is described as [TxPlan YAML](../reference/txplan/); the library selects UTXOs, calculates the fee, and handles change. For fetching UTXOs and protocol parameters conveniently, each wrapper ships optional providers (Yaci DevKit, Blockfrost) — see the per-language *Providers & Evaluators* pages.
+
+## Next steps
+
+- Your language's guide: [JavaScript](../js/) · [Go](../go/) · [Rust](../rust/) · [Python](../python/)
+- [Building transactions](../python/transactions/) — payments, staking, governance, minting, Plutus, and which keys sign what
+- [Platforms & Packages](../reference/platforms/) — supported OS/arch matrix
+- [Using with AI agents](../ai/) — make your AI assistant productive with the bindings immediately
+
+
+---
+
+# Cardano Client Lib for JavaScript (Bun)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/js/
+
+`@bloxbean/cardano-client-lib` brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to JavaScript as a native library. No JVM, no remote service: the heavy lifting happens inside `libccl`, a GraalVM native-image build of CCL that ships with the package.
+
+> **Bun only.** The wrapper uses `bun:ffi` and requires [Bun](https://bun.sh) ≥ 1.0. Node.js is not supported: Node FFI bridges (ffi-napi, koffi) crash against a GraalVM native library due to its stack-boundary detection.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [API reference](api/) | Every class and method: `CclBridge`, account, address, crypto, tx, plutus, script, gov, wallet, quicktx |
+| [Building transactions](transactions/) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
+| [Providers & evaluators](providers/) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
+| [Troubleshooting](troubleshooting/) | Native library resolution, platform support, common errors |
+| [TxPlan (YAML) reference](../reference/txplan/) | The transaction description format used by `quicktx.build` — shared by all four language wrappers |
+
+## Installation
+
+```bash
+bun add @bloxbean/cardano-client-lib
+```
+
+The package pulls in a platform-specific package (via `optionalDependencies`) that bundles the prebuilt native library — nothing else to install:
+
+| Platform | Package |
+|---|---|
+| Linux x86_64 (glibc ≥ 2.17) | `@bloxbean/cardano-client-lib-linux-x86_64` |
+| Linux aarch64 (glibc ≥ 2.17) | `@bloxbean/cardano-client-lib-linux-aarch64` |
+| Linux x86_64 (musl / Alpine) | `@bloxbean/cardano-client-lib-linux-musl-x86_64` |
+| macOS Apple Silicon | `@bloxbean/cardano-client-lib-macos-aarch64` |
+| Windows x86_64 | `@bloxbean/cardano-client-lib-windows-x86_64` |
+
+macOS Intel is not supported with prebuilt binaries (Oracle GraalVM dropped Intel Macs); musl is x86_64-only. On those platforms, [build the library from source](troubleshooting/#building-the-native-library-from-source) and point `CCL_LIB_PATH` at it.
+
+## Quick start
+
+```js
+import { CclBridge, TESTNET } from "@bloxbean/cardano-client-lib";
+
+const bridge = new CclBridge();
+try {
+  // Create a new account (24-word mnemonic, testnet addresses).
+  const account = bridge.account.create(TESTNET);
+  console.log(account.base_address);   // addr_test1...
+  console.log(account.stake_address);  // stake_test1...
+
+  // Restore it later from the mnemonic.
+  const restored = bridge.account.fromMnemonic(account.mnemonic, TESTNET, 0, 0);
+} finally {
+  bridge.close();
+}
+```
+
+Or let `using` handle the lifecycle:
+
+```js
+using bridge = new CclBridge();
+const account = bridge.account.create(TESTNET);
+```
+
+### Build, sign, and inspect a transaction — fully offline
+
+Transactions are described as a [TxPlan YAML document](../reference/txplan/). You supply the UTXOs and protocol parameters (from any source — see [providers](providers/) for ready-made ones), and get back an unsigned transaction:
+
+```js
+const yaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${account.base_address}
+      intents:
+        - type: payment
+          address: addr_test1qz3...
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`;
+
+const result = bridge.quicktx.build(yaml, utxos, protocolParams);
+// result = { tx_cbor, tx_hash, fee }
+
+const signed = bridge.account.signTx(account.mnemonic, TESTNET, 0, 0, result.tx_cbor);
+// submit `signed` with any HTTP client — the library never talks to the network
+```
+
+With a provider, fetching the chain data is one call:
+
+```js
+import { YaciProvider } from "@bloxbean/cardano-client-lib";
+
+const provider = new YaciProvider();  // local Yaci DevKit
+const result = await bridge.quicktx.buildWith(yaml, provider, account.base_address);
+```
+
+## Design in one paragraph
+
+The native library is **offline and stateless** — it derives, builds, signs, hashes, and serializes, but never performs I/O. Anything that touches the network (fetching UTXOs, protocol parameters, submitting transactions, remote script evaluation) lives in the wrapper or in your code, where you control HTTP. Plutus execution units are computed offline in-process (via Scalus) by default, so even script transactions build without a network connection.
+
+## Networks
+
+```js
+import { MAINNET, TESTNET, PREPROD, PREVIEW } from "@bloxbean/cardano-client-lib";
+```
+
+Every key-derivation method requires an explicit network argument — there is no default. Always pass one of these constants, never a bare number: they are CCL enum ordinals (`MAINNET = 0`, `TESTNET = 1`), which are the **inverse** of Cardano's on-chain network id (on-chain mainnet = 1). See [API reference → Networks](api/#networks).
+
+## Examples
+
+Runnable examples live in [`wrappers/js/examples/`](../../wrappers/js/examples):
+
+- `account.js` — create/restore accounts, derive keys and DRep id
+- `primitives.js` — mnemonics, Blake2b hashing, Ed25519 sign/verify, address parsing
+- `transaction.js` — offline QuickTx build + sign
+- `evaluator.js` — Plutus mint with offline Scalus units vs. remote Blockfrost evaluation
+
+
+---
+
+# JavaScript API Reference
+
+Source: https://bloxbean.github.io/cardano-client-bindings/js/api/
+
+All functionality hangs off a `CclBridge` instance. Import what you need from the package root:
+
+```js
+import {
+  CclBridge, CclError, CclClosedError,
+  MAINNET, TESTNET, PREPROD, PREVIEW,
+  YaciProvider, BlockfrostProvider, BlockfrostEvaluator,
+} from "@bloxbean/cardano-client-lib";
+```
+
+The package ships TypeScript definitions (`index.d.ts`) for every class, method, and result shape shown below.
+
+## CclBridge
+
+```ts
+constructor(libPath?: string)
+version(): string
+close(): void
+[Symbol.dispose](): void
+```
+
+Constructing a bridge loads the native library (see [resolution order](../troubleshooting/#how-the-native-library-is-found)), creates a GraalVM isolate, and verifies the library version matches the wrapper. The API groups are properties: `bridge.account`, `bridge.address`, `bridge.crypto`, `bridge.tx`, `bridge.plutus`, `bridge.script`, `bridge.gov`, `bridge.wallet`, `bridge.quicktx`.
+
+**Lifecycle.** `close()` tears down the isolate and is idempotent. Any call after `close()` throws `CclClosedError` — this is deliberate: passing a stale isolate handle to the native side would abort the whole process uncatchably, so the wrapper converts it into a catchable error. Use `try/finally` or the `using` declaration:
+
+```js
+using bridge = new CclBridge();   // closed automatically at end of scope
+```
+
+**Threading.** A bridge is bound to the thread that created it. In Bun's single-threaded model this rarely matters; if you use workers, create one bridge per worker.
+
+## Networks
+
+```ts
+type Network = 0 | 1 | 2 | 3
+MAINNET = 0, TESTNET = 1, PREPROD = 2, PREVIEW = 3
+```
+
+Every method that derives keys (`account.*`, `wallet.*`, `gov.*`) requires a `network` argument. Passing `undefined`/`null` throws `TypeError`; an out-of-range value throws `RangeError`.
+
+> **Gotcha:** these constants are CCL enum ordinals, **not** Cardano's on-chain network id — the two are inverted for mainnet/testnet (`MAINNET = 0`, but a mainnet address's on-chain `network_id` is `1`). Never feed `address.info().network_id` back into an API that takes a network.
+
+## Errors
+
+| Class | When |
+|---|---|
+| `CclError` | A native call failed. Has `.code` (see table below) and `.message` (the native error text). |
+| `CclClosedError` | Any API call after `close()`. |
+| `TypeError` / `RangeError` | Missing / out-of-range `network` argument. |
+| `Error` | Library load failure, isolate creation failure, version mismatch, provider HTTP failures. |
+
+Error codes on `CclError.code`:
+
+| Constant | Code | Meaning |
+|---|---|---|
+| `CCL_ERROR_GENERAL` | -1 | Unspecified failure |
+| `CCL_ERROR_INVALID_ARGUMENT` | -2 | Bad argument |
+| `CCL_ERROR_SERIALIZATION` | -3 | (De)serialization failure |
+| `CCL_ERROR_CRYPTO` | -4 | Cryptographic failure |
+| `CCL_ERROR_INVALID_NETWORK` | -5 | Bad network value |
+| `CCL_ERROR_INVALID_MNEMONIC` | -6 | Bad mnemonic |
+| `CCL_ERROR_INVALID_ADDRESS` | -7 | Bad address |
+| `CCL_ERROR_INSUFFICIENT_FUNDS` | -8 | UTXOs can't cover outputs + fee |
+| `CCL_ERROR_INVALID_TRANSACTION` | -9 | Bad transaction |
+| `CCL_ERROR_TX_BUILD` | -10 | TxPlan build failure (most common `quicktx.build` error — usually a malformed plan) |
+
+Validation-style methods (`address.validate`, `crypto.validateMnemonic`, `crypto.verify`) return `false` instead of throwing.
+
+## bridge.account
+
+```ts
+create(network: Network): AccountInfo
+fromMnemonic(mnemonic: string, network: Network, accountIndex = 0, addressIndex = 0): AccountInfo
+getPrivateKey(mnemonic: string, network: Network, accountIndex = 0, addressIndex = 0): string
+getPublicKey(mnemonic: string, network: Network, accountIndex = 0, addressIndex = 0): string
+getDrepId(mnemonic: string, network: Network, accountIndex = 0): string
+signTx(mnemonic: string, network: Network, accountIndex: number, addressIndex: number, txCborHex: string): string
+signTxWithKeys(mnemonic: string, network: Network, accountIndex: number, addressIndex: number,
+               txCborHex: string, keys: SigningKeyRole[] | SigningKeyRole): string
+```
+
+`AccountInfo` = `{ mnemonic, base_address, enterprise_address, stake_address, change_address }`.
+
+- `create` generates a fresh 24-word mnemonic; treat the returned `mnemonic` as a secret.
+- `getPrivateKey` returns the 64-byte **extended** key as 128 hex chars. For raw Ed25519 signing (`crypto.sign`) use the first 64 hex chars.
+- `signTx` witnesses with the payment key only. When a transaction carries certificates that need other witnesses, use `signTxWithKeys` with the roles in order:
+
+```ts
+type SigningKeyRole = "payment" | "stake" | "drep" | "committee_cold" | "committee_hot"
+```
+
+```js
+// A DRep registration needs the payment key (fee) and the DRep key (certificate):
+const signed = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, result.tx_cbor, ["payment", "drep"]);
+```
+
+## bridge.address
+
+```ts
+info(bech32: string): AddressInfo
+validate(bech32: string): boolean
+toBytes(bech32: string): string     // hex
+fromBytes(hexBytes: string): string // bech32
+```
+
+`AddressInfo` = `{ type, network_id, payment_credential_hash?, delegation_credential_hash?, is_pubkey_payment, is_script_payment }`. `type` is e.g. `"Base"`, `"Enterprise"`, `"Pointer"`, `"Reward"`. `network_id` is the genuine on-chain id (mainnet = 1).
+
+## bridge.crypto
+
+```ts
+blake2b256(dataHex: string): string
+blake2b224(dataHex: string): string
+generateMnemonic(wordCount = 24): string
+validateMnemonic(mnemonic: string): boolean
+sign(messageHex: string, skHex: string): string      // Ed25519; 32-byte key (64 hex chars)
+verify(signatureHex: string, messageHex: string, pkHex: string): boolean
+```
+
+```js
+const digest = bridge.crypto.blake2b256("48656c6c6f");          // "Hello"
+const sk = bridge.account.getPrivateKey(mnemonic, TESTNET).slice(0, 64);
+const sig = bridge.crypto.sign("68656c6c6f", sk);
+```
+
+## bridge.tx
+
+```ts
+hash(txCborHex: string): string
+signWithSecretKey(txCborHex: string, skCborHex: string): string
+toJson(txCborHex: string): string          // JSON string
+fromJson(txJson: string): string           // CBOR hex
+deserialize(txCborHex: string): TransactionJson   // parsed object
+```
+
+`toJson` returns a JSON **string**; `deserialize` returns the parsed object (with a `body` field holding inputs/outputs/fee). `signWithSecretKey` expects a CBOR-encoded secret key, not raw key hex — for mnemonic-based accounts prefer `account.signTx`.
+
+## bridge.plutus
+
+```ts
+dataHash(datumCborHex: string): string    // 64 hex chars
+dataToJson(cborHex: string): string       // JSON string
+dataFromJson(json: string): string        // CBOR hex
+```
+
+```js
+bridge.plutus.dataHash("182a");   // hash of PlutusData int 42
+```
+
+## bridge.script
+
+```ts
+nativeFromJson(json: string): string           // JSON: { policy_id, script_hash, cbor_hex }
+hash(scriptCborHex: string, scriptType = 0): string
+```
+
+`scriptType`: `0` native, `1` PlutusV1, `2` PlutusV2, `3` PlutusV3.
+
+```js
+const script = JSON.parse(bridge.script.nativeFromJson(JSON.stringify({ type: "sig", keyHash })));
+// script.policy_id, script.script_hash, script.cbor_hex
+```
+
+## bridge.gov
+
+```ts
+drepKeyFromMnemonic(mnemonic: string, network: Network, accountIndex = 0): DrepKeyInfo
+committeeColdKeyFromMnemonic(mnemonic: string, network: Network, accountIndex = 0): CommitteeKeyInfo
+committeeHotKeyFromMnemonic(mnemonic: string, network: Network, accountIndex = 0): CommitteeKeyInfo
+```
+
+`DrepKeyInfo` = `{ drep_id /* drep1... */, verification_key, verification_key_hash, bech32_verification_key, bech32_verification_key_hash }`. Committee results carry `id` (`cc_cold1...` / `cc_hot1...`) instead of `drep_id`.
+
+## bridge.wallet
+
+HD wallet: one mnemonic, many sequential addresses.
+
+```ts
+create(network: Network): WalletInfo
+fromMnemonic(mnemonic: string, network: Network): WalletInfo
+getAddress(mnemonic: string, network: Network, index = 0): string
+```
+
+`WalletInfo` = `{ mnemonic, stake_address, addresses: string[] }`.
+
+## bridge.quicktx
+
+```ts
+build(txplanYaml: string, utxos: Utxo[], protocolParams: ProtocolParams,
+      execUnits?: ExecUnits[] | null): TxResult
+buildWith(txplanYaml: string, provider: ChainDataProvider, sender: string,
+          evaluator?: TransactionEvaluator | null): Promise<TxResult>
+```
+
+`TxResult` = `{ tx_cbor, tx_hash, fee }` (all strings).
+
+- **`build`** is fully offline: you describe the transaction as [TxPlan YAML](../../reference/txplan/) and supply the chain data yourself. UTXO selection, fee calculation, and change handling happen inside the native library. It never submits — sign the returned `tx_cbor` and submit with any HTTP client.
+- `utxos` is an array of CCL `Utxo` objects: `{ tx_hash, output_index, address, amount: [{ unit, quantity }], data_hash?, inline_datum?, reference_script_hash? }`. `unit` is `"lovelace"` or `policyId + assetNameHex`.
+- `protocolParams` is the CCL `ProtocolParams` JSON model. Cost models in the deprecated numerically-keyed map form are normalized automatically (`normalizeCostModels`), preventing `PPViewHashesDontMatch` on Plutus transactions.
+- **Large numbers are safe.** Inputs are serialized with `lossless-json`, so quantities above 2^53 survive exactly.
+- `execUnits` — for Plutus transactions, `[{ mem, steps }]`, one entry per redeemer in transaction order. When omitted, the native library computes them **offline** with the embedded Scalus evaluator, so script transactions build with no network access. Supply your own to override, or use an [evaluator](../providers/#evaluators) for node-backed costing.
+- **`buildWith`** fetches UTXOs and protocol parameters from a [provider](../providers/), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.
+
+```js
+const result = bridge.quicktx.build(yaml, utxos, params);
+const plutusResult = bridge.quicktx.build(yaml, utxos, params, [{ mem: 2000000, steps: 500000000 }]);
+```
+
+## Utility exports
+
+```ts
+normalizeCostModels(protocolParams): ProtocolParams  // applied automatically inside build()
+parseEvaluation(resp): ExecUnits[]                   // parse Ogmios/Blockfrost evaluate responses
+resolveLibFile(libPath?: string): string             // the native library path that would be loaded
+platformSuffix(): string                             // e.g. "macos-aarch64", "linux-musl-x86_64"
+```
+
+
+---
+
+# Building Transactions (JavaScript)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/js/transactions/
+
+This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from JavaScript.
+
+## The workflow
+
+Every transaction follows the same four steps:
+
+```js
+import { CclBridge, TESTNET, YaciProvider } from "@bloxbean/cardano-client-lib";
+
+using bridge = new CclBridge();
+const provider = new YaciProvider();          // or BlockfrostProvider, or your own
+
+// 1. Describe — TxPlan YAML (see the intent catalog)
+const yaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender}
+      intents:
+        - type: payment
+          address: ${receiver}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`;
+
+// 2. Build — offline; UTXO selection, fee, and change happen in the native lib
+const result = await bridge.quicktx.buildWith(yaml, provider, sender);
+// (or bridge.quicktx.build(yaml, utxos, protocolParams) with your own chain data)
+
+// 3. Sign — with the key roles the transaction's certificates require
+const signed = bridge.account.signTx(mnemonic, TESTNET, 0, 0, result.tx_cbor);
+
+// 4. Submit — any Blockfrost-compatible endpoint; the library never submits
+const resp = await fetch(`${submitUrl}/tx/submit`, {
+  method: "POST",
+  headers: { "Content-Type": "application/cbor" },
+  body: Buffer.from(signed, "hex"),
+});
+if (!resp.ok) throw new Error(`rejected: ${await resp.text()}`);
+const txHash = (await resp.text()).trim().replace(/"/g, "");
+```
+
+## Which keys sign what
+
+`signTx` witnesses with the payment key only. Certificates need their own witness — use `signTxWithKeys` with roles **in order**:
+
+| Transaction contains | `keys` |
+|---|---|
+| Payments, metadata, minting, Plutus operations | `["payment"]` (or plain `signTx`) |
+| `stake_registration` / `stake_deregistration` / `stake_delegation` / `stake_withdrawal` / `voting_delegation` | `["payment", "stake"]` |
+| `drep_registration` / `drep_update` / `drep_deregistration` / `voting` | `["payment", "drep"]` |
+| `governance_proposal` | `["payment"]` |
+| `pool_registration` / `pool_update` / `pool_retirement` | `["payment", "stake"]` when the pool is keyed to the account's stake key |
+
+A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+
+## Worked example: register and delegate stake
+
+Two transactions — the registration must be on-chain before the delegation:
+
+```js
+const stakeYaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender}
+      intents:
+        - type: stake_registration
+          stake_address: ${account.stake_address}
+`;
+const reg = await bridge.quicktx.buildWith(stakeYaml, provider, sender);
+const signedReg = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, reg.tx_cbor, ["payment", "stake"]);
+await submit(signedReg);          // wait for inclusion before the next step
+
+const delegYaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender}
+      intents:
+        - type: stake_delegation
+          stake_address: ${account.stake_address}
+          pool_id: pool1...
+`;
+const deleg = await bridge.quicktx.buildWith(delegYaml, provider, sender);
+const signedDeleg = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, deleg.tx_cbor, ["payment", "stake"]);
+await submit(signedDeleg);
+```
+
+## Worked example: DRep registration, then vote
+
+The DRep credential comes from the governance API:
+
+```js
+const drep = bridge.gov.drepKeyFromMnemonic(mnemonic, TESTNET, 0);
+
+const drepYaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender}
+      intents:
+        - type: drep_registration
+          drep_credential_hex: ${drep.verification_key_hash}
+          drep_credential_type: key_hash
+          anchor_url: https://example.com/meta.json
+          anchor_hash: ${anchorHash}
+`;
+const reg = await bridge.quicktx.buildWith(drepYaml, provider, sender);
+const signedReg = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, reg.tx_cbor, ["payment", "drep"]);
+await submit(signedReg);
+```
+
+To vote on a governance action, the action id is the proposal transaction's hash plus its index (a proposal you submit yourself returns its hash from `build` — `result.tx_hash`):
+
+```js
+const voteYaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender}
+      intents:
+        - type: voting
+          voter_hex: ${voterHex}
+          gov_action_tx_hash: ${proposalTxHash}
+          gov_action_index: 0
+          vote: "YES"
+          anchor_url: https://example.com/meta.json
+          anchor_hash: ${anchorHash}
+`;
+const vote = await bridge.quicktx.buildWith(voteYaml, provider, sender);
+const signedVote = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, vote.tx_cbor, ["payment", "drep"]);
+```
+
+## Worked example: mint under a native script
+
+An asset policy is a native script; derive it with the script API, then mint with `signTx` (an empty `ScriptAll` policy needs no extra signature; a `sig`-keyed policy needs the corresponding key's witness):
+
+```js
+const mintYaml = `
+version: 1.0
+transaction:
+  - tx:
+      from: ${sender}
+      intents:
+        - type: minting
+          assets:
+            - name: TestNFT
+              value: 1
+          receiver: ${receiver}
+          script_hex: "820180"
+          script_type: 0
+`;
+const mint = await bridge.quicktx.buildWith(mintYaml, provider, sender);
+const signedMint = bridge.account.signTx(mnemonic, TESTNET, 0, 0, mint.tx_cbor);
+```
+
+## Worked example: Plutus mint
+
+By default execution units are computed **offline** (embedded Scalus evaluator) — a Plutus transaction is a normal build:
+
+```js
+const result = await bridge.quicktx.buildWith(plutusMintYaml, provider, sender);
+```
+
+To cost against a real node instead, pass an evaluator — `buildWith` then runs the two-pass flow (draft → remote evaluate → rebuild):
+
+```js
+import { BlockfrostEvaluator } from "@bloxbean/cardano-client-lib";
+
+const evaluator = new BlockfrostEvaluator(projectId, { network: "preprod" });
+const result = await bridge.quicktx.buildWith(plutusMintYaml, provider, sender, evaluator);
+```
+
+Or supply units yourself with the offline `build`:
+
+```js
+const result = bridge.quicktx.build(plutusMintYaml, utxos, params, [{ mem: 2000000, steps: 500000000 }]);
+```
+
+For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with its `data_hash`) **plus** a separate UTXO for fee/collateral in `utxos` — see the [catalog entry](../../reference/txplan/#plutus-scripts) and the end-to-end lock-then-spend flow in [`wrappers/js/test/intents.integration.test.js`](../../wrappers/js/test/intents.integration.test.js).
+
+## Errors you'll meet
+
+- `CCL Error -10` — the plan didn't build: malformed YAML, wrong intent field, or a Plutus costing problem. Compare against the [catalog](../../reference/txplan/#intent-catalog--verified-shapes).
+- `CCL Error -8` — the supplied UTXOs can't cover outputs + fee.
+- Node rejection `MissingVKeyWitnessesUTXOW` — a certificate wasn't witnessed; check the roles table above.
+
+
+---
+
+# Providers & Evaluators (JavaScript)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/js/providers/
+
+The native library is offline by design — it never makes a network call. Providers and evaluators are small wrapper-side HTTP conveniences for feeding `quicktx.buildWith` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need them: call `quicktx.build` directly.
+
+## ChainDataProvider
+
+```ts
+class ChainDataProvider {
+  async utxos(address: string): Promise<Utxo[]>          // ALL utxos at the address; selection happens in the native lib
+  async protocolParams(): Promise<ProtocolParams>
+}
+```
+
+Providers are structural — any object with these two async methods works, so plugging in Koios, Ogmios, or your own indexer is a few lines.
+
+### YaciProvider
+
+Talks to a local [Yaci DevKit](https://github.com/bloxbean/yaci-devkit) devnet (or any yaci-store instance exposing the Blockfrost-style REST API).
+
+```ts
+new YaciProvider(baseUrl?: string)   // default: "http://localhost:10000/local-cluster/api"
+```
+
+```js
+const provider = new YaciProvider();
+const result = await bridge.quicktx.buildWith(yaml, provider, senderAddress);
+```
+
+### BlockfrostProvider
+
+```ts
+new BlockfrostProvider(projectId: string, options?: { network?: "mainnet" | "preprod" | "preview", baseUrl?: string })
+```
+
+- `network` picks the public Blockfrost endpoint (default `"mainnet"`); pass `baseUrl` instead for a self-hosted instance. An unknown `network` without `baseUrl` throws.
+- UTXO fetches paginate (100 per page) until exhausted, and each UTXO gets the owning `address` injected (Blockfrost omits it, but the builder needs it).
+- Protocol parameters come from `/epochs/latest/parameters`; the native library ignores the extra Blockfrost fields.
+
+```js
+const provider = new BlockfrostProvider(process.env.BF_PROJECT_ID, { network: "preprod" });
+const result = await bridge.quicktx.buildWith(yaml, provider, senderAddress);
+```
+
+## Evaluators
+
+For Plutus transactions, execution units are computed **offline by default** — the native library embeds the Scalus UPLC evaluator, so no evaluator is needed for a script transaction to build. Use a remote evaluator when you want node-backed costing instead:
+
+```ts
+class TransactionEvaluator {
+  async evaluate(txCbor: string, utxos: Utxo[]): Promise<ExecUnits[]>   // [{ mem, steps }] in redeemer order
+}
+```
+
+### BlockfrostEvaluator
+
+```ts
+new BlockfrostEvaluator(projectId: string, options?: { network?: "mainnet" | "preprod" | "preview", baseUrl?: string })
+```
+
+POSTs the draft transaction CBOR to `/utils/txs/evaluate` (Blockfrost / Ogmios-compatible) and parses the response into `[{ mem, steps }]` in Cardano redeemer order (`spend < mint < cert < reward < vote < propose`).
+
+```js
+const evaluator = new BlockfrostEvaluator(projectId, { network: "preprod" });
+const result = await bridge.quicktx.buildWith(yaml, provider, sender, evaluator);
+// two-pass: draft build (offline units) → remote evaluate → rebuild with returned units
+```
+
+The standalone `parseEvaluation(resp)` export handles both the purpose-keyed map form (`{"spend:0": {memory, steps}}`) and the Ogmios v6 list form, if you want to wire up your own evaluator.
+
+## Numbers: LosslessNumber
+
+Provider responses are parsed with [`lossless-json`](https://github.com/josdejong/lossless-json), not `JSON.parse`. A UTXO's lovelace amount or a token quantity can exceed `Number.MAX_SAFE_INTEGER` (2^53), which plain `JSON.parse` would silently round — corrupting UTXO selection and change outputs.
+
+Practical consequences:
+
+- Passing provider results straight into `build`/`buildWith` is exact — nothing to do.
+- If you *inspect* a provider-returned quantity yourself, it is a string-backed `LosslessNumber`, not a `number`. Use `.toString()` for exactness, or `Number(x)` / `.valueOf()` when you know the value is small.
+
+```js
+const utxos = await provider.utxos(address);
+const lovelace = utxos[0].amount[0].quantity.toString();  // exact, arbitrary size
+```
+
+## Timeouts & errors
+
+Every provider/evaluator request is bounded by a 60-second timeout (`AbortSignal.timeout`); a hung endpoint rejects with a `TimeoutError` instead of hanging forever. Non-2xx responses throw `Error("GET/POST <url> failed: HTTP <status>: <body>")`.
+
+
+---
+
+# Troubleshooting (JavaScript)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/js/troubleshooting/
+
+## How the native library is found
+
+`new CclBridge(libPath?)` resolves `libccl.dylib` / `libccl.so` / `libccl.dll` in this order:
+
+1. The explicit `libPath` constructor argument (a directory).
+2. The `CCL_LIB_PATH` environment variable (a directory) — the usual way to run against a locally built library.
+3. A copy bundled inside the package itself (`libs/`).
+4. The platform-specific package for your OS/arch (e.g. `@bloxbean/cardano-client-lib-macos-aarch64`) — this is what a normal `bun add` install uses.
+5. The bare filename, letting the OS loader search its default paths.
+
+On Linux, musl (Alpine) is detected automatically by checking for the musl dynamic loader, and the `linux-musl-x86_64` package is selected instead of the glibc one.
+
+Check what would be loaded:
+
+```js
+import { resolveLibFile, platformSuffix } from "@bloxbean/cardano-client-lib";
+console.log(platformSuffix());   // e.g. "linux-x86_64"
+console.log(resolveLibFile());   // absolute path to the library
+```
+
+## Common errors
+
+### `Failed to load the CCL native library (...)`
+
+The library file wasn't found or couldn't be loaded.
+
+- **Normal install:** make sure the platform package was installed (check `bun pm ls | grep cardano-client-lib`). `optionalDependencies` can be skipped by `--no-optional` / some CI caching setups — reinstall without that flag.
+- **Local build:** set `CCL_LIB_PATH` to the directory containing the library, **and** make the OS loader happy for its transitive dependencies:
+  ```bash
+  export CCL_LIB_PATH=/path/to/core/build/native/nativeCompile
+  export DYLD_LIBRARY_PATH=$CCL_LIB_PATH   # macOS
+  export LD_LIBRARY_PATH=$CCL_LIB_PATH     # Linux
+  ```
+- **Unsupported platform** (macOS Intel; Alpine on ARM): no prebuilt library exists — build from source (below).
+
+### `libccl version '...' is incompatible`
+
+The wrapper and the native library must match on base semver. This appears when `CCL_LIB_PATH` points at a stale build. Rebuild the library, or (at your own risk) set `CCL_SKIP_VERSION_CHECK=1`.
+
+### `CclClosedError: CclBridge is closed`
+
+Something called the bridge after `close()`. This error is the wrapper saving you: handing a stale isolate handle to the native side would abort the whole process. Keep calls inside the bridge's `try`/`using` scope, or create a new bridge.
+
+### `CCL Error -10: ...` from `quicktx.build`
+
+`CCL_ERROR_TX_BUILD` — the TxPlan didn't build. Usual causes:
+
+- Malformed YAML or a wrong intent field name (check against the [TxPlan reference](../../reference/txplan/)).
+- A Plutus transaction with wrong/missing execution units.
+- Check `CCL Error -8` too: `INSUFFICIENT_FUNDS` means the supplied UTXOs can't cover outputs + fee.
+
+### `PPViewHashesDontMatch` when submitting a Plutus transaction
+
+The protocol parameters' cost models were mangled. `build()` normalizes the common deprecated map form automatically; if you construct parameters by hand, keep the cost models in the order-stable `cost_models_raw` array form.
+
+### Crash / segfault under Node.js
+
+Node is not supported — this is expected, not a bug. GraalVM native libraries do stack-boundary checks that Node FFI bridges violate. Run under [Bun](https://bun.sh) ≥ 1.0.
+
+## Building the native library from source
+
+Needed only on platforms without a prebuilt library (macOS Intel, Alpine ARM) or for development against the bridge itself:
+
+```bash
+git clone https://github.com/bloxbean/cardano-client-bindings
+cd cardano-client-bindings
+sdk install java 25.0.3-graal        # GraalVM with native-image
+./gradlew :core:nativeCompile        # → core/build/native/nativeCompile/libccl.*
+export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
+```
+
+## Platform support
+
+| Platform | Prebuilt | Notes |
+|---|---|---|
+| Linux x86_64 (glibc ≥ 2.17) | ✅ | RHEL/CentOS 7+, Ubuntu 18.04+, Debian 9+, Amazon Linux 2, … |
+| Linux aarch64 (glibc ≥ 2.17) | ✅ | |
+| Alpine x86_64 (musl) | ✅ | auto-detected |
+| Alpine aarch64 (musl) | ❌ | GraalVM `--libc=musl` is x86_64-only |
+| macOS Apple Silicon | ✅ | |
+| macOS Intel | ❌ | Oracle GraalVM dropped Intel Macs |
+| Windows x86_64 | ✅ | |
+
+
+---
+
+# Cardano Client Lib for Go
+
+Source: https://bloxbean.github.io/cardano-client-bindings/go/
+
+The `ccl` Go package brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Go as a native library. No JVM, **no cgo, no C toolchain**: the shared library is loaded at runtime with [purego](https://github.com/ebitengine/purego).
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [API reference](api/) | Every type and method: `Bridge`, Account, Address, Crypto, Tx, Plutus, Script, Gov, Wallet, QuickTx |
+| [Building transactions](transactions/) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
+| [Providers & evaluators](providers/) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
+| [Troubleshooting](troubleshooting/) | Native library download & resolution, platform support, common errors |
+| [TxPlan (YAML) reference](../reference/txplan/) | The transaction description format used by `QuickTx.Build` — shared by all four language wrappers |
+
+## Installation
+
+```bash
+go get github.com/bloxbean/cardano-client-bindings/wrappers/go
+```
+
+```go
+import "github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
+```
+
+Requires Go ≥ 1.21. On first use, the package downloads the prebuilt native library (`libccl`) for your platform from the project's GitHub releases into your user cache directory (`os.UserCacheDir()/cardano-client-bindings/<version>/`) — a one-time, per-version download. No environment variables or build flags are needed.
+
+To use a locally built library instead (or on a platform without prebuilt binaries), set `CCL_LIB_PATH` — see [troubleshooting](troubleshooting/#how-the-native-library-is-found).
+
+## Quick start
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
+)
+
+func main() {
+	bridge, err := ccl.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer bridge.Close()
+
+	// Create a new account (24-word mnemonic, testnet addresses).
+	account, err := bridge.Account.Create(ccl.Testnet)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(account.BaseAddress)  // addr_test1...
+	fmt.Println(account.StakeAddress) // stake_test1...
+
+	// Restore it later from the mnemonic.
+	restored, _ := bridge.Account.FromMnemonic(account.Mnemonic, ccl.Testnet, 0, 0)
+	_ = restored
+}
+```
+
+### Build, sign, and inspect a transaction — fully offline
+
+Transactions are described as a [TxPlan YAML document](../reference/txplan/). You supply the UTXOs and protocol parameters (from any source — see [providers](providers/) for ready-made ones), and get back an unsigned transaction:
+
+```go
+yaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`, sender.BaseAddress, receiver)
+
+result, err := bridge.QuickTx.Build(yaml, utxos, protocolParams)
+// result.TxCbor, result.TxHash, result.Fee
+
+signed, err := bridge.Account.SignTx(sender.Mnemonic, ccl.Testnet, 0, 0, result.TxCbor)
+// submit `signed` with any HTTP client — the library never talks to the network
+```
+
+With a provider, fetching the chain data is one call:
+
+```go
+provider := ccl.NewYaciProvider("") // local Yaci DevKit ("" = default URL)
+result, err := bridge.QuickTx.BuildWith(yaml, provider, sender.BaseAddress)
+```
+
+## Design in one paragraph
+
+The native library is **offline and stateless** — it derives, builds, signs, hashes, and serializes, but never performs I/O. Anything that touches the network (fetching UTXOs, protocol parameters, submitting transactions, remote script evaluation) lives in the wrapper or in your code, where you control HTTP. Plutus execution units are computed offline in-process (via Scalus) by default, so even script transactions build without a network connection.
+
+## Concurrency
+
+A `*Bridge` is safe to share across goroutines: all native calls are funneled to one dedicated, pinned OS thread (a GraalVM isolate thread is bound to the OS thread that created it), so calls are serialized. For parallel native work, create multiple `Bridge` instances. Always `defer bridge.Close()`; calls after `Close` return `ccl.ErrBridgeClosed` rather than crashing.
+
+## Networks
+
+```go
+ccl.Mainnet // 0
+ccl.Testnet // 1
+ccl.Preprod // 2
+ccl.Preview // 3
+```
+
+Every key-derivation method takes a typed `ccl.Network` — passing a bare `int` is a compile error. Note the values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Mainnet = 0`, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api/#networks).
+
+## Examples
+
+Runnable examples live in [`wrappers/go/examples/`](../../wrappers/go/examples):
+
+- `examples/account` — create/restore accounts, derive keys and DRep id
+- `examples/primitives` — mnemonics, Blake2b hashing, Ed25519 sign/verify, address parsing
+- `examples/transaction` — offline QuickTx build + sign
+- `examples/evaluator` — Plutus mint with offline Scalus units vs. remote Blockfrost evaluation
+
+```bash
+go run ./examples/account
+```
+
+
+---
+
+# Go API Reference
+
+Source: https://bloxbean.github.io/cardano-client-bindings/go/api/
+
+Everything lives in package `ccl`:
+
+```go
+import "github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
+```
+
+## Bridge
+
+```go
+func New() (*Bridge, error)
+func (b *Bridge) Close() error
+func (b *Bridge) Version() (string, error)
+
+var ErrBridgeClosed = errors.New("ccl: bridge is closed")
+```
+
+`New()` loads the native library (downloading it on first use — see [troubleshooting](../troubleshooting/#how-the-native-library-is-found)), creates a GraalVM isolate on a dedicated pinned OS thread, and verifies the library version matches the wrapper. The API groups are exported fields:
+
+```go
+bridge.Account  // *AccountApi
+bridge.Address  // *AddressApi
+bridge.Crypto   // *CryptoApi
+bridge.Tx       // *TxApi
+bridge.Plutus   // *PlutusApi
+bridge.Script   // *ScriptApi
+bridge.Gov      // *GovApi
+bridge.Wallet   // *WalletApi
+bridge.QuickTx  // *QuickTxApi
+```
+
+**Lifecycle.** `Close()` tears down the isolate and is idempotent. Any call after `Close` returns `ErrBridgeClosed` (test with `errors.Is`) — it never hangs or panics.
+
+**Concurrency.** A `*Bridge` may be shared across goroutines; calls are serialized onto the bridge's single isolate thread. Create multiple bridges for parallelism.
+
+## Networks
+
+```go
+type Network int
+
+const (
+	Mainnet Network = 0
+	Testnet Network = 1
+	Preprod Network = 2
+	Preview Network = 3
+)
+
+func (n Network) String() string  // "mainnet", "testnet", ...
+func (n Network) Valid() bool
+```
+
+Every method that derives keys (`Account`, `Wallet`, `Gov`) requires a `Network` value. An out-of-range value returns a plain descriptive error before any native call.
+
+> **Gotcha:** these constants are CCL enum ordinals, **not** Cardano's on-chain network id — the two are inverted for mainnet/testnet (`Mainnet = 0`, but a mainnet address's on-chain `network_id` is `1`). `AddressInfo.NetworkID` is the genuine on-chain value; never feed it back into an API that takes a `Network`.
+
+## Errors
+
+```go
+type CclError struct {
+	Code    int
+	Message string
+}
+func (e *CclError) Error() string  // "CCL Error <code>: <message>"
+```
+
+Native failures surface as `*CclError` — match with `errors.As`. Error codes:
+
+| Constant | Code | Meaning |
+|---|---|---|
+| `ErrGeneral` | -1 | Unspecified failure |
+| `ErrInvalidArgument` | -2 | Bad argument |
+| `ErrSerialization` | -3 | (De)serialization failure |
+| `ErrCrypto` | -4 | Cryptographic failure |
+| `ErrInvalidNetwork` | -5 | Bad network value |
+| `ErrInvalidMnemonic` | -6 | Bad mnemonic |
+| `ErrInvalidAddress` | -7 | Bad address |
+| `ErrInsufficientFunds` | -8 | UTXOs can't cover outputs + fee |
+| `ErrInvalidTransaction` | -9 | Bad transaction |
+| `ErrTxBuild` | -10 | TxPlan build failure (most common `QuickTx.Build` error — usually a malformed plan) |
+
+Predicate methods (`Address.Validate`, `Crypto.ValidateMnemonic`, `Crypto.Verify`) return `bool` and never error.
+
+## bridge.Account
+
+```go
+func (a *AccountApi) Create(network Network) (*AccountInfo, error)
+func (a *AccountApi) FromMnemonic(mnemonic string, network Network, accountIndex, addressIndex int) (*AccountInfo, error)
+func (a *AccountApi) GetPublicKey(mnemonic string, network Network, accountIndex, addressIndex int) (string, error)
+func (a *AccountApi) GetPrivateKey(mnemonic string, network Network, accountIndex, addressIndex int) (string, error)
+func (a *AccountApi) GetDRepID(mnemonic string, network Network, accountIndex int) (string, error)
+func (a *AccountApi) SignTx(mnemonic string, network Network, accountIndex, addressIndex int, txCborHex string) (string, error)
+func (a *AccountApi) SignTxWithKeys(mnemonic string, network Network, accountIndex, addressIndex int, txCborHex string, keys ...string) (string, error)
+```
+
+```go
+type AccountInfo struct {
+	Mnemonic          string `json:"mnemonic"`
+	BaseAddress       string `json:"base_address"`
+	EnterpriseAddress string `json:"enterprise_address"`
+	StakeAddress      string `json:"stake_address"`
+	ChangeAddress     string `json:"change_address"`
+}
+```
+
+- `Create` generates a fresh 24-word mnemonic; treat `AccountInfo.Mnemonic` as a secret.
+- `GetPrivateKey` returns the 64-byte **extended** key as 128 hex chars. For raw Ed25519 signing (`Crypto.Sign`) use the first 64 hex chars.
+- `SignTx` witnesses with the payment key only. When a transaction carries certificates that need other witnesses, use `SignTxWithKeys` with roles in order — valid roles: `"payment"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`:
+
+```go
+// A stake registration needs the payment key (fee) and the stake key (certificate):
+signed, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, result.TxCbor, "payment", "stake")
+```
+
+Without the extra witness the node rejects the transaction with `MissingVKeyWitnessesUTXOW`.
+
+## bridge.Address
+
+```go
+func (a *AddressApi) Info(bech32 string) (*AddressInfo, error)
+func (a *AddressApi) Validate(bech32 string) bool
+func (a *AddressApi) ToBytes(bech32 string) (string, error)     // hex
+func (a *AddressApi) FromBytes(hexBytes string) (string, error) // bech32
+```
+
+```go
+type AddressInfo struct {
+	Type                     string `json:"type"`        // "Base", "Enterprise", "Pointer", "Reward"
+	NetworkID                int    `json:"network_id"`  // on-chain id: 0=testnet, 1=mainnet
+	PaymentCredentialHash    string `json:"payment_credential_hash,omitempty"`
+	DelegationCredentialHash string `json:"delegation_credential_hash,omitempty"`
+	IsPubkeyPayment          bool   `json:"is_pubkey_payment"`
+	IsScriptPayment          bool   `json:"is_script_payment"`
+}
+```
+
+## bridge.Crypto
+
+```go
+func (c *CryptoApi) Blake2b256(dataHex string) (string, error)
+func (c *CryptoApi) Blake2b224(dataHex string) (string, error)
+func (c *CryptoApi) GenerateMnemonic(wordCount int) (string, error)   // 12 or 24
+func (c *CryptoApi) ValidateMnemonic(mnemonic string) bool
+func (c *CryptoApi) Sign(messageHex, skHex string) (string, error)    // Ed25519; 32-byte key (64 hex chars)
+func (c *CryptoApi) Verify(signatureHex, messageHex, pkHex string) bool
+```
+
+Hash inputs are hex in → hex out:
+
+```go
+digest, _ := bridge.Crypto.Blake2b256("48656c6c6f") // "Hello"
+priv, _ := bridge.Account.GetPrivateKey(mnemonic, ccl.Testnet, 0, 0)
+sig, _ := bridge.Crypto.Sign(msgHex, priv[:64])     // first 32 bytes of the extended key
+```
+
+## bridge.Tx
+
+```go
+func (t *TxApi) Hash(txCborHex string) (string, error)
+func (t *TxApi) SignWithSecretKey(txCborHex, skCborHex string) (string, error)
+func (t *TxApi) ToJson(txCborHex string) (string, error)
+func (t *TxApi) FromJson(txJson string) (string, error)     // returns CBOR hex
+func (t *TxApi) Deserialize(txCborHex string) (string, error)
+```
+
+`ToJson`/`Deserialize` return a JSON string with a `body` field (inputs/outputs/fee). `SignWithSecretKey` expects a CBOR-encoded secret key, not raw key hex — for mnemonic-based accounts prefer `Account.SignTx`.
+
+## bridge.Plutus
+
+```go
+func (p *PlutusApi) DataHash(datumCborHex string) (string, error)   // 64 hex chars
+func (p *PlutusApi) DataToJson(cborHex string) (string, error)
+func (p *PlutusApi) DataFromJson(jsonStr string) (string, error)    // returns CBOR hex
+```
+
+```go
+hash, _ := bridge.Plutus.DataHash("182a")  // hash of PlutusData int 42
+```
+
+## bridge.Script
+
+```go
+func (s *ScriptApi) NativeFromJson(jsonStr string) (string, error)              // JSON: {policy_id, script_hash, cbor_hex}
+func (s *ScriptApi) Hash(scriptCborHex string, scriptType int) (string, error)  // 56 hex chars
+```
+
+`scriptType`: `0` native, `1` PlutusV1, `2` PlutusV2, `3` PlutusV3.
+
+```go
+scriptJSON := fmt.Sprintf(`{"type":"sig","keyHash":"%s"}`, info.PaymentCredentialHash)
+result, _ := bridge.Script.NativeFromJson(scriptJSON)
+// unmarshal result → policy_id, script_hash, cbor_hex
+```
+
+## bridge.Gov
+
+```go
+func (g *GovApi) DrepKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error)
+func (g *GovApi) CommitteeColdKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error)
+func (g *GovApi) CommitteeHotKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error)
+```
+
+```go
+type GovKeyInfo struct {
+	DrepID                    string `json:"drep_id,omitempty"` // drep1... (DRep keys)
+	ID                        string `json:"id,omitempty"`      // cc_cold1... / cc_hot1... (committee keys)
+	VerificationKey           string `json:"verification_key"`
+	VerificationKeyHash       string `json:"verification_key_hash"`
+	Bech32VerificationKey     string `json:"bech32_verification_key"`
+	Bech32VerificationKeyHash string `json:"bech32_verification_key_hash"`
+}
+```
+
+## bridge.Wallet
+
+HD wallet: one mnemonic, many sequential addresses.
+
+```go
+func (w *WalletApi) Create(network Network) (*WalletInfo, error)
+func (w *WalletApi) FromMnemonic(mnemonic string, network Network) (*WalletInfo, error)
+func (w *WalletApi) GetAddress(mnemonic string, network Network, index int) (string, error)
+```
+
+```go
+type WalletInfo struct {
+	Mnemonic     string   `json:"mnemonic"`
+	StakeAddress string   `json:"stake_address"`
+	Addresses    []string `json:"addresses"`
+}
+```
+
+## bridge.QuickTx
+
+```go
+func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}, execUnits ...interface{}) (*TxResult, error)
+func (q *QuickTxApi) BuildWith(yaml string, provider ChainDataProvider, sender string, evaluator ...TransactionEvaluator) (*TxResult, error)
+```
+
+```go
+type TxResult struct {
+	TxCbor string `yaml:"tx_cbor"`
+	TxHash string `yaml:"tx_hash"`
+	Fee    string `yaml:"fee"`
+}
+```
+
+- **`Build`** is fully offline: you describe the transaction as [TxPlan YAML](../../reference/txplan/) and supply the chain data yourself. UTXO selection, fee calculation, and change handling happen inside the native library. It never submits — sign the returned `TxCbor` and submit with any HTTP client.
+- `utxos` is a slice of CCL `Utxo` objects (typically `[]map[string]interface{}`): `{tx_hash, output_index, address, amount: [{unit, quantity}]}`. `unit` is `"lovelace"` or `policyId + assetNameHex`. Quantities are best passed as **strings**.
+- `protocolParams` is the CCL `ProtocolParams` model (typically `map[string]interface{}`); unknown fields are ignored.
+- `execUnits` — for Plutus transactions, pass one value: a slice of `{mem, steps}` maps, one per redeemer in transaction order. When omitted, the native library computes them **offline** with the embedded Scalus evaluator.
+- **`BuildWith`** fetches UTXOs and protocol parameters from a [provider](../providers/), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.
+
+```go
+result, err := bridge.QuickTx.Build(yaml, utxos, params)
+
+plutusResult, err := bridge.QuickTx.Build(yaml, utxos, params,
+	[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}})
+```
+
+
+---
+
+# Building Transactions (Go)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/go/transactions/
+
+This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from Go.
+
+## The workflow
+
+Every transaction follows the same four steps:
+
+```go
+bridge, err := ccl.New()
+if err != nil { log.Fatal(err) }
+defer bridge.Close()
+
+provider := ccl.NewYaciProvider("")   // or a BlockfrostProvider, or your own
+
+// 1. Describe — TxPlan YAML (see the intent catalog)
+yaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`, sender, receiver)
+
+// 2. Build — offline; UTXO selection, fee, and change happen in the native lib
+result, err := bridge.QuickTx.BuildWith(yaml, provider, sender)
+// (or bridge.QuickTx.Build(yaml, utxos, protocolParams) with your own chain data)
+
+// 3. Sign — with the key roles the transaction's certificates require
+signed, err := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, result.TxCbor)
+
+// 4. Submit — any Blockfrost-compatible endpoint; the library never submits
+txBytes, _ := hex.DecodeString(signed)
+resp, err := http.Post(submitURL+"/tx/submit", "application/cbor", bytes.NewReader(txBytes))
+```
+
+## Which keys sign what
+
+`SignTx` witnesses with the payment key only. Certificates need their own witness — use `SignTxWithKeys` with roles **in order**:
+
+| Transaction contains | Roles |
+|---|---|
+| Payments, metadata, minting, Plutus operations | `"payment"` (or plain `SignTx`) |
+| `stake_registration` / `stake_deregistration` / `stake_delegation` / `stake_withdrawal` / `voting_delegation` | `"payment", "stake"` |
+| `drep_registration` / `drep_update` / `drep_deregistration` / `voting` | `"payment", "drep"` |
+| `governance_proposal` | `"payment"` |
+| `pool_registration` / `pool_update` / `pool_retirement` | `"payment", "stake"` when the pool is keyed to the account's stake key |
+
+A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+
+## Worked example: register and delegate stake
+
+Two transactions — the registration must be on-chain before the delegation:
+
+```go
+stakeYaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: stake_registration
+          stake_address: %s
+`, sender, account.StakeAddress)
+
+reg, err := bridge.QuickTx.BuildWith(stakeYaml, provider, sender)
+signedReg, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, reg.TxCbor, "payment", "stake")
+// submit signedReg; wait for inclusion before the next step
+
+delegYaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: stake_delegation
+          stake_address: %s
+          pool_id: pool1...
+`, sender, account.StakeAddress)
+
+deleg, err := bridge.QuickTx.BuildWith(delegYaml, provider, sender)
+signedDeleg, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, deleg.TxCbor, "payment", "stake")
+```
+
+## Worked example: DRep registration, then vote
+
+The DRep credential comes from the governance API:
+
+```go
+drep, err := bridge.Gov.DrepKeyFromMnemonic(mnemonic, ccl.Testnet, 0)
+
+drepYaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: drep_registration
+          drep_credential_hex: %s
+          drep_credential_type: key_hash
+          anchor_url: https://example.com/meta.json
+          anchor_hash: %s
+`, sender, drep.VerificationKeyHash, anchorHash)
+
+reg, err := bridge.QuickTx.BuildWith(drepYaml, provider, sender)
+signedReg, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, reg.TxCbor, "payment", "drep")
+```
+
+To vote on a governance action, the action id is the proposal transaction's hash plus its index (a proposal you submit yourself returns its hash from `Build` — `result.TxHash`). Sign the `voting` transaction with `"payment", "drep"`.
+
+## Worked example: mint under a native script
+
+```go
+mintYaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: minting
+          assets:
+            - name: TestNFT
+              value: 1
+          receiver: %s
+          script_hex: "820180"
+          script_type: 0
+`, sender, receiver)
+
+mint, err := bridge.QuickTx.BuildWith(mintYaml, provider, sender)
+signedMint, err := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, mint.TxCbor)
+```
+
+An empty `ScriptAll` policy (`820180`) needs no extra signature; a `sig`-keyed policy needs the corresponding key's witness.
+
+## Worked example: Plutus mint
+
+By default execution units are computed **offline** (embedded Scalus evaluator) — a Plutus transaction is a normal build:
+
+```go
+result, err := bridge.QuickTx.BuildWith(plutusMintYaml, provider, sender)
+```
+
+To cost against a real node instead, pass an evaluator — `BuildWith` then runs the two-pass flow (draft → remote evaluate → rebuild):
+
+```go
+evaluator, _ := ccl.NewBlockfrostEvaluator(projectID, "preprod")
+result, err := bridge.QuickTx.BuildWith(plutusMintYaml, provider, sender, evaluator)
+```
+
+Or supply units yourself with the offline `Build`:
+
+```go
+result, err := bridge.QuickTx.Build(plutusMintYaml, utxos, params,
+	[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}})
+```
+
+For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with its `data_hash`) **plus** a separate UTXO for fee/collateral in `utxos` — see the [catalog entry](../../reference/txplan/#plutus-scripts) and the end-to-end lock-then-spend flow in [`wrappers/go/ccl/script_spend_test.go`](../../wrappers/go/ccl/script_spend_test.go).
+
+## Errors you'll meet
+
+- `CCL Error -10` (`ErrTxBuild`) — the plan didn't build: malformed YAML, wrong intent field, or a Plutus costing problem. Compare against the [catalog](../../reference/txplan/#intent-catalog--verified-shapes).
+- `CCL Error -8` (`ErrInsufficientFunds`) — the supplied UTXOs can't cover outputs + fee.
+- Node rejection `MissingVKeyWitnessesUTXOW` — a certificate wasn't witnessed; check the roles table above.
+
+
+---
+
+# Providers & Evaluators (Go)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/go/providers/
+
+The native library is offline by design — it never makes a network call. Providers and evaluators are small wrapper-side HTTP conveniences for feeding `QuickTx.BuildWith` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need them: call `QuickTx.Build` directly.
+
+## ChainDataProvider
+
+```go
+type ChainDataProvider interface {
+	Utxos(address string) ([]map[string]interface{}, error) // ALL utxos at the address; selection happens in the native lib
+	ProtocolParams() (map[string]interface{}, error)
+}
+```
+
+Any implementation works — plugging in Koios, Ogmios, or your own indexer is a small adapter.
+
+### YaciProvider
+
+Talks to a local [Yaci DevKit](https://github.com/bloxbean/yaci-devkit) devnet (or any yaci-store instance exposing the Blockfrost-style REST API).
+
+```go
+func NewYaciProvider(baseURL string) *YaciProvider // "" → "http://localhost:10000/local-cluster/api"
+```
+
+```go
+provider := ccl.NewYaciProvider("")
+result, err := bridge.QuickTx.BuildWith(yaml, provider, senderAddress)
+```
+
+### BlockfrostProvider
+
+```go
+func NewBlockfrostProvider(projectID, network string) (*BlockfrostProvider, error) // network: "mainnet" | "preprod" | "preview"
+func NewBlockfrostProviderURL(projectID, baseURL string) *BlockfrostProvider       // self-hosted / custom endpoint
+```
+
+- `NewBlockfrostProvider` returns an error for an unknown network name; use the `...URL` constructor for custom endpoints.
+- UTXO fetches paginate (100 per page) until exhausted, and each UTXO gets the owning `address` injected (Blockfrost omits it, but the builder needs it).
+- Protocol parameters come from `/epochs/latest/parameters`; the native library ignores the extra Blockfrost fields.
+
+```go
+provider, err := ccl.NewBlockfrostProvider(os.Getenv("BF_PROJECT_ID"), "preprod")
+result, err := bridge.QuickTx.BuildWith(yaml, provider, senderAddress)
+```
+
+## Evaluators
+
+For Plutus transactions, execution units are computed **offline by default** — the native library embeds the Scalus UPLC evaluator, so no evaluator is needed for a script transaction to build. Use a remote evaluator when you want node-backed costing instead:
+
+```go
+type TransactionEvaluator interface {
+	Evaluate(txCbor string, utxos []map[string]interface{}) ([]map[string]interface{}, error) // [{mem, steps}] in redeemer order
+}
+```
+
+### BlockfrostEvaluator
+
+```go
+func NewBlockfrostEvaluator(projectID, network string) (*BlockfrostEvaluator, error)
+func NewBlockfrostEvaluatorURL(projectID, baseURL string) *BlockfrostEvaluator
+```
+
+POSTs the draft transaction CBOR to `/utils/txs/evaluate` (Blockfrost / Ogmios-compatible) and parses the response into `[{mem, steps}]` in Cardano redeemer order (`spend < mint < cert < reward < vote < propose`). Both the purpose-keyed map form and the Ogmios v6 list form are handled.
+
+```go
+evaluator, _ := ccl.NewBlockfrostEvaluator(projectID, "preprod")
+result, err := bridge.QuickTx.BuildWith(yaml, provider, sender, evaluator)
+// two-pass: draft build (offline units) → remote evaluate → rebuild with returned units
+```
+
+## Numbers are decoded losslessly
+
+Provider responses are decoded with `json.Decoder.UseNumber()`, so JSON integers arrive as string-backed `json.Number` instead of `float64`. This matters: a UTXO's lovelace amount or a token quantity can exceed 2^53, which a `float64` would silently round — corrupting UTXO selection and change outputs. Passing provider results straight into `Build`/`BuildWith` is exact.
+
+If you inspect a quantity yourself, convert explicitly:
+
+```go
+q := utxos[0]["amount"].([]interface{})[0].(map[string]interface{})["quantity"]
+switch v := q.(type) {
+case string:      // Blockfrost/DevKit canonical form
+	fmt.Println(v)
+case json.Number: // numeric JSON form, still exact
+	fmt.Println(v.String())
+}
+```
+
+## Timeouts & errors
+
+Every provider/evaluator request is bounded by a 60-second HTTP client timeout; a hung endpoint fails the call instead of pinning a goroutine forever. Non-200 responses return `"GET/POST <url> failed: HTTP <code>: <body>"`.
+
+
+---
+
+# Troubleshooting (Go)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/go/troubleshooting/
+
+## How the native library is found
+
+The `ccl` package resolves `libccl.dylib` / `libccl.so` / `libccl.dll` at runtime, once per process, in this order:
+
+1. **`CCL_LIB_PATH`** — a directory containing the library, or the library file itself. If set but the file isn't there, resolution fails hard (no fallback) — this is the way to run against a locally built library.
+2. **The per-version cache**: `os.UserCacheDir()/cardano-client-bindings/<version>/` (e.g. `~/Library/Caches/...` on macOS, `~/.cache/...` on Linux).
+3. **A one-time download** of the release tarball from GitHub releases, extracted atomically into the cache.
+
+The downloaded release tag is pinned in the wrapper (kept in lockstep with the wrapper version); override it with `CCL_LIB_VERSION` (e.g. `CCL_LIB_VERSION=v0.1.0-pre4`).
+
+On Linux, musl (Alpine) is detected automatically by checking for the musl dynamic loader, and the `linux-musl-x86_64` artifact is downloaded instead of the glibc one.
+
+Environment variables:
+
+| Variable | Effect |
+|---|---|
+| `CCL_LIB_PATH` | Use a local library instead of the cache/download |
+| `CCL_LIB_VERSION` | Override the pinned release tag to download |
+| `CCL_SKIP_VERSION_CHECK` | Skip the wrapper ↔ native-lib version compatibility check |
+
+## Common errors
+
+### `CCL_LIB_PATH set but ... not found`
+
+`CCL_LIB_PATH` is authoritative: when set, nothing else is tried. Point it at the directory that actually contains `libccl.so`/`libccl.dylib` (typically `core/build/native/nativeCompile` in a source checkout), or unset it to use the downloaded library.
+
+### Download fails on first use
+
+The first `ccl.New()` needs network access to GitHub releases (a one-time, per-version download). In restricted environments, either pre-populate the cache directory, or build from source and set `CCL_LIB_PATH`. The download is atomic (temp file + rename), so a killed process can't leave a corrupt library behind.
+
+### `no prebuilt libccl for <GOOS>/<GOARCH>`
+
+No prebuilt artifact exists for your platform (see matrix below). Build from source and set `CCL_LIB_PATH`.
+
+### Version mismatch on `New()`
+
+The wrapper and the native library must match on base semver. This usually means `CCL_LIB_PATH` points at a stale build, or `CCL_LIB_VERSION` pins an old tag. Rebuild/repin, or (at your own risk) set `CCL_SKIP_VERSION_CHECK=1`.
+
+### `ccl: bridge is closed`
+
+Something called the bridge after `Close()`. Check with `errors.Is(err, ccl.ErrBridgeClosed)`. Keep the bridge alive for as long as callers use it — the guard exists because handing a stale isolate handle to the native side would crash the process.
+
+### `CCL Error -10: ...` from `QuickTx.Build`
+
+`ErrTxBuild` — the TxPlan didn't build. Usual causes:
+
+- Malformed YAML or a wrong intent field name (check against the [TxPlan reference](../../reference/txplan/)).
+- A Plutus transaction with wrong/missing execution units.
+- `CCL Error -8` (`ErrInsufficientFunds`) means the supplied UTXOs can't cover outputs + fee.
+
+### Old `go get` errors (module not found)
+
+Early revisions of the module had a stale internal pin that broke `go get`. Update to the latest tagged version; the pin is now enforced by CI.
+
+## Building the native library from source
+
+Needed only on platforms without a prebuilt library or for development against the bridge itself:
+
+```bash
+git clone https://github.com/bloxbean/cardano-client-bindings
+cd cardano-client-bindings
+sdk install java 25.0.3-graal        # GraalVM with native-image
+./gradlew :core:nativeCompile        # → core/build/native/nativeCompile/libccl.*
+export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
+```
+
+## Platform support
+
+| GOOS/GOARCH | Prebuilt | Notes |
+|---|---|---|
+| linux/amd64 (glibc ≥ 2.17) | ✅ | RHEL/CentOS 7+, Ubuntu 18.04+, Debian 9+, Amazon Linux 2, … |
+| linux/arm64 (glibc ≥ 2.17) | ✅ | |
+| linux/amd64 (musl / Alpine) | ✅ | auto-detected |
+| linux/arm64 (musl) | ❌ | GraalVM `--libc=musl` is x86_64-only |
+| darwin/arm64 (Apple Silicon) | ✅ | |
+| darwin/amd64 (macOS Intel) | ❌ | Oracle GraalVM dropped Intel Macs |
+| windows/amd64 | ✅ | |
+
+
+---
+
+# Cardano Client Lib for Rust
+
+Source: https://bloxbean.github.io/cardano-client-bindings/rust/
+
+The `cardano-client-lib` crate (imported as `ccl`) brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Rust as a native library. No JVM at runtime: the crate links against `libccl`, a GraalVM native-image build of CCL fetched automatically at build time.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [API reference](api/) | Every type and method: `Bridge`, account, address, crypto, tx, plutus, script, gov, wallet, quicktx |
+| [Building transactions](transactions/) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
+| [Providers & evaluators](providers/) | The `providers` feature: fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
+| [Troubleshooting](troubleshooting/) | Native library fetching, platform support, common errors |
+| [TxPlan (YAML) reference](../reference/txplan/) | The transaction description format used by `quicktx().build` — shared by all four language wrappers |
+
+## Installation
+
+Once published to crates.io:
+
+```toml
+[dependencies]
+cardano-client-lib = "0.1"
+# with the optional HTTP providers:
+# cardano-client-lib = { version = "0.1", features = ["providers"] }
+```
+
+Until then, use a git dependency:
+
+```toml
+[dependencies]
+cardano-client-lib = { git = "https://github.com/bloxbean/cardano-client-bindings", package = "cardano-client-lib" }
+```
+
+The import name is `ccl` regardless: `use ccl::{Bridge, Network};`.
+
+**First build needs network access:** crates.io can't host the ~50 MB native library, so `build.rs` downloads the prebuilt `libccl` for your platform from the project's GitHub releases (once, cached in the build directory). An rpath is set automatically — **no `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` needed at runtime**. To build against a local library instead, set `CCL_LIB_PATH` — see [troubleshooting](troubleshooting/#how-the-native-library-is-obtained).
+
+Features:
+
+| Feature | Default | Adds |
+|---|---|---|
+| `providers` | off | `ccl::providers` module (Yaci/Blockfrost chain-data providers + evaluators, pulls in `ureq`) |
+
+## Quick start
+
+```rust
+use ccl::{Bridge, Network};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let bridge = Bridge::new()?; // torn down automatically on drop (RAII)
+
+    // Create a new account (24-word mnemonic, testnet addresses).
+    let created = bridge.account().create(Network::Testnet)?;
+    let account: serde_json::Value = serde_json::from_str(&created)?;
+    println!("{}", account["base_address"]);  // addr_test1...
+    println!("{}", account["stake_address"]); // stake_test1...
+
+    // Restore it later from the mnemonic.
+    let mnemonic = account["mnemonic"].as_str().unwrap();
+    let _restored = bridge.account().from_mnemonic(mnemonic, Network::Testnet, 0, 0)?;
+    Ok(())
+}
+```
+
+### Build, sign, and inspect a transaction — fully offline
+
+Transactions are described as a [TxPlan YAML document](../reference/txplan/). You supply the UTXOs and protocol parameters (from any source — see [providers](providers/) for ready-made ones), and get back an unsigned transaction:
+
+```rust
+let yaml = format!(r#"
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: payment
+          address: {receiver}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+"#);
+
+let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params, None)?;
+// result.tx_cbor, result.tx_hash, result.fee
+
+let signed = bridge.account().sign_tx(mnemonic, Network::Testnet, 0, 0, &result.tx_cbor)?;
+// submit `signed` with any HTTP client — the library never talks to the network
+```
+
+With a provider (requires the `providers` feature), fetching the chain data is one call:
+
+```rust
+use ccl::providers::YaciProvider;
+
+let provider = YaciProvider::default(); // local Yaci DevKit
+let result = bridge.quicktx().build_with(&yaml, &provider, &sender, None)?;
+```
+
+## Design in one paragraph
+
+The native library is **offline and stateless** — it derives, builds, signs, hashes, and serializes, but never performs I/O. Anything that touches the network (fetching UTXOs, protocol parameters, submitting transactions, remote script evaluation) lives in the optional `providers` module or in your code, where you control HTTP. Plutus execution units are computed offline in-process (via Scalus) by default, so even script transactions build without a network connection.
+
+## Threading
+
+`Bridge` is deliberately **`!Send` and `!Sync`**: the underlying GraalVM isolate thread is bound to the OS thread that created it, so moving a bridge across threads would corrupt the VM. The compiler enforces this — create **one `Bridge` per thread**. Teardown is RAII (`Drop`); there is no `close()` to forget, and the borrow checker prevents use-after-free of the bridge by the API handles.
+
+## Networks
+
+```rust
+pub enum Network { Mainnet, Testnet, Preprod, Preview }
+```
+
+Every key-derivation method takes a typed `Network` — there is no integer API. Note the underlying values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Mainnet` → ordinal 0, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api/#networks).
+
+## Examples
+
+Runnable examples live in [`wrappers/rust/examples/`](../../wrappers/rust/examples):
+
+- `account.rs` — create/restore accounts, derive keys and DRep id
+- `primitives.rs` — mnemonics, Blake2b hashing, Ed25519 sign/verify, address parsing
+- `transaction.rs` — offline QuickTx build + sign
+- `evaluator.rs` — Plutus mint with offline Scalus units vs. remote Blockfrost evaluation (needs `--features providers`)
+
+```bash
+cargo run --example account
+cargo run --example evaluator --features providers
+```
+
+
+---
+
+# Rust API Reference
+
+Source: https://bloxbean.github.io/cardano-client-bindings/rust/api/
+
+```rust
+use ccl::{Bridge, Network, CclError, Result};
+```
+
+Most methods return `ccl::Result<String>` where the string is either a JSON document (parse with `serde_json`) or a bare hex/bech32 value — noted per method below.
+
+## Bridge
+
+```rust
+impl Bridge {
+    pub fn new() -> Result<Self>;
+    pub fn version(&self) -> Result<String>;
+
+    pub fn account(&self) -> AccountApi<'_>;
+    pub fn address(&self) -> AddressApi<'_>;
+    pub fn crypto(&self)  -> CryptoApi<'_>;
+    pub fn tx(&self)      -> TxApi<'_>;
+    pub fn plutus(&self)  -> PlutusApi<'_>;
+    pub fn script(&self)  -> ScriptApi<'_>;
+    pub fn gov(&self)     -> GovApi<'_>;
+    pub fn wallet(&self)  -> WalletApi<'_>;
+    pub fn quicktx(&self) -> QuickTxApi<'_>;
+}
+```
+
+`Bridge::new()` creates a GraalVM isolate and verifies the native library version matches the crate.
+
+**Lifecycle.** Teardown is RAII: `Drop` tears down the isolate. The API handles (`AccountApi<'_>` etc.) borrow the bridge, so the borrow checker statically prevents use-after-free.
+
+**Threading.** `Bridge` is **`!Send` and `!Sync`** — moving it to another thread is a compile error. The GraalVM isolate thread is bound to the OS thread that created it; create one `Bridge` per thread.
+
+## Networks
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Network { Mainnet, Testnet, Preprod, Preview }
+
+impl Network { pub fn as_i32(self) -> i32 }  // Mainnet=0, Testnet=1, Preprod=2, Preview=3
+```
+
+> **Gotcha:** the ordinals are CCL enum values, **not** Cardano's on-chain network id — the two are inverted for mainnet/testnet (`Mainnet` = 0, but a mainnet address's on-chain `network_id` is `1`). The `network_id` field returned by `address().info()` is the genuine on-chain value; never map it back to a `Network`.
+
+## Errors
+
+```rust
+pub struct CclError { pub code: i32, pub message: String }  // Display: "CCL Error {code}: {message}"
+pub type Result<T> = std::result::Result<T, CclError>;
+```
+
+Error codes (`ccl::error_codes`):
+
+| Constant | Code | Meaning |
+|---|---|---|
+| `CCL_ERROR_GENERAL` | -1 | Unspecified failure (also: version mismatch, HTTP provider errors) |
+| `CCL_ERROR_INVALID_ARGUMENT` | -2 | Bad argument (also: interior NUL in a string) |
+| `CCL_ERROR_SERIALIZATION` | -3 | (De)serialization failure |
+| `CCL_ERROR_CRYPTO` | -4 | Cryptographic failure |
+| `CCL_ERROR_INVALID_NETWORK` | -5 | Bad network value |
+| `CCL_ERROR_INVALID_MNEMONIC` | -6 | Bad mnemonic |
+| `CCL_ERROR_INVALID_ADDRESS` | -7 | Bad address |
+| `CCL_ERROR_INSUFFICIENT_FUNDS` | -8 | UTXOs can't cover outputs + fee |
+| `CCL_ERROR_INVALID_TRANSACTION` | -9 | Bad transaction |
+| `CCL_ERROR_TX_BUILD` | -10 | TxPlan build failure (most common `quicktx().build` error — usually a malformed plan) |
+
+Predicate methods (`validate`, `validate_mnemonic`, `verify`) return `bool` and never error.
+
+## bridge.account()
+
+```rust
+pub fn create(&self, network: Network) -> Result<String>;  // JSON
+pub fn from_mnemonic(&self, mnemonic: &str, network: Network, account_index: i32, address_index: i32) -> Result<String>;  // JSON
+pub fn get_public_key(&self, mnemonic: &str, network: Network, account_index: i32, address_index: i32) -> Result<String>;  // hex
+pub fn get_private_key(&self, mnemonic: &str, network: Network, account_index: i32, address_index: i32) -> Result<String>; // hex (extended)
+pub fn get_drep_id(&self, mnemonic: &str, network: Network, account_index: i32) -> Result<String>;  // bech32 drep1...
+pub fn sign_tx(&self, mnemonic: &str, network: Network, account_index: i32, address_index: i32, tx_cbor_hex: &str) -> Result<String>;
+pub fn sign_tx_with_keys(&self, mnemonic: &str, network: Network, account_index: i32, address_index: i32, tx_cbor_hex: &str, keys: &[&str]) -> Result<String>;
+```
+
+`create`/`from_mnemonic` return JSON with `mnemonic`, `base_address`, `enterprise_address`, `stake_address` (and `change_address`).
+
+- `create` generates a fresh 24-word mnemonic; treat it as a secret.
+- `get_private_key` returns the 64-byte **extended** key as 128 hex chars. For raw Ed25519 signing (`crypto().sign`) use the first 64 hex chars (`&key[..64]`).
+- `sign_tx` witnesses with the payment key only. When a transaction carries certificates that need other witnesses, use `sign_tx_with_keys` with roles in order — valid roles: `"payment"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`:
+
+```rust
+// A DRep registration needs the payment key (fee) and the DRep key (certificate):
+let signed = bridge.account().sign_tx_with_keys(
+    mnemonic, Network::Testnet, 0, 0, &result.tx_cbor, &["payment", "drep"])?;
+```
+
+## bridge.address()
+
+```rust
+pub fn info(&self, bech32: &str) -> Result<String>;       // JSON
+pub fn validate(&self, bech32: &str) -> bool;
+pub fn to_bytes(&self, bech32: &str) -> Result<String>;   // hex
+pub fn from_bytes(&self, hex_bytes: &str) -> Result<String>; // bech32
+```
+
+`info` JSON fields: `type` (`"Base"`, `"Enterprise"`, `"Pointer"`, `"Reward"`), `network_id` (on-chain: 1 = mainnet), `payment_credential_hash`, `delegation_credential_hash`, `is_pubkey_payment`, `is_script_payment`.
+
+## bridge.crypto()
+
+```rust
+pub fn blake2b_256(&self, data_hex: &str) -> Result<String>;
+pub fn blake2b_224(&self, data_hex: &str) -> Result<String>;
+pub fn generate_mnemonic(&self, word_count: i32) -> Result<String>;  // 12 or 24
+pub fn validate_mnemonic(&self, mnemonic: &str) -> bool;
+pub fn sign(&self, message_hex: &str, sk_hex: &str) -> Result<String>;  // Ed25519; 32-byte key (64 hex chars)
+pub fn verify(&self, signature_hex: &str, message_hex: &str, pk_hex: &str) -> bool;
+```
+
+```rust
+let digest = bridge.crypto().blake2b_256("48656c6c6f")?; // "Hello"
+let sk = bridge.account().get_private_key(mnemonic, Network::Testnet, 0, 0)?;
+let sig = bridge.crypto().sign(msg_hex, &sk[..64])?;     // first 32 bytes of the extended key
+```
+
+## bridge.tx()
+
+```rust
+pub fn hash(&self, tx_cbor_hex: &str) -> Result<String>;   // 64-hex tx id
+pub fn sign_with_secret_key(&self, tx_cbor_hex: &str, sk_cbor_hex: &str) -> Result<String>;
+pub fn to_json(&self, tx_cbor_hex: &str) -> Result<String>;      // JSON
+pub fn from_json(&self, tx_json: &str) -> Result<String>;        // CBOR hex
+pub fn deserialize(&self, tx_cbor_hex: &str) -> Result<String>;  // JSON
+```
+
+`to_json`/`deserialize` return JSON with a `body` object (inputs/outputs/fee). `sign_with_secret_key` expects a CBOR-encoded secret key, not raw key hex — for mnemonic-based accounts prefer `account().sign_tx`.
+
+## bridge.plutus()
+
+```rust
+pub fn data_hash(&self, datum_cbor_hex: &str) -> Result<String>;   // 64 hex chars
+pub fn data_to_json(&self, cbor_hex: &str) -> Result<String>;
+pub fn data_from_json(&self, json: &str) -> Result<String>;        // CBOR hex
+```
+
+```rust
+let hash = bridge.plutus().data_hash("182a")?;  // hash of PlutusData int 42
+```
+
+## bridge.script()
+
+```rust
+pub fn native_from_json(&self, json: &str) -> Result<String>;  // JSON: { policy_id, script_hash, cbor_hex }
+pub fn hash(&self, script_cbor_hex: &str, script_type: i32) -> Result<String>;  // 56 hex chars
+```
+
+`script_type`: `0` native, `1` PlutusV1, `2` PlutusV2, `3` PlutusV3.
+
+```rust
+let script_json = format!(r#"{{"type":"sig","keyHash":"{key_hash}"}}"#);
+let parsed: serde_json::Value = serde_json::from_str(&bridge.script().native_from_json(&script_json)?)?;
+// parsed["policy_id"], parsed["script_hash"], parsed["cbor_hex"]
+```
+
+## bridge.gov()
+
+```rust
+pub fn drep_key_from_mnemonic(&self, mnemonic: &str, network: Network, account_index: i32) -> Result<String>;
+pub fn committee_cold_key_from_mnemonic(&self, mnemonic: &str, network: Network, account_index: i32) -> Result<String>;
+pub fn committee_hot_key_from_mnemonic(&self, mnemonic: &str, network: Network, account_index: i32) -> Result<String>;
+```
+
+JSON results: the DRep method returns `{ drep_id: "drep1...", verification_key, verification_key_hash, ... }`; committee methods return `{ id: "cc_cold1..." / "cc_hot1...", ... }`.
+
+## bridge.wallet()
+
+HD wallet: one mnemonic, many sequential addresses.
+
+```rust
+pub fn create(&self, network: Network) -> Result<String>;  // JSON: { mnemonic, stake_address, addresses }
+pub fn from_mnemonic(&self, mnemonic: &str, network: Network) -> Result<String>;
+pub fn get_address(&self, mnemonic: &str, network: Network, index: i32) -> Result<String>;  // bech32
+```
+
+## bridge.quicktx()
+
+```rust
+#[derive(Debug, serde::Deserialize)]
+pub struct TxResult { pub tx_cbor: String, pub tx_hash: String, pub fee: String }
+
+pub fn build(&self, yaml: &str, utxos: &serde_json::Value, protocol_params: &serde_json::Value,
+             exec_units: Option<&serde_json::Value>) -> Result<TxResult>;
+
+// with `--features providers`:
+pub fn build_with(&self, yaml: &str, provider: &dyn ChainDataProvider, sender: &str,
+                  evaluator: Option<&dyn TransactionEvaluator>) -> Result<TxResult>;
+```
+
+- **`build`** is fully offline: you describe the transaction as [TxPlan YAML](../../reference/txplan/) and supply the chain data yourself as `serde_json::Value`s. UTXO selection, fee calculation, and change handling happen inside the native library. It never submits — sign the returned `tx_cbor` and submit with any HTTP client.
+- `utxos` is a JSON array of CCL `Utxo` objects: `{tx_hash, output_index, address, amount: [{unit, quantity}]}`. `unit` is `"lovelace"` or `policyId + assetNameHex`. Quantities are best passed as **strings** (`"quantity": "5000000"`), matching the canonical CCL model.
+- `protocol_params` is the CCL `ProtocolParams` JSON model; unknown fields are ignored.
+- `exec_units` — for Plutus transactions, `Some(&json!([{"mem": ..., "steps": ...}]))`, one entry per redeemer in transaction order. Pass `None` to let the native library compute them **offline** with the embedded Scalus evaluator.
+- **`build_with`** fetches UTXOs and protocol parameters from a [provider](../providers/), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.
+
+```rust
+use serde_json::json;
+
+let result = bridge.quicktx().build(&yaml, &utxos, &params, None)?;
+
+let plutus = bridge.quicktx().build(&yaml, &utxos, &params,
+    Some(&json!([{"mem": 2000000, "steps": 500000000}])))?;
+```
+
+
+---
+
+# Building Transactions (Rust)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/rust/transactions/
+
+This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from Rust.
+
+## The workflow
+
+Every transaction follows the same four steps (providers need `--features providers`):
+
+```rust
+use ccl::{Bridge, Network};
+use ccl::providers::YaciProvider;
+
+let bridge = Bridge::new()?;
+let provider = YaciProvider::default();   // or BlockfrostProvider, or your own impl
+
+// 1. Describe — TxPlan YAML (see the intent catalog)
+let yaml = format!(r#"
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: payment
+          address: {receiver}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+"#);
+
+// 2. Build — offline; UTXO selection, fee, and change happen in the native lib
+let result = bridge.quicktx().build_with(&yaml, &provider, &sender, None)?;
+// (or bridge.quicktx().build(&yaml, &utxos, &protocol_params, None) with your own chain data)
+
+// 3. Sign — with the key roles the transaction's certificates require
+let signed = bridge.account().sign_tx(&mnemonic, Network::Testnet, 0, 0, &result.tx_cbor)?;
+
+// 4. Submit — any Blockfrost-compatible endpoint; the library never submits
+// e.g. with ureq: POST {url}/tx/submit, Content-Type: application/cbor, body = hex-decoded `signed`
+```
+
+## Which keys sign what
+
+`sign_tx` witnesses with the payment key only. Certificates need their own witness — use `sign_tx_with_keys` with roles **in order**:
+
+| Transaction contains | `keys` |
+|---|---|
+| Payments, metadata, minting, Plutus operations | `&["payment"]` (or plain `sign_tx`) |
+| `stake_registration` / `stake_deregistration` / `stake_delegation` / `stake_withdrawal` / `voting_delegation` | `&["payment", "stake"]` |
+| `drep_registration` / `drep_update` / `drep_deregistration` / `voting` | `&["payment", "drep"]` |
+| `governance_proposal` | `&["payment"]` |
+| `pool_registration` / `pool_update` / `pool_retirement` | `&["payment", "stake"]` when the pool is keyed to the account's stake key |
+
+A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+
+## Worked example: register and delegate stake
+
+Two transactions — the registration must be on-chain before the delegation:
+
+```rust
+let stake_yaml = format!(r#"
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: stake_registration
+          stake_address: {stake_address}
+"#);
+
+let reg = bridge.quicktx().build_with(&stake_yaml, &provider, &sender, None)?;
+let signed_reg = bridge.account().sign_tx_with_keys(
+    &mnemonic, Network::Testnet, 0, 0, &reg.tx_cbor, &["payment", "stake"])?;
+// submit signed_reg; wait for inclusion before the next step
+
+let deleg_yaml = format!(r#"
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: stake_delegation
+          stake_address: {stake_address}
+          pool_id: pool1...
+"#);
+
+let deleg = bridge.quicktx().build_with(&deleg_yaml, &provider, &sender, None)?;
+let signed_deleg = bridge.account().sign_tx_with_keys(
+    &mnemonic, Network::Testnet, 0, 0, &deleg.tx_cbor, &["payment", "stake"])?;
+```
+
+## Worked example: DRep registration, then vote
+
+The DRep credential comes from the governance API:
+
+```rust
+let drep: serde_json::Value =
+    serde_json::from_str(&bridge.gov().drep_key_from_mnemonic(&mnemonic, Network::Testnet, 0)?)?;
+let credential = drep["verification_key_hash"].as_str().unwrap();
+
+let drep_yaml = format!(r#"
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: drep_registration
+          drep_credential_hex: {credential}
+          drep_credential_type: key_hash
+          anchor_url: https://example.com/meta.json
+          anchor_hash: {anchor_hash}
+"#);
+
+let reg = bridge.quicktx().build_with(&drep_yaml, &provider, &sender, None)?;
+let signed = bridge.account().sign_tx_with_keys(
+    &mnemonic, Network::Testnet, 0, 0, &reg.tx_cbor, &["payment", "drep"])?;
+```
+
+To vote on a governance action, the action id is the proposal transaction's hash plus its index (a proposal you submit yourself returns its hash from `build` — `result.tx_hash`). Sign the `voting` transaction with `&["payment", "drep"]`.
+
+## Worked example: mint under a native script
+
+```rust
+let mint_yaml = format!(r#"
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: minting
+          assets:
+            - name: TestNFT
+              value: 1
+          receiver: {receiver}
+          script_hex: "820180"
+          script_type: 0
+"#);
+
+let mint = bridge.quicktx().build_with(&mint_yaml, &provider, &sender, None)?;
+let signed = bridge.account().sign_tx(&mnemonic, Network::Testnet, 0, 0, &mint.tx_cbor)?;
+```
+
+An empty `ScriptAll` policy (`820180`) needs no extra signature; a `sig`-keyed policy needs the corresponding key's witness.
+
+## Worked example: Plutus mint
+
+By default execution units are computed **offline** (embedded Scalus evaluator) — a Plutus transaction is a normal build:
+
+```rust
+let result = bridge.quicktx().build_with(&plutus_mint_yaml, &provider, &sender, None)?;
+```
+
+To cost against a real node instead, pass an evaluator — `build_with` then runs the two-pass flow (draft → remote evaluate → rebuild):
+
+```rust
+use ccl::providers::BlockfrostEvaluator;
+
+let evaluator = BlockfrostEvaluator::new(&project_id, "preprod")?;
+let result = bridge.quicktx().build_with(&plutus_mint_yaml, &provider, &sender, Some(&evaluator))?;
+```
+
+Or supply units yourself with the offline `build`:
+
+```rust
+use serde_json::json;
+
+let result = bridge.quicktx().build(&plutus_mint_yaml, &utxos, &params,
+    Some(&json!([{"mem": 2000000, "steps": 500000000}])))?;
+```
+
+For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with its `data_hash`) **plus** a separate UTXO for fee/collateral in `utxos` — see the [catalog entry](../../reference/txplan/#plutus-scripts) and the end-to-end lock-then-spend flow in [`wrappers/rust/tests/quicktx_integration_test.rs`](../../wrappers/rust/tests/quicktx_integration_test.rs).
+
+## Errors you'll meet
+
+- `CCL Error -10` (`CCL_ERROR_TX_BUILD`) — the plan didn't build: malformed YAML, wrong intent field, or a Plutus costing problem. Compare against the [catalog](../../reference/txplan/#intent-catalog--verified-shapes).
+- `CCL Error -8` (`CCL_ERROR_INSUFFICIENT_FUNDS`) — the supplied UTXOs can't cover outputs + fee.
+- Node rejection `MissingVKeyWitnessesUTXOW` — a certificate wasn't witnessed; check the roles table above.
+
+
+---
+
+# Providers & Evaluators (Rust)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/rust/providers/
+
+The native library is offline by design — it never makes a network call. The optional `providers` module contains small HTTP conveniences for feeding `quicktx().build_with` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need it: call `quicktx().build` directly and skip the feature.
+
+```toml
+[dependencies]
+cardano-client-lib = { version = "0.1", features = ["providers"] }
+```
+
+```rust
+use ccl::providers::{ChainDataProvider, YaciProvider, BlockfrostProvider, BlockfrostEvaluator};
+```
+
+## ChainDataProvider
+
+```rust
+pub trait ChainDataProvider {
+    fn utxos(&self, address: &str) -> Result<serde_json::Value>;  // ALL utxos at the address; selection happens in the native lib
+    fn protocol_params(&self) -> Result<serde_json::Value>;
+}
+```
+
+Implement the trait to plug in Koios, Ogmios, or your own indexer.
+
+### YaciProvider
+
+Talks to a local [Yaci DevKit](https://github.com/bloxbean/yaci-devkit) devnet (or any yaci-store instance exposing the Blockfrost-style REST API).
+
+```rust
+impl YaciProvider {
+    pub const DEFAULT_URL: &'static str = "http://localhost:10000/local-cluster/api";
+    pub fn new(base_url: &str) -> Self;
+}
+impl Default for YaciProvider;  // = new(DEFAULT_URL)
+```
+
+```rust
+let provider = YaciProvider::default();
+let result = bridge.quicktx().build_with(&yaml, &provider, &sender, None)?;
+```
+
+### BlockfrostProvider
+
+```rust
+impl BlockfrostProvider {
+    pub fn new(project_id: &str, network: &str) -> Result<Self>;   // "mainnet" | "preprod" | "preview"
+    pub fn with_url(project_id: &str, base_url: &str) -> Self;     // self-hosted / custom endpoint
+}
+```
+
+- `new` returns an error for an unknown network name; use `with_url` for custom endpoints.
+- UTXO fetches paginate (100 per page) until exhausted, and each UTXO gets the owning `address` injected (Blockfrost omits it, but the builder needs it).
+- Protocol parameters come from `/epochs/latest/parameters`; the native library ignores the extra Blockfrost fields.
+
+```rust
+let provider = BlockfrostProvider::new(&std::env::var("BF_PROJECT_ID")?, "preprod")?;
+let result = bridge.quicktx().build_with(&yaml, &provider, &sender, None)?;
+```
+
+## Evaluators
+
+For Plutus transactions, execution units are computed **offline by default** — the native library embeds the Scalus UPLC evaluator, so no evaluator is needed for a script transaction to build. Use a remote evaluator when you want node-backed costing instead:
+
+```rust
+pub trait TransactionEvaluator {
+    fn evaluate(&self, tx_cbor: &str, utxos: &serde_json::Value) -> Result<serde_json::Value>;
+    // returns [{mem, steps}] in redeemer order
+}
+```
+
+### BlockfrostEvaluator
+
+```rust
+impl BlockfrostEvaluator {
+    pub fn new(project_id: &str, network: &str) -> Result<Self>;
+    pub fn with_url(project_id: &str, base_url: &str) -> Self;
+}
+```
+
+POSTs the draft transaction CBOR to `/utils/txs/evaluate` (Blockfrost / Ogmios-compatible) and parses the response into `[{mem, steps}]` in Cardano redeemer order (`spend < mint < cert < reward < vote < propose`). Both the purpose-keyed map form and the Ogmios v6 list form are handled.
+
+```rust
+let evaluator = BlockfrostEvaluator::new(&project_id, "preprod")?;
+let result = bridge.quicktx().build_with(&yaml, &provider, &sender, Some(&evaluator))?;
+// two-pass: draft build (offline units) → remote evaluate → rebuild with returned units
+```
+
+## Numbers
+
+Chain data flows through `serde_json::Value`, which keeps JSON integers exact (`i64`/`u64` — no float truncation), and the canonical CCL models carry quantities as **strings** (`"quantity": "5000000"`) anyway. Passing provider results straight into `build`/`build_with` is exact.
+
+## Timeouts & errors
+
+HTTP failures surface as `CclError { code: CCL_ERROR_GENERAL, message: "<context>: <cause>" }`.
+
+> **Caveat:** the provider HTTP calls currently set no explicit request timeout, so a hung endpoint can block the calling thread indefinitely. If your application can't tolerate that, wrap provider calls in your own timeout mechanism or implement the `ChainDataProvider` trait over an HTTP client you configure.
+
+
+---
+
+# Troubleshooting (Rust)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/rust/troubleshooting/
+
+## How the native library is obtained
+
+`build.rs` sources `libccl.dylib` / `libccl.so` / `libccl.dll` at **build time**, in this order:
+
+1. **`CCL_LIB_PATH`** — an explicit directory containing a locally built library.
+2. **In-tree build** — `core/build/native/nativeCompile`, when developing inside the `cardano-client-bindings` repository.
+3. **GitHub release download** — the prebuilt library for your target platform, fetched with `curl` and cached in the crate's build directory.
+
+The downloaded release tag is pinned in `build.rs` (kept in lockstep with the crate version); override it with the `CCL_LIB_VERSION` environment variable.
+
+The library is staged into `OUT_DIR` and an **rpath is emitted automatically**, so nothing is needed at runtime — no `LD_LIBRARY_PATH`, no `DYLD_LIBRARY_PATH`. On macOS the install name is rewritten to `@rpath/libccl.dylib`; on Windows the GraalVM import library is staged for the MSVC linker.
+
+Environment variables (build-time):
+
+| Variable | Effect |
+|---|---|
+| `CCL_LIB_PATH` | Use a local library instead of the in-tree/download paths |
+| `CCL_LIB_VERSION` | Override the pinned release tag to download |
+| `CCL_SKIP_VERSION_CHECK` | (runtime) Skip the crate ↔ native-lib version compatibility check in `Bridge::new()` |
+
+## Common errors
+
+### Build fails downloading the library
+
+The first build needs network access to GitHub releases (the ~50 MB library can't be hosted on crates.io). In restricted environments, pre-download the release tarball, extract it, and set `CCL_LIB_PATH` to that directory — the download step is skipped entirely.
+
+### `no prebuilt libccl for <platform>` (build.rs panic)
+
+No prebuilt artifact exists for your target (see matrix below — notably macOS Intel and non-x86_64 musl). Build the library from source (below) and set `CCL_LIB_PATH`.
+
+### Version mismatch from `Bridge::new()`
+
+The crate and the native library must match on base semver. This usually means `CCL_LIB_PATH` points at a stale local build, or `CCL_LIB_VERSION` pins an old tag. Rebuild/repin, or (at your own risk) set `CCL_SKIP_VERSION_CHECK=1`.
+
+### `Bridge` cannot be sent between threads safely (compile error)
+
+Deliberate. The GraalVM isolate thread inside `Bridge` is bound to the OS thread that created it — moving it would corrupt the VM, so `Bridge` is `!Send`/`!Sync` and the compiler stops you. Create one `Bridge` per thread (e.g. in a `thread_local!`, or construct inside each worker).
+
+### `CCL Error -10: ...` from `quicktx().build`
+
+`CCL_ERROR_TX_BUILD` — the TxPlan didn't build. Usual causes:
+
+- Malformed YAML or a wrong intent field name (check against the [TxPlan reference](../../reference/txplan/)).
+- A Plutus transaction with wrong/missing execution units.
+- `CCL Error -8` (`INSUFFICIENT_FUNDS`) means the supplied UTXOs can't cover outputs + fee.
+
+## Building the native library from source
+
+Needed only on platforms without a prebuilt library or for development against the bridge itself:
+
+```bash
+git clone https://github.com/bloxbean/cardano-client-bindings
+cd cardano-client-bindings
+sdk install java 25.0.3-graal        # GraalVM with native-image
+./gradlew :core:nativeCompile        # → core/build/native/nativeCompile/libccl.*
+export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
+cargo build
+```
+
+## Platform support
+
+| Target | Prebuilt | Notes |
+|---|---|---|
+| linux x86_64 (glibc ≥ 2.17) | ✅ | RHEL/CentOS 7+, Ubuntu 18.04+, Debian 9+, Amazon Linux 2, … |
+| linux aarch64 (glibc ≥ 2.17) | ✅ | |
+| linux x86_64 (musl / Alpine) | ✅ | selected automatically when `target_env = "musl"` |
+| linux aarch64 (musl) | ❌ | GraalVM `--libc=musl` is x86_64-only |
+| macOS Apple Silicon | ✅ | |
+| macOS Intel | ❌ | Oracle GraalVM dropped Intel Macs |
+| windows x86_64 | ✅ | |
+
+
+---
+
+# Cardano Client Lib for Python
+
+Source: https://bloxbean.github.io/cardano-client-bindings/python/
+
+The `ccl` Python package (distribution name: `cardano-client-lib`) brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Python as a native library. No JVM, no C extension: pure `ctypes` over `libccl`, a GraalVM native-image build of CCL.
+
+Requires Python ≥ 3.8. The only runtime dependency is `pyyaml`.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [API reference](api/) | Every class and method: `CclLib`, account, address, crypto, tx, plutus, script, gov, wallet, quicktx |
+| [Building transactions](transactions/) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
+| [Providers & evaluators](providers/) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
+| [Troubleshooting](troubleshooting/) | Native library resolution, platform support, common errors |
+| [TxPlan (YAML) reference](../reference/txplan/) | The transaction description format used by `quicktx.build` — shared by all four language wrappers |
+
+## Installation
+
+```bash
+pip install cardano-client-lib
+```
+
+> If the package is not yet available on PyPI for your platform, install a wheel from the project's [GitHub releases](https://github.com/bloxbean/cardano-client-bindings/releases), or build one locally: `./gradlew :wrappers:python:wheel` (produces `wrappers/python/dist/*.whl`). Wheels bundle the native library — nothing else to install.
+
+For development against a locally built native library, skip the wheel and point the package at it:
+
+```bash
+export PYTHONPATH=/path/to/cardano-client-bindings/wrappers/python
+export CCL_LIB_PATH=/path/to/cardano-client-bindings/core/build/native/nativeCompile
+```
+
+## Quick start
+
+```python
+from ccl import CclLib, Network
+
+with CclLib() as lib:
+    # Create a new account (24-word mnemonic, testnet addresses).
+    account = lib.account.create(Network.TESTNET)
+    print(account["base_address"])   # addr_test1...
+    print(account["stake_address"])  # stake_test1...
+
+    # Restore it later from the mnemonic.
+    restored = lib.account.from_mnemonic(account["mnemonic"], Network.TESTNET)
+```
+
+The context manager tears down the native isolate on exit; equivalently, call `lib.close()` in a `finally` block.
+
+### Build, sign, and inspect a transaction — fully offline
+
+Transactions are described as a [TxPlan YAML document](../reference/txplan/). You supply the UTXOs and protocol parameters (from any source — see [providers](providers/) for ready-made ones), and get back an unsigned transaction:
+
+```python
+yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {account["base_address"]}
+      intents:
+        - type: payment
+          address: {receiver}
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+"""
+
+result = lib.quicktx.build(yaml, utxos, protocol_params)
+# result = {"tx_cbor": ..., "tx_hash": ..., "fee": ...}
+
+signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
+# submit `signed` with any HTTP client — the library never talks to the network
+```
+
+With a provider, fetching the chain data is one call:
+
+```python
+from ccl import YaciProvider
+
+provider = YaciProvider()  # local Yaci DevKit
+result = lib.quicktx.build_with(yaml, provider, account["base_address"])
+```
+
+## Design in one paragraph
+
+The native library is **offline and stateless** — it derives, builds, signs, hashes, and serializes, but never performs I/O. Anything that touches the network (fetching UTXOs, protocol parameters, submitting transactions, remote script evaluation) lives in the wrapper or in your code, where you control HTTP. Plutus execution units are computed offline in-process (via Scalus) by default, so even script transactions build without a network connection.
+
+## Threading
+
+A single `CclLib` instance is **safe to share across threads** — each OS thread is attached to the GraalVM isolate lazily and gets its own native call state, so it works naturally in threaded web servers (Flask/FastAPI/gunicorn, `ThreadPoolExecutor`). Just never use an instance after `close()`; that raises `CclClosedError`.
+
+## Networks
+
+```python
+from ccl import Network
+
+Network.MAINNET  # 0
+Network.TESTNET  # 1
+Network.PREPROD  # 2
+Network.PREVIEW  # 3
+```
+
+Every key-derivation method requires an explicit `network` argument — there is no default; omitting it raises `TypeError`. `Network` is an `IntEnum`, and out-of-range ints raise `ValueError` at the wrapper boundary. Note the values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Network.MAINNET == 0`, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api/#networks).
+
+## Examples
+
+Runnable examples live in [`wrappers/python/examples/`](../../wrappers/python/examples):
+
+- `01_account_and_keys.py` — create/restore accounts, derive keys and DRep id
+- `02_primitives.py` — mnemonics, Blake2b hashing, Ed25519 sign/verify, address parsing
+- `03_build_and_sign_tx.py` — offline QuickTx build + sign
+- `04_plutus_evaluator.py` — Plutus mint with offline Scalus units vs. remote Blockfrost evaluation
+
+
+---
+
+# Python API Reference
+
+Source: https://bloxbean.github.io/cardano-client-bindings/python/api/
+
+```python
+from ccl import CclLib, Network, CclError, CclClosedError
+```
+
+All functionality hangs off a `CclLib` instance. JSON-returning methods give you plain `dict`s / `list`s; key and hash methods return `str`.
+
+## CclLib
+
+```python
+CclLib(lib_path=None)          # lib_path: directory containing libccl, overrides auto-resolution
+lib.version() -> str
+lib.close() -> None            # idempotent
+# context manager: with CclLib() as lib: ...
+```
+
+Constructing loads the native library (see [resolution order](../troubleshooting/#how-the-native-library-is-found)), creates a GraalVM isolate, and verifies the library version matches the wrapper. The API groups are attributes: `lib.account`, `lib.address`, `lib.crypto`, `lib.tx`, `lib.plutus`, `lib.script`, `lib.gov`, `lib.wallet`, `lib.quicktx`.
+
+**Lifecycle.** `close()` detaches all attached threads and tears down the isolate; it is idempotent and also runs on `__exit__`/`__del__`. Any call after `close()` raises `CclClosedError` — this is deliberate: passing a stale isolate handle to the native side would abort the whole process uncatchably, so the wrapper converts it into a catchable exception.
+
+**Threading.** One `CclLib` may be shared across threads: each OS thread is attached to the isolate lazily on first use and gets its own native call state, so concurrent calls from a thread pool are safe.
+
+## Networks
+
+```python
+class Network(IntEnum):
+    MAINNET = 0
+    TESTNET = 1
+    PREPROD = 2
+    PREVIEW = 3
+```
+
+Every method that derives keys (`account`, `wallet`, `gov`, signing) requires a `network` argument. Omitting it raises `TypeError`; an out-of-range value raises `ValueError` before any native call. Being an `IntEnum`, plain ints 0–3 are accepted too, but prefer the enum.
+
+> **Gotcha:** these values are CCL enum ordinals, **not** Cardano's on-chain network id — the two are inverted for mainnet/testnet (`Network.MAINNET == 0`, but a mainnet address's on-chain `network_id` is `1`). `address.info()["network_id"]` is the genuine on-chain value; never feed it back into an API that takes a `network`.
+
+## Errors
+
+| Exception | When |
+|---|---|
+| `CclError` | A native call failed. Has `.code` (see table below) and `.message`. `str(e)` = `"CCL Error <code>: <message>"`. |
+| `CclClosedError` (a `RuntimeError`) | Any API call after `close()`. |
+| `TypeError` / `ValueError` | Missing / out-of-range `network` argument. |
+| `OSError` | Native library could not be loaded. |
+| `RuntimeError` | Isolate creation failure or wrapper/native version mismatch. |
+
+Error codes on `CclError.code` (also available as `CclLib.CCL_ERROR_*` constants):
+
+| Constant | Code | Meaning |
+|---|---|---|
+| `CCL_ERROR_GENERAL` | -1 | Unspecified failure |
+| `CCL_ERROR_INVALID_ARGUMENT` | -2 | Bad argument |
+| `CCL_ERROR_SERIALIZATION` | -3 | (De)serialization failure |
+| `CCL_ERROR_CRYPTO` | -4 | Cryptographic failure |
+| `CCL_ERROR_INVALID_NETWORK` | -5 | Bad network value |
+| `CCL_ERROR_INVALID_MNEMONIC` | -6 | Bad mnemonic |
+| `CCL_ERROR_INVALID_ADDRESS` | -7 | Bad address |
+| `CCL_ERROR_INSUFFICIENT_FUNDS` | -8 | UTXOs can't cover outputs + fee |
+| `CCL_ERROR_INVALID_TRANSACTION` | -9 | Bad transaction |
+| `CCL_ERROR_TX_BUILD` | -10 | TxPlan build failure (most common `quicktx.build` error — usually a malformed plan) |
+
+Predicate methods (`address.validate`, `crypto.validate_mnemonic`, `crypto.verify`) return `False` instead of raising.
+
+## lib.account
+
+```python
+create(network) -> dict
+from_mnemonic(mnemonic, network, account_index=0, address_index=0) -> dict
+get_private_key(mnemonic, network, account_index=0, address_index=0) -> str   # extended key, 128 hex chars
+get_public_key(mnemonic, network, account_index=0, address_index=0) -> str    # 64 hex chars
+get_drep_id(mnemonic, network, account_index=0) -> str                        # "drep1..."
+sign_tx(mnemonic, tx_cbor_hex, network, account_index=0, address_index=0) -> str
+sign_tx_with_keys(mnemonic, tx_cbor_hex, keys, network, account_index=0, address_index=0) -> str
+```
+
+`create`/`from_mnemonic` return `{"mnemonic", "base_address", "enterprise_address", "stake_address"}`.
+
+- `create` generates a fresh 24-word mnemonic; treat `result["mnemonic"]` as a secret.
+- `get_private_key` returns the 64-byte **extended** key as 128 hex chars. For raw Ed25519 signing (`crypto.sign`) use the first 64 hex chars (`key[:64]`).
+- `sign_tx` witnesses with the payment key only. When a transaction carries certificates that need other witnesses, use `sign_tx_with_keys` — `keys` is a list (or comma-separated string) of roles applied in order: `"payment"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`:
+
+```python
+# A stake registration needs the payment key (fee) and the stake key (certificate):
+signed = lib.account.sign_tx_with_keys(mnemonic, result["tx_cbor"], ["payment", "stake"], Network.TESTNET)
+```
+
+> Note the argument order: unlike the other wrappers, `sign_tx`/`sign_tx_with_keys` take the transaction (and keys) **before** the network.
+
+## lib.address
+
+```python
+info(bech32_address) -> dict
+validate(bech32_address) -> bool
+to_bytes(bech32_address) -> str    # hex
+from_bytes(hex_bytes) -> str       # bech32
+```
+
+`info` returns `{"type", "network_id", "payment_credential_hash", ...}`. `type` is e.g. `"Base"`, `"Enterprise"`, `"Pointer"`, `"Reward"`; `network_id` is the genuine on-chain id (mainnet = 1).
+
+## lib.crypto
+
+```python
+blake2b_256(data_hex) -> str       # 64 hex chars
+blake2b_224(data_hex) -> str       # 56 hex chars
+generate_mnemonic(word_count=24) -> str
+validate_mnemonic(mnemonic) -> bool
+sign(message_hex, sk_hex) -> str   # Ed25519; 32-byte key (64 hex chars)
+verify(signature_hex, message_hex, pk_hex) -> bool
+```
+
+```python
+digest = lib.crypto.blake2b_256("48656c6c6f")            # "Hello"
+sk = lib.account.get_private_key(mnemonic, Network.TESTNET)[:64]
+sig = lib.crypto.sign("68656c6c6f", sk)
+```
+
+## lib.tx
+
+```python
+hash(tx_cbor_hex) -> str            # 64 hex chars
+sign_with_secret_key(tx_cbor_hex, sk_cbor_hex) -> str
+to_json(tx_cbor_hex) -> dict
+from_json(tx_json) -> str           # accepts dict or JSON string; returns CBOR hex
+deserialize(tx_cbor_hex) -> dict
+```
+
+`to_json`/`deserialize` return a dict with a `body` key (inputs/outputs/fee).
+
+> **Known limitations (current release):** `tx.from_json` and `tx.sign_with_secret_key` hit GraalVM reflection gaps in the native library and are not usable yet. For signing, use `account.sign_tx` (mnemonic-based), which covers the common path.
+
+## lib.plutus
+
+```python
+data_hash(datum_cbor_hex) -> str    # 64 hex chars
+data_to_json(cbor_hex) -> str
+data_from_json(json_str) -> str     # accepts dict or JSON string; returns CBOR hex
+```
+
+```python
+h = lib.plutus.data_hash("182a")    # hash of PlutusData int 42
+```
+
+> **Known limitation (current release):** `data_to_json`/`data_from_json` hit a GraalVM reflection gap and are not usable yet; `data_hash` works.
+
+## lib.script
+
+```python
+native_from_json(json_str) -> str          # JSON string: {"policy_id", "script_hash", "cbor_hex"}
+hash(script_cbor_hex, script_type=0) -> str  # 56 hex chars
+```
+
+`script_type`: `0` native, `1` PlutusV1, `2` PlutusV2, `3` PlutusV3.
+
+```python
+import json
+script = json.loads(lib.script.native_from_json(json.dumps({"type": "sig", "keyHash": key_hash})))
+# script["policy_id"], script["script_hash"], script["cbor_hex"]
+```
+
+## lib.gov
+
+```python
+drep_key_from_mnemonic(mnemonic, network, account_index=0) -> dict
+committee_cold_key_from_mnemonic(mnemonic, network, account_index=0) -> dict
+committee_hot_key_from_mnemonic(mnemonic, network, account_index=0) -> dict
+```
+
+The DRep method returns `{"drep_id": "drep1...", "verification_key", "verification_key_hash"}`; committee methods return `{"id": "cc_cold1..." / "cc_hot1...", ...}`.
+
+## lib.wallet
+
+HD wallet: one mnemonic, many sequential addresses.
+
+```python
+create(network) -> dict                              # {"mnemonic", "stake_address", "addresses"}
+from_mnemonic(mnemonic, network) -> dict
+get_address(mnemonic, network, index=0) -> str       # bech32
+```
+
+## lib.quicktx
+
+```python
+build(txplan_yaml, utxos, protocol_params, exec_units=None) -> dict
+build_with(txplan_yaml, provider, sender, evaluator=None) -> dict
+```
+
+Both return `{"tx_cbor": str, "tx_hash": str, "fee": str}`.
+
+- **`build`** is fully offline: you describe the transaction as [TxPlan YAML](../../reference/txplan/) and supply the chain data yourself. UTXO selection, fee calculation, and change handling happen inside the native library. It never submits — sign the returned `tx_cbor` and submit with any HTTP client.
+- `utxos` is a list of CCL `Utxo` dicts: `{"tx_hash", "output_index", "address", "amount": [{"unit", "quantity"}]}`. `unit` is `"lovelace"` or `policyId + assetNameHex`. Pass quantities as **strings** (`"quantity": "100000000"`); Python ints are arbitrary precision, so reading values back (e.g. `int(result["fee"])`) is always exact.
+- `protocol_params` is the CCL `ProtocolParams` dict; unknown fields are ignored.
+- `exec_units` — for Plutus transactions, `[{"mem": ..., "steps": ...}]`, one entry per redeemer in transaction order. When omitted, the native library computes them **offline** with the embedded Scalus evaluator.
+- **`build_with`** fetches UTXOs and protocol parameters from a [provider](../providers/), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.
+
+```python
+result = lib.quicktx.build(yaml, utxos, params)
+
+plutus_result = lib.quicktx.build(yaml, utxos, params,
+                                  exec_units=[{"mem": 2000000, "steps": 500000000}])
+```
+
+
+---
+
+# Building Transactions (Python)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/python/transactions/
+
+This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from Python.
+
+## The workflow
+
+Every transaction follows the same four steps:
+
+```python
+from ccl import CclLib, Network, YaciProvider
+import urllib.request
+
+with CclLib() as lib:
+    provider = YaciProvider()   # or BlockfrostProvider, or your own
+
+    # 1. Describe — TxPlan YAML (see the intent catalog)
+    yaml = f"""
+    version: 1.0
+    transaction:
+      - tx:
+          from: {sender}
+          intents:
+            - type: payment
+              address: {receiver}
+              amounts:
+                - unit: lovelace
+                  quantity: "5000000"
+    """
+
+    # 2. Build — offline; UTXO selection, fee, and change happen in the native lib
+    result = lib.quicktx.build_with(yaml, provider, sender)
+    # (or lib.quicktx.build(yaml, utxos, protocol_params) with your own chain data)
+
+    # 3. Sign — with the key roles the transaction's certificates require
+    signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], Network.TESTNET)
+
+    # 4. Submit — any Blockfrost-compatible endpoint; the library never submits
+    req = urllib.request.Request(f"{submit_url}/tx/submit", method="POST",
+                                 data=bytes.fromhex(signed),
+                                 headers={"Content-Type": "application/cbor"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        tx_hash = resp.read().decode().strip().strip('"')
+```
+
+## Which keys sign what
+
+`sign_tx` witnesses with the payment key only. Certificates need their own witness — use `sign_tx_with_keys` with roles **in order**:
+
+| Transaction contains | `keys` |
+|---|---|
+| Payments, metadata, minting, Plutus operations | `["payment"]` (or plain `sign_tx`) |
+| `stake_registration` / `stake_deregistration` / `stake_delegation` / `stake_withdrawal` / `voting_delegation` | `["payment", "stake"]` |
+| `drep_registration` / `drep_update` / `drep_deregistration` / `voting` | `["payment", "drep"]` |
+| `governance_proposal` | `["payment"]` |
+| `pool_registration` / `pool_update` / `pool_retirement` | `["payment", "stake"]` when the pool is keyed to the account's stake key |
+
+A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+
+## Worked example: register and delegate stake
+
+Two transactions — the registration must be on-chain before the delegation:
+
+```python
+stake_yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: stake_registration
+          stake_address: {account["stake_address"]}
+"""
+reg = lib.quicktx.build_with(stake_yaml, provider, sender)
+signed_reg = lib.account.sign_tx_with_keys(mnemonic, reg["tx_cbor"], ["payment", "stake"], Network.TESTNET)
+# submit signed_reg; wait for inclusion before the next step
+
+deleg_yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: stake_delegation
+          stake_address: {account["stake_address"]}
+          pool_id: pool1...
+"""
+deleg = lib.quicktx.build_with(deleg_yaml, provider, sender)
+signed_deleg = lib.account.sign_tx_with_keys(mnemonic, deleg["tx_cbor"], ["payment", "stake"], Network.TESTNET)
+```
+
+## Worked example: DRep registration, then vote
+
+The DRep credential comes from the governance API:
+
+```python
+drep = lib.gov.drep_key_from_mnemonic(mnemonic, Network.TESTNET)
+
+drep_yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: drep_registration
+          drep_credential_hex: {drep["verification_key_hash"]}
+          drep_credential_type: key_hash
+          anchor_url: https://example.com/meta.json
+          anchor_hash: {anchor_hash}
+"""
+reg = lib.quicktx.build_with(drep_yaml, provider, sender)
+signed = lib.account.sign_tx_with_keys(mnemonic, reg["tx_cbor"], ["payment", "drep"], Network.TESTNET)
+```
+
+To vote on a governance action, the action id is the proposal transaction's hash plus its index (a proposal you submit yourself returns its hash from `build` — `result["tx_hash"]`). Sign the `voting` transaction with `["payment", "drep"]`.
+
+## Worked example: mint under a native script
+
+```python
+mint_yaml = f"""
+version: 1.0
+transaction:
+  - tx:
+      from: {sender}
+      intents:
+        - type: minting
+          assets:
+            - name: TestNFT
+              value: 1
+          receiver: {receiver}
+          script_hex: "820180"
+          script_type: 0
+"""
+mint = lib.quicktx.build_with(mint_yaml, provider, sender)
+signed = lib.account.sign_tx(mnemonic, mint["tx_cbor"], Network.TESTNET)
+```
+
+An empty `ScriptAll` policy (`820180`) needs no extra signature; a `sig`-keyed policy needs the corresponding key's witness.
+
+## Worked example: Plutus mint
+
+By default execution units are computed **offline** (embedded Scalus evaluator) — a Plutus transaction is a normal build:
+
+```python
+result = lib.quicktx.build_with(plutus_mint_yaml, provider, sender)
+```
+
+To cost against a real node instead, pass an evaluator — `build_with` then runs the two-pass flow (draft → remote evaluate → rebuild):
+
+```python
+from ccl import BlockfrostEvaluator
+
+evaluator = BlockfrostEvaluator(project_id, network="preprod")
+result = lib.quicktx.build_with(plutus_mint_yaml, provider, sender, evaluator)
+```
+
+Or supply units yourself with the offline `build`:
+
+```python
+result = lib.quicktx.build(plutus_mint_yaml, utxos, params,
+                           exec_units=[{"mem": 2000000, "steps": 500000000}])
+```
+
+For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with its `data_hash`) **plus** a separate UTXO for fee/collateral in `utxos` — see the [catalog entry](../../reference/txplan/#plutus-scripts).
+
+## Errors you'll meet
+
+- `CCL Error -10` (`CCL_ERROR_TX_BUILD`) — the plan didn't build: malformed YAML, wrong intent field, or a Plutus costing problem. Compare against the [catalog](../../reference/txplan/#intent-catalog--verified-shapes).
+- `CCL Error -8` (`CCL_ERROR_INSUFFICIENT_FUNDS`) — the supplied UTXOs can't cover outputs + fee.
+- Node rejection `MissingVKeyWitnessesUTXOW` — a certificate wasn't witnessed; check the roles table above.
+
+
+---
+
+# Providers & Evaluators (Python)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/python/providers/
+
+The native library is offline by design — it never makes a network call. Providers and evaluators are small wrapper-side HTTP conveniences (stdlib `urllib`, no extra dependencies) for feeding `quicktx.build_with` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need them: call `quicktx.build` directly.
+
+```python
+from ccl import YaciProvider, BlockfrostProvider, BlockfrostEvaluator
+```
+
+## ChainDataProvider
+
+```python
+class ChainDataProvider:
+    def utxos(self, address) -> list[dict]: ...   # ALL utxos at the address; selection happens in the native lib
+    def protocol_params(self) -> dict: ...
+```
+
+Providers are duck-typed — any object with these two methods works, so plugging in Koios, Ogmios, or your own indexer is a few lines.
+
+### YaciProvider
+
+Talks to a local [Yaci DevKit](https://github.com/bloxbean/yaci-devkit) devnet (or any yaci-store instance exposing the Blockfrost-style REST API).
+
+```python
+YaciProvider(base_url="http://localhost:10000/local-cluster/api")
+```
+
+```python
+provider = YaciProvider()
+result = lib.quicktx.build_with(yaml, provider, sender_address)
+```
+
+### BlockfrostProvider
+
+```python
+BlockfrostProvider(project_id, network="mainnet", base_url=None)
+```
+
+- `network` picks the public Blockfrost endpoint: `"mainnet"`, `"preprod"`, or `"preview"` (note: there is no `"testnet"`). Pass `base_url` instead for a self-hosted instance; an unknown `network` without `base_url` raises `ValueError`.
+- UTXO fetches paginate (100 per page) until exhausted, and each UTXO gets the owning `address` injected (Blockfrost omits it, but the builder needs it).
+- Protocol parameters come from `/epochs/latest/parameters`; the native library ignores the extra Blockfrost fields.
+
+```python
+import os
+provider = BlockfrostProvider(os.environ["BF_PROJECT_ID"], network="preprod")
+result = lib.quicktx.build_with(yaml, provider, sender_address)
+```
+
+## Evaluators
+
+For Plutus transactions, execution units are computed **offline by default** — the native library embeds the Scalus UPLC evaluator, so no evaluator is needed for a script transaction to build. Use a remote evaluator when you want node-backed costing instead:
+
+```python
+class TransactionEvaluator:
+    def evaluate(self, tx_cbor, utxos=None) -> list[dict]: ...   # [{"mem", "steps"}] in redeemer order
+```
+
+### BlockfrostEvaluator
+
+```python
+BlockfrostEvaluator(project_id, network="mainnet", base_url=None)
+```
+
+POSTs the draft transaction CBOR to `/utils/txs/evaluate` (Blockfrost / Ogmios-compatible) and parses the response into `[{"mem", "steps"}]` in Cardano redeemer order (`spend < mint < cert < reward < vote < propose`). Both the purpose-keyed map form and the Ogmios v6 list form are handled.
+
+```python
+evaluator = BlockfrostEvaluator(project_id, network="preprod")
+result = lib.quicktx.build_with(yaml, provider, sender, evaluator)
+# two-pass: draft build (offline units) → remote evaluate → rebuild with returned units
+```
+
+## Numbers
+
+Chain data carries quantities as **strings** in the canonical CCL models (`"quantity": "5000000"`), and Python's `int` is arbitrary precision — there is no 2^53 float-truncation risk anywhere on the Python path. Read the fee back with `int(result["fee"])`.
+
+## Timeouts & errors
+
+Provider GETs are bounded at 30 seconds and evaluator POSTs at 60 seconds; a hung endpoint raises instead of blocking forever. HTTP failures raise `RuntimeError(f"GET/POST <url> failed: HTTP <code>: <body>")`.
+
+
+---
+
+# Troubleshooting (Python)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/python/troubleshooting/
+
+## How the native library is found
+
+`CclLib(lib_path=None)` resolves `libccl.dylib` / `libccl.so` / `libccl.dll` in this order:
+
+1. The explicit `lib_path` constructor argument (a directory).
+2. The `CCL_LIB_PATH` environment variable (a directory) — the usual way to run against a locally built library.
+3. A copy bundled inside the installed wheel (`ccl/_libs/`) — this is what a normal `pip install` uses.
+4. The bare filename, letting the OS loader search its default paths.
+
+On Windows, the library's directory is registered with `os.add_dll_directory` so sibling DLL dependencies resolve.
+
+## Common errors
+
+### `OSError` loading the library
+
+The library file wasn't found or couldn't be loaded.
+
+- **Wheel install:** make sure you installed a wheel built for your platform (check `pip show -f cardano-client-lib` lists `ccl/_libs/libccl...`). A source install has no bundled library — set `CCL_LIB_PATH`.
+- **Local build:** set `CCL_LIB_PATH` to the directory containing the library, **and** make the OS loader happy for its transitive dependencies:
+  ```bash
+  export CCL_LIB_PATH=/path/to/core/build/native/nativeCompile
+  export DYLD_LIBRARY_PATH=$CCL_LIB_PATH   # macOS
+  export LD_LIBRARY_PATH=$CCL_LIB_PATH     # Linux
+  ```
+- **Unsupported platform** (macOS Intel): no prebuilt library exists — build from source (below).
+
+### `RuntimeError: ... incompatible ...` (version mismatch)
+
+The wrapper and the native library must match on base semver. This appears when `CCL_LIB_PATH` points at a stale build. Rebuild the library, or (at your own risk) set `CCL_SKIP_VERSION_CHECK=1`.
+
+### `CclClosedError`
+
+Something called the instance after `close()` (or after its `with` block ended). This exception is the wrapper saving you: handing a stale isolate handle to the native side would abort the whole interpreter. Keep calls inside the instance's lifetime, or create a new `CclLib`.
+
+### `TypeError` / `ValueError` about `network`
+
+The `network` argument is required and validated — there is no default (a silent mainnet default was removed deliberately). Pass `Network.MAINNET/TESTNET/PREPROD/PREVIEW`.
+
+### `CCL Error -10: ...` from `quicktx.build`
+
+`CCL_ERROR_TX_BUILD` — the TxPlan didn't build. Usual causes:
+
+- Malformed YAML or a wrong intent field name (check against the [TxPlan reference](../../reference/txplan/)).
+- A Plutus transaction with wrong/missing execution units.
+- `CCL Error -8` (`INSUFFICIENT_FUNDS`) means the supplied UTXOs can't cover outputs + fee.
+
+### `tx.from_json` / `plutus.data_to_json` / `plutus.data_from_json` fail
+
+Known limitation of the current native library (GraalVM reflection configuration gaps). Use the working alternatives: `account.sign_tx` for signing, `plutus.data_hash` for datum hashing.
+
+## Building the native library from source
+
+Needed only on platforms without a prebuilt library (macOS Intel) or for development against the bridge itself:
+
+```bash
+git clone https://github.com/bloxbean/cardano-client-bindings
+cd cardano-client-bindings
+sdk install java 25.0.3-graal        # GraalVM with native-image
+./gradlew :core:nativeCompile        # → core/build/native/nativeCompile/libccl.*
+export PYTHONPATH=$PWD/wrappers/python
+export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
+```
+
+## Platform support
+
+| Platform | Prebuilt | Notes |
+|---|---|---|
+| Linux x86_64 (glibc ≥ 2.17) | ✅ | RHEL/CentOS 7+, Ubuntu 18.04+, Debian 9+, Amazon Linux 2, … |
+| Linux aarch64 (glibc ≥ 2.17) | ✅ | |
+| macOS Apple Silicon | ✅ | |
+| macOS Intel | ❌ | Oracle GraalVM dropped Intel Macs |
+| Windows x86_64 | ✅ | |
+
+> Alpine/musl: the musl native library exists (the Go/Rust/JS wrappers use it), but musllinux wheel publishing is still being wired up — on Alpine, install from source with `CCL_LIB_PATH` pointing at the musl `libccl.so` for now.
+
+
+---
+
+# QuickTx — TxPlan (YAML) Transaction Builder
+
+Source: https://bloxbean.github.io/cardano-client-bindings/reference/txplan/
+
+QuickTx builds unsigned Cardano transactions **fully offline** from a CCL
+[**TxPlan**](https://github.com/bloxbean/cardano-client-lib) — a YAML document describing what the
+transaction should do. You pass the TxPlan YAML plus the chain data the build needs (UTXOs and
+protocol parameters), and get back an unsigned transaction in CBOR hex.
+
+The whole interface is YAML: **TxPlan YAML in → YAML result out**.
+
+## Overview
+
+- **Single function**: `ccl_quicktx_build(thread, yaml, utxos_json, protocol_params_json, exec_units_json)` → returns `0` on success.
+- **Result**: a YAML document with `tx_cbor` (unsigned transaction), `tx_hash`, and `fee`.
+- **Fully offline**: the caller supplies UTXOs and protocol parameters — the native library makes no
+  HTTP calls and never submits. (The native entry point has no provider mode; each wrapper offers a
+  `build_with` convenience that fetches the chain data from a [wrapper-side provider](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0011-wrapper-side-chain-data-providers.md) first.)
+- **Client-side chain data**: UTXOs and protocol parameters are passed as JSON (the standard CCL
+  `Utxo` / `ProtocolParams` models).
+
+### Entry point
+
+```c
+int ccl_quicktx_build(
+    graal_isolatethread_t* thread,
+    const char* yaml,                  // TxPlan YAML
+    const char* utxos_json,            // JSON array of UTXOs
+    const char* protocol_params_json,  // JSON protocol parameters
+    const char* exec_units_json        // JSON [{mem, steps}] per redeemer, or null (Plutus only; null = compute offline with the embedded Scalus evaluator)
+);
+```
+
+### Return codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | Success — retrieve the result via `ccl_get_result(thread)` |
+| `-2` | Invalid argument (e.g. missing YAML or protocol parameters) |
+| `-8` | Insufficient funds (UTXOs can't cover outputs + fees) |
+| `-10`| Transaction build failure (e.g. malformed TxPlan) |
+
+### Success result (YAML)
+
+```yaml
+tx_cbor: 84a400...
+tx_hash: abcd1234...
+fee: "173333"
+```
+
+---
+
+## TxPlan — YAML structure
+
+A TxPlan is a YAML document with an optional `version`, optional `variables` for substitution, and a
+`transaction` list. Each list entry has a `tx` block with the sender (`from`) and a list of `intents`.
+
+```yaml
+version: 1.0
+
+# Optional: ${name} placeholders are substituted before the plan is parsed.
+variables:
+  to: addr_test1...
+  amount: "5000000"
+
+transaction:
+  - tx:
+      from: addr_test1...            # sender / default fee payer
+      intents:
+        - type: payment
+          address: ${to}
+          amounts:
+            - unit: lovelace
+              quantity: ${amount}
+```
+
+Multiple entries in `transaction` are **composed** into a single transaction (each `tx` may have a
+different `from`). The `tx` block also accepts context such as a fee payer and a validity interval;
+those fields follow CCL's TxPlan serialization (see the reference link above).
+
+### Intents
+
+Each intent has a `type` discriminator. The full set supported by CCL's TxPlan:
+
+| `type` | Purpose |
+|--------|---------|
+| `payment` | Pay ADA / native tokens to an address |
+| `minting` | Mint/burn with a native script |
+| `metadata` | Attach transaction metadata |
+| `donation` | Treasury donation |
+| `stake_registration` | Register a stake address |
+| `stake_deregistration` | Deregister a stake address |
+| `stake_delegation` | Delegate to a stake pool |
+| `stake_withdrawal` | Withdraw staking rewards |
+| `drep_registration` / `drep_deregistration` / `drep_update` | DRep lifecycle |
+| `voting` | Cast a governance vote |
+| `voting_delegation` | Delegate voting power to a DRep |
+| `governance_proposal` | Submit a governance action |
+| `pool_registration` / `pool_update` / `pool_retirement` | Stake-pool lifecycle |
+| `collect_from` | Explicitly select input UTXOs |
+| `reference_input` | Add read-only reference inputs |
+| `native_script` | Attach a native script |
+| `script_collect_from` / `script_minting` / `validator` | Plutus script operations |
+
+> The exact YAML fields for each intent come from CCL's TxPlan serialization. This bridge passes the
+> YAML through unchanged, so the authoritative field reference is the CCL `quicktx` module
+> (`intent/*Intent.java` and the TxPlan tests at `v0.8.0-pre4`). Known-good shapes for every intent
+> are cataloged in [Intent catalog — verified shapes](#intent-catalog--verified-shapes) below.
+
+> **Plutus script transactions** build fully offline with no extra input: when `exec_units_json` is
+> null, the native library computes the redeemers' **execution units** itself with the embedded
+> [Scalus](https://scalus.org) UPLC evaluator (see [ADR-0013](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0013-transaction-evaluators.md)).
+> To supply your own units instead — from Ogmios, Blockfrost, Aiken, or any other evaluator — pass
+> `exec_units_json`, a JSON array of `[{mem, steps}]`, one per redeemer in transaction order; the
+> bridge then wires CCL's `StaticTransactionEvaluator` to stamp them on without running the script.
+> Explicit units always take precedence over the Scalus default.
+
+---
+
+## Chain data (caller-supplied)
+
+### UTXO format
+
+`utxos_json` is a JSON array in the standard Blockfrost/Koios/DevKit shape:
+
+```json
+[
+  {
+    "tx_hash": "aaaa...64hex",
+    "output_index": 0,
+    "address": "addr_test1...",
+    "amount": [
+      { "unit": "lovelace", "quantity": "100000000" },
+      { "unit": "policy_hex+asset_name_hex", "quantity": "500" }
+    ]
+  }
+]
+```
+
+### Protocol parameters
+
+`protocol_params_json` is a JSON object in the standard protocol-parameters shape (`min_fee_a`,
+`min_fee_b`, `key_deposit`, `pool_deposit`, `coins_per_utxo_size`, the Conway governance deposits,
+etc.). The CCL `ProtocolParams` model deserializes it directly.
+
+---
+
+## Examples
+
+### 1. Simple ADA payment
+
+```yaml
+version: 1.0
+transaction:
+  - tx:
+      from: addr_test1qp...
+      intents:
+        - type: payment
+          address: addr_test1qz...
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+```
+
+### 2. Multiple payments (one sender)
+
+```yaml
+version: 1.0
+transaction:
+  - tx:
+      from: addr_test1qp...
+      intents:
+        - type: payment
+          address: addr_test1_receiver1...
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+        - type: payment
+          address: addr_test1_receiver2...
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+```
+
+### 3. Variable substitution
+
+```yaml
+version: 1.0
+variables:
+  to: addr_test1qz...
+  amount: "4000000"
+transaction:
+  - tx:
+      from: addr_test1qp...
+      intents:
+        - type: payment
+          address: ${to}
+          amounts:
+            - unit: lovelace
+              quantity: ${amount}
+```
+
+### 4. Payment with metadata
+
+The `metadata` intent's value is a **scalar string** that the deserializer auto-detects — pass it as
+a JSON string (it may also be CBOR hex). Labels are the top-level keys:
+
+```yaml
+version: 1.0
+transaction:
+  - tx:
+      from: addr_test1qp...
+      intents:
+        - type: payment
+          address: addr_test1qz...
+          amounts:
+            - unit: lovelace
+              quantity: "2000000"
+        - type: metadata
+          metadata: '{"674": {"msg": "Hello from Cardano Client Bindings"}}'
+```
+
+### 5. Plutus mint (with caller-supplied execution units)
+
+A script intent goes under `scripts:` (the validator) with the operation in `intents:`. Execution
+units are optional — omitted, the embedded Scalus evaluator computes them offline; this example
+supplies them explicitly, in which case the bridge stamps them on without running the script.
+
+```yaml
+version: 1.0
+transaction:
+  - tx:
+      from: addr_test1qp...
+      intents:
+        - type: script_minting
+          policyId: 793f8c8cffba081b2a56462fc219cc8fe652d6a338b62c7b134876e7
+          assets:
+            - name: TestToken
+              value: 1
+          receiver: addr_test1qp...
+          redeemer:
+            int: 0
+      scripts:
+        - type: validator
+          role: mint
+          cbor_hex: 4e4d01000033222220051200120011
+          version: v2
+```
+
+…built with `exec_units_json = [{"mem": 2000000, "steps": 500000000}]` (one entry for the single
+mint redeemer), or with `exec_units_json = null` to let Scalus compute the units.
+
+### 6. Compose (multiple senders into one transaction)
+
+The `transaction` list can hold more than one `tx`, each with its own `from`; they are composed into
+a single transaction. The `context.fee_payer` pays the fee. Supply UTXOs for every sender.
+
+```yaml
+version: 1.0
+context:
+  fee_payer: addr_test1_sender1...
+transaction:
+  - tx:
+      from: addr_test1_sender1...
+      intents:
+        - type: payment
+          address: addr_test1_receiver...
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+  - tx:
+      from: addr_test1_sender2...
+      intents:
+        - type: payment
+          address: addr_test1_receiver...
+          amounts:
+            - unit: lovelace
+              quantity: "3000000"
+```
+
+---
+
+## Intent catalog — verified shapes
+
+The shapes below are taken from the repository's integration-test fixtures
+(`test-fixtures/quicktx-intents/`), which every wrapper submits against a real devnet in CI — they
+are known-good. Each snippet shows the `intents:` (and where relevant `inputs:`/`scripts:`) block;
+the surrounding skeleton (`version`, `context.fee_payer`, `tx.from`, `tx.change_address`) is the
+same as in the examples above. The **Sign with** column lists the key roles for
+`sign_tx_with_keys` — certificates must be witnessed by their key or the node rejects the
+transaction with `MissingVKeyWitnessesUTXOW`.
+
+### Staking
+
+| Intent | Sign with |
+|---|---|
+| `stake_registration`, `stake_deregistration`, `stake_delegation`, `stake_withdrawal` | `payment`, `stake` |
+
+```yaml
+intents:
+  - type: stake_registration
+    stake_address: stake_test1uq...
+
+  - type: stake_deregistration
+    stake_address: stake_test1uq...
+    refund_address: addr_test1qz...     # receives the key deposit back
+
+  - type: stake_delegation
+    stake_address: stake_test1uq...
+    pool_id: pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy
+
+  - type: stake_withdrawal
+    reward_address: stake_test1uq...
+    amount: 0                            # the full reward balance must be withdrawn; 0 when empty
+```
+
+(One intent per transaction in the fixtures; registration must be on-chain before delegation/withdrawal. Conway requires the stake address to be vote-delegated before a withdrawal.)
+
+### Governance — DRep lifecycle
+
+| Intent | Sign with |
+|---|---|
+| `drep_registration`, `drep_update`, `drep_deregistration` | `payment`, `drep` |
+
+```yaml
+intents:
+  - type: drep_registration
+    drep_credential_hex: a5b45515a3ff8cb7c02ce351834da324eb6dfc41b5779cb5e6b832aa  # verification_key_hash from the gov API
+    drep_credential_type: key_hash
+    anchor_url: https://example.com/meta.json
+    anchor_hash: aaaa...64hex
+
+  - type: drep_update
+    drep_credential_hex: a5b4...
+    drep_credential_type: key_hash
+    anchor_url: https://example.com/meta.json
+    anchor_hash: aaaa...64hex
+
+  - type: drep_deregistration
+    drep_credential_hex: a5b4...
+    drep_credential_type: key_hash
+```
+
+The credential hex is the DRep `verification_key_hash` from the governance API (`drep_key_from_mnemonic`).
+
+### Governance — voting
+
+| Intent | Sign with |
+|---|---|
+| `voting_delegation` | `payment`, `stake` |
+| `governance_proposal` | `payment` |
+| `voting` | `payment`, `drep` |
+
+```yaml
+intents:
+  # Delegate a stake address's voting power to a DRep (or abstain / no-confidence):
+  - type: voting_delegation
+    address: stake_test1uq...
+    drep_hex: "8102"          # serialized DRep; for a key DRep use its credential form
+    drep_type: abstain        # abstain | no_confidence | key DRep
+
+  # Submit a governance action (the return_address gets the deposit back):
+  - type: governance_proposal
+    gov_action_hex: "8106"    # serialized GovAction (8106 = info action)
+    return_address: stake_test1uq...
+    anchor_url: https://example.com/meta.json
+    anchor_hash: aaaa...64hex
+
+  # Vote on a governance action; the action id is the proposal's tx hash + index:
+  - type: voting
+    voter_hex: 8202581ca5b4...   # serialized Voter (DRep key-hash form)
+    gov_action_tx_hash: 1274...64hex
+    gov_action_index: 0
+    vote: "YES"                  # YES | NO | ABSTAIN
+    anchor_url: https://example.com/meta.json
+    anchor_hash: aaaa...64hex
+```
+
+### Stake pools
+
+| Intent | Sign with |
+|---|---|
+| `pool_registration`, `pool_update`, `pool_retirement` | `payment`, `stake` (pool keyed to the account's stake key; a real pool uses its operator cold key) |
+
+```yaml
+intents:
+  - type: pool_registration
+    update: false
+    is_update: false
+    pool_registration:
+      type: POOL_REGISTRATION
+      operator: 32c7...28hex            # pool operator key hash
+      vrfKeyHash: b95a...64hex
+      pledge: 100000000
+      cost: 340000000
+      margin: { numerator: 1, denominator: 100 }
+      rewardAccount: e032...            # reward account (header byte + stake key hash)
+      poolOwners:
+        - 32c7...28hex
+      relays:
+        - relay_type: single_host_addr
+          port: 3001
+
+  # pool_update is identical with `update: true` / `is_update: true`
+
+  - type: pool_retirement
+    pool_id: pool1pu5jlj4q9w9jlxeu370a3c9myx47md5j5m2str0naunn2q3lkdy
+    retirement_epoch: 500
+```
+
+### Treasury donation
+
+```yaml
+intents:
+  - type: donation
+    current_treasury_value: 0     # must match the ledger's current value at submission
+    donation_amount: 1000000
+```
+
+### Explicit inputs
+
+`inputs:` sits alongside `intents:` in the `tx` block:
+
+```yaml
+inputs:
+  # Spend exactly these UTXOs instead of automatic selection:
+  - type: collect_from
+    utxo_refs:
+      - tx_hash: aaaa...64hex
+        output_index: 0
+
+  # Read-only reference inputs (CIP-31):
+  - type: reference_input
+    refs:
+      - tx_hash: cccc...64hex
+        output_index: 0
+```
+
+### Native scripts
+
+```yaml
+# Mint/burn under a native script policy:
+intents:
+  - type: minting
+    assets:
+      - name: TestNFT
+        value: 1                 # negative to burn
+    receiver: addr_test1vz...
+    script_hex: "820180"         # serialized native script (empty ScriptAll here)
+    script_type: 0
+
+# Attach a native script witness to the transaction:
+scripts:
+  - type: native_script
+    script_hex: 8201818200581ca101...
+```
+
+### Plutus scripts
+
+Lock at a script address (a plain payment with a datum hash):
+
+```yaml
+intents:
+  - type: payment
+    address: addr_test1wp...     # script address
+    amounts:
+      - unit: lovelace
+        quantity: "10000000"
+    datum_hash: 9e11...64hex
+```
+
+Spend a script UTXO (`script_collect_from` input + the validator under `scripts:`):
+
+```yaml
+inputs:
+  - type: script_collect_from
+    utxo_refs:
+      - tx_hash: bbbb...64hex     # the locked UTXO
+        output_index: 0
+    redeemer:
+      int: 0                      # PlutusData in JSON form
+    datum:
+      int: 42                     # must hash to the locked output's datum_hash
+intents:
+  - type: payment
+    address: addr_test1vz...
+    amounts:
+      - unit: lovelace
+        quantity: "5000000"
+scripts:
+  - type: validator
+    role: spend
+    cbor_hex: 4e4d01000033222220051200120011
+    version: v2
+```
+
+Mint under a Plutus policy (`script_minting`, shown in [example 5](#5-plutus-mint-with-caller-supplied-execution-units)). For any Plutus transaction, supply the UTXO being spent (with its `data_hash`) **plus** a separate UTXO for fee/collateral, and either pass `exec_units` or let the offline Scalus evaluator compute them.
+
+---
+
+## Using it from the wrappers
+
+Each wrapper exposes a thin `build(yaml, utxos, protocolParams, execUnits?)` that marshals the chain
+data to JSON, calls `ccl_quicktx_build`, and parses the YAML result — plus a `build_with(yaml,
+provider, sender, evaluator?)` convenience that fetches the chain data from a provider first (see
+each wrapper's providers guide). The result is an object/dict/struct with `tx_cbor`, `tx_hash`, and
+`fee`. Both return an **unsigned** transaction — sign `tx_cbor` with the account sign API, then
+submit it yourself.
+
+> **Signing stake/governance transactions.** `sign_tx` adds only the **payment** key. Certificates
+> in stake registration/deregistration/delegation, reward withdrawal, and DRep/vote operations must
+> also be witnessed by the **stake** (or **DRep**) key, or the node rejects the tx with
+> `MissingVKeyWitnessesUTXOW`. Use `sign_tx_with_keys(..., keys)` (Go `SignTxWithKeys`, JS
+> `signTxWithKeys`) with the roles you need, e.g. `["payment", "stake"]` or `["payment", "drep"]`
+> (roles: `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`).
+
+### Python
+
+```python
+from ccl import CclLib
+
+lib = CclLib()
+result = lib.quicktx.build(txplan_yaml, utxos, protocol_params)  # -> {"tx_cbor","tx_hash","fee"}
+signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], CclLib.TESTNET, 0, 0)
+```
+
+### JavaScript (Bun)
+
+```javascript
+import { CclBridge, TESTNET } from '@bloxbean/cardano-client-lib';
+
+const bridge = new CclBridge();
+const result = bridge.quicktx.build(txplanYaml, utxos, protocolParams);
+const signed = bridge.account.signTx(mnemonic, TESTNET, 0, 0, result.tx_cbor);
+```
+
+### Go
+
+```go
+bridge, _ := ccl.New()
+defer bridge.Close()
+
+result, _ := bridge.QuickTx.Build(txplanYaml, utxos, protocolParams)
+signed, _ := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, result.TxCbor)
+```
+
+### Rust
+
+```rust
+let bridge = ccl::Bridge::new().unwrap();
+
+let result = bridge.quicktx().build(&txplan_yaml, &utxos, &protocol_params).unwrap();
+let signed = bridge.account()
+    .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
+    .unwrap();
+```
+
+See each wrapper's `examples/transaction.*` for a complete build-and-sign program.
+
+
+---
+
+# Platforms & Packages
+
+Source: https://bloxbean.github.io/cardano-client-bindings/reference/platforms/
+
+The native library (`libccl`) is a platform-specific binary built with GraalVM native-image. This page is the single answer to "does it run on my machine, and how big is it?".
+
+## Platform support matrix
+
+| Platform | Prebuilt | Notes |
+|---|---|---|
+| Linux x86_64 (glibc ≥ 2.17) | ✅ | RHEL/CentOS 7+, Ubuntu 18.04+, Debian 9+, Amazon Linux 2, and newer |
+| Linux aarch64 (glibc ≥ 2.17) | ✅ | |
+| Linux x86_64 (musl / Alpine) | ✅ | Separate `linux-musl-x86_64` artifact; Rust/Go pick it automatically, npm via the `libc` field. musllinux **wheel** publishing is still being wired up — Python on Alpine installs from source for now |
+| macOS Apple Silicon | ✅ | |
+| macOS Intel | ❌ | Oracle GraalVM dropped Intel Macs — build from source with an older toolchain, or use a supported platform |
+| Windows x86_64 | ✅ | |
+| Windows ARM64 | ❌ | Not built yet |
+| Linux aarch64 (musl) | ❌ | GraalVM's musl toolchain support is x86_64-only today |
+
+The Linux builds are deliberately conservative: built inside `manylinux_2_28` for a **glibc 2.17 floor**, and compiled with `-march=compatibility` so no modern-CPU instructions (AVX2/AVX-512) are required — they run on a decade of distros and older datacenter VMs alike.
+
+## Size
+
+- **Native library:** ~50–60 MB uncompressed per platform. The embedded [Scalus](https://scalus.org) UPLC evaluator — which is what lets Plutus transactions build fully offline — accounts for roughly 12 MB.
+- **Wrapper packages:** Python wheels and npm platform packages bundle the library, so they weigh tens of MB (compressed). Rust and Go keep their packages small: the crate/module is source-only and fetches the library once (Rust at first build, Go at first use, both cached; `CCL_LIB_PATH` overrides).
+
+## How the library reaches you
+
+Every wrapper resolves `libccl` in the same priority order:
+
+1. an explicit path passed in code;
+2. the `CCL_LIB_PATH` environment variable (local development);
+3. the copy bundled in / cached by the installed package;
+4. the OS loader's default search paths.
+
+| Language | Mechanism | Network needed? |
+|---|---|---|
+| Python | platform wheel bundles the lib | No — at install |
+| JavaScript | npm platform packages via `optionalDependencies` (musl selected by the `libc` field) | No — at install |
+| Rust | `build.rs` fetches from the GitHub release, stages with `@rpath` | Once, at first build |
+| Go | pure-Go runtime resolution: `CCL_LIB_PATH` → user cache → one-time download | Once, at first use |
+
+## Runtimes
+
+- **Python** ≥ 3.8 (pure ctypes — one wheel per platform works on any Python 3)
+- **Go** ≥ 1.21 (no cgo — cross-compiles, no C toolchain)
+- **Rust** ≥ 1.70
+- **JavaScript**: [Bun](https://bun.sh) 1.0+ only — see [limitations](../limitations/#javascript-runs-on-bun-only)
+
+## Building from source
+
+Needed only on unsupported platforms or for developing the bindings themselves — requires [Oracle GraalVM 25](https://www.graalvm.org/) (with `native-image`):
+
+```bash
+git clone https://github.com/bloxbean/cardano-client-bindings
+cd cardano-client-bindings
+sdk install java 25.0.3-graal
+./gradlew :core:nativeCompile     # → core/build/native/nativeCompile/libccl.*
+export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
+```
+
+Each language's *Troubleshooting* page covers the loader environment variables and common load errors.
+
+
+---
+
+# Caveats & Limitations
+
+Source: https://bloxbean.github.io/cardano-client-bindings/reference/limitations/
+
+An honest list — read this before building on the bindings. Items are marked **by design** (a deliberate architectural decision, see the [ADRs](../architecture/)) or **current limitation** (expected to improve).
+
+## Offline by design
+
+**By design.** The native library is offline, stateless, and side-effect-free: it makes **no network calls and never submits a transaction**. You supply chain data (UTXOs, protocol parameters) and submit the signed CBOR yourself with any HTTP client. Optional wrapper-side providers (Yaci DevKit, Blockfrost) and remote evaluators exist as conveniences — networking lives in the wrappers, never in `libccl`. Backend modules like Blockfrost/Koios/Ogmios clients are intentionally out of scope.
+
+## JavaScript runs on Bun only
+
+**By design (for now).** Node.js FFI libraries (`ffi-napi`, `koffi`) crash against GraalVM native-image libraries; Bun's built-in `bun:ffi` works. Node support is wanted-but-blocked, not committed — revisit if Node FFI stabilizes.
+
+## Functions not usable yet
+
+**Current limitation.** A few native-library functions hit GraalVM reflection-configuration gaps and fail at runtime in **all four wrappers**:
+
+| Broken | Use instead |
+|---|---|
+| `tx.from_json` / `tx.sign_with_secret_key` | `account.sign_tx` (mnemonic-based signing) |
+| `plutus.data_to_json` / `plutus.data_from_json` | `plutus.data_hash` works; keep PlutusData as CBOR hex |
+
+## Plutus execution units
+
+Plutus transactions build fully offline: when you supply no execution units, the embedded **Scalus** UPLC evaluator computes them in-process. Caveats:
+
+- Scalus needs **cost models** in the protocol parameters; when absent, reference parameters are used as a fallback.
+- For node-authoritative costing, pass a remote evaluator (e.g. Blockfrost `/utils/txs/evaluate`) — the wrapper then does a two-pass build. Explicit units always take precedence.
+- Script/ledger evolution may outpace the embedded evaluator; the remote path is the escape hatch.
+
+## Threading models differ per language
+
+- **Python**: one `CclLib` may be shared across threads — each OS thread attaches to the isolate lazily.
+- **Go**: all native calls are **serialized** onto one dedicated OS thread per `Bridge` (GraalVM isolates are thread-affine and goroutines migrate). Correctness over raw concurrency; use multiple `Bridge` instances for parallelism.
+- After `close()`, calls fail with a catchable error (e.g. Python's `CclClosedError`) — this guards against passing a stale isolate handle to the native side, which would abort the whole process.
+
+## Format & versioning caveats
+
+- **Pre-1.0, tracking a preview CCL.** The bindings target CCL `0.8.0-pre4`; the TxPlan schema is CCL's and will be re-pinned when CCL `0.8.0` stabilizes. Expect breaking changes before 1.0.
+- **Wrapper ↔ library version lock.** The wrapper and native library must match on base semver; a mismatch fails fast at load (`CCL_SKIP_VERSION_CHECK=1` overrides at your own risk).
+- **Network enum ≠ on-chain network id.** `Network.MAINNET == 0` but a mainnet address's on-chain `network_id` is `1`. Never feed `address.info()["network_id"]` back into an API that takes a `network`.
+- **Quantities are strings.** Chain data carries amounts as strings (`"quantity": "5000000"`) to avoid 2^53 float truncation — mind this in JavaScript especially.
+- **Argument-order quirk:** Python's `sign_tx`/`sign_tx_with_keys` take the transaction before the network, unlike the other wrappers.
+
+## Signing needs the right key roles
+
+`sign_tx` witnesses with the **payment key only**. Stake, DRep, and committee certificates need their own witnesses via `sign_tx_with_keys` (roles: `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`) — otherwise the node rejects with `MissingVKeyWitnessesUTXOW`. Each language's *Building Transactions* page has the intent → roles table.
+
+## Platform gaps
+
+macOS Intel and Windows ARM64 have no prebuilt library; Alpine Python installs from source until musllinux wheels publish. Full matrix: [Platforms & Packages](../platforms/).
+
+
+---
+
+# Architecture (ADRs)
+
+Source: https://bloxbean.github.io/cardano-client-bindings/reference/architecture/
+
+Significant decisions are recorded as [Architecture Decision Records](https://github.com/bloxbean/cardano-client-bindings/tree/develop/docs/adr) in the repository — the *why* behind choices that aren't obvious from the code. The short version:
+
+| Decision | ADR |
+|---|---|
+| CCL compiled to a native shared library with a C ABI (GraalVM native-image); no JVM at runtime | [0001](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0001-native-shared-library-ffi.md) |
+| The native lib is offline & stateless — caller-supplied chain data, no HTTP inside `libccl` | [0002](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0002-offline-stateless-no-provider.md) |
+| Four thin language wrappers over one uniform FFI | [0003](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0003-four-language-wrappers-uniform-ffi.md) |
+| Bun is the only supported JavaScript runtime | [0004](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0004-bun-only-javascript-runtime.md) |
+| Toolchain pinned to Oracle GraalVM 25.0.3 | [0005](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0005-oracle-graalvm-25.md) |
+| TxPlan (YAML) as the transaction format | [0006](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0006-txplan-yaml-transaction-format.md) |
+| Plutus exec units caller-suppliable (evolved by 0013's Scalus default) | [0007](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0007-caller-supplied-plutus-exec-units.md) |
+| Linux portability: glibc-2.17 baseline + `-march=compatibility`; musl as a separate artifact | [0008](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0008-linux-glibc-baseline-portability.md) |
+| Go pins all FFI to one dedicated OS thread (isolate thread-affinity) | [0010](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0010-go-isolate-thread-affinity.md) |
+| Chain-data providers live wrapper-side | [0011](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0011-wrapper-side-chain-data-providers.md) |
+| Native lib ships bundled in per-wrapper platform packages | [0012](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0012-native-lib-bundled-in-wrapper-packages.md) |
+| Evaluators: Scalus offline default in core, pluggable remote in wrappers | [0013](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0013-transaction-evaluators.md) |
+| Go distribution: purego + runtime library resolution | [0014](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0014-go-distribution-purego-runtime-resolution.md) |
+| No reference wrapper — all four kept at parity, enforced by CI | [0015](https://github.com/bloxbean/cardano-client-bindings/blob/develop/docs/adr/0015-no-reference-wrapper-parity.md) |
+
+(ADR-0009 was withdrawn — a release-process workflow, not an architectural decision; the number stays reserved.)
+
+## The architecture in one paragraph
+
+CCL (Java) is compiled by GraalVM native-image into `libccl`, exposing `ccl_*` entry points over a C ABI where data crosses as C strings (JSON/YAML/hex). Four thin wrappers — Python (ctypes), Go (purego), Rust (FFI), JS (Bun FFI) — bind the same entry-point set, verified by a CI parity check. The core is strictly offline; anything that touches the network (chain-data providers, remote evaluators) lives in the wrappers using each language's own HTTP stack. Transactions are described in CCL's TxPlan YAML and built offline, with Plutus execution units computed in-process by the embedded Scalus evaluator unless supplied or delegated to a remote evaluator.
