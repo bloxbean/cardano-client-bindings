@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - 'dv*'
+    # Temporary while the docsite PR is in review, so the preview at
+    # bloxbean.github.io/cardano-client-bindings stays current; remove the
+    # branch trigger after merge (dv* tags / manual dispatch take over).
+    branches:
+      - feature/docsite
+    paths:
+      - 'website/**'
+      - '.github/workflows/website-deploy.yml'
   workflow_dispatch:
 
 permissions:
