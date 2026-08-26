@@ -14,6 +14,10 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build-js-packages.yml
+    with:
+      # The publish job downloads these AFTER the `release` approval, so they must outlive a
+      # human gate. PR dry runs keep the workflow's short default instead.
+      retention-days: 14
 
   publish:
     needs: build

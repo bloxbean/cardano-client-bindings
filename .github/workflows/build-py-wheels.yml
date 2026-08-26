@@ -13,6 +13,14 @@ name: Build Python wheels
 
 on:
   workflow_call:
+    inputs:
+      retention-days:
+        description: >-
+          Artifact retention. Defaults to a short window because PR dry runs dominate the volume;
+          the release path passes a longer one, since its publish job downloads these artifacts
+          only after a human approves the `release` environment.
+        type: number
+        default: 1
     outputs:
       version:
         description: Package version read from gradle.properties
@@ -88,6 +96,24 @@ jobs:
       - name: Build the wheel (bundles the native lib)
         shell: bash
         run: ./gradlew :wrappers:python:wheel
+      # setup-python's interpreter is a universal2 build, so bdist_wheel tags the wheel universal2 —
+      # but the bundled dylib is arm64-only (macOS x86_64 is not built; see RELEASING.md). pip treats
+      # universal2 as compatible with Intel Macs, so left alone this wheel would install there and
+      # then fail to load, instead of the intended "no matching distribution". Correct only the
+      # architecture and keep the macOS version part, which tracks the runner image.
+      - name: Relabel macOS wheel -> arm64
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eux
+          cd wrappers/python/dist
+          for w in ./*.whl; do
+            case "$w" in
+              *universal2*)
+                TAG=$(echo "$w" | sed -E 's/.*-(macosx_[0-9]+_[0-9]+)_universal2\.whl/\1_arm64/')
+                python -m wheel tags --platform-tag "$TAG" --remove "$w" ;;
+            esac
+          done
       - name: List built wheel
         shell: bash
         run: ls -la wrappers/python/dist
@@ -95,6 +121,7 @@ jobs:
         with:
           name: wheels-${{ matrix.platform }}
           path: wrappers/python/dist/*.whl
+          retention-days: ${{ inputs.retention-days }}
 
   # Linux: build in an OLD-glibc container (manylinux_2_28) so the bundled .so keeps its glibc-2.17
   # baseline (ADR-0008), then relabel the wheel's platform tag from linux_* to manylinux_2_28_* — the
@@ -150,6 +177,7 @@ jobs:
         with:
           name: wheels-${{ matrix.platform }}
           path: wrappers/python/dist/*.whl
+          retention-days: ${{ inputs.retention-days }}
 
   # Linux/musl (Alpine): the glibc wheels above cannot load on musl, and the project ships no sdist,
   # so without this wheel `pip install cardano-client-lib` on Alpine fails outright with "no matching
@@ -220,6 +248,7 @@ jobs:
         with:
           name: wheels-linux-musl-x86_64
           path: wrappers/python/dist/*.whl
+          retention-days: ${{ inputs.retention-days }}
 
   # Prove a produced wheel actually installs and imports with no CCL_LIB_PATH set — the thing a
   # `pip install` user depends on. glibc/x86_64 here; the musl wheel is exercised on a real Alpine
