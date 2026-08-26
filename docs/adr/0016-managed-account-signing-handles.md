@@ -140,11 +140,97 @@ Each wrapper will expose an idiomatic transaction signer abstraction:
 | Rust | `Account<'bridge>` | `Drop` plus explicit close where useful | trait |
 | Go | `*Account` tied to `*Bridge` | explicit `Close()` | interface |
 
-The primary transaction-signing shape in every wrapper becomes:
+The following representative API sketches establish the intended ownership, lifecycle, and signing
+shape. Final names may change to remain idiomatic, but mnemonic/network/path arguments must not return
+to the per-transaction signing call.
 
-```text
-account.sign_tx(tx_cbor, roles?)
+#### JavaScript / TypeScript
+
+```javascript
+const sender = bridge.accounts.fromMnemonic(mnemonic, TESTNET, {
+  accountIndex: 0,
+  addressIndex: 0,
+});
+
+try {
+  const built = bridge.quicktx.build(plan, utxos, protocolParams);
+  const signed = sender.signTx(built.tx_cbor);
+
+  const governanceSigned = sender.signTx(built.tx_cbor, {
+    roles: [SigningRole.Payment, SigningRole.DRep],
+  });
+} finally {
+  sender.close();
+}
 ```
+
+A JavaScript `RecoveryPhrase` should redact string, inspection, and JSON representations. A
+byte-backed value should be overwritten by `close()`/`Symbol.dispose` where Bun permits it; it still
+cannot guarantee removal of copies previously made as JavaScript strings.
+
+#### Python
+
+```python
+with bridge.accounts.from_mnemonic(
+    mnemonic,
+    Network.TESTNET,
+    account_index=0,
+    address_index=0,
+) as sender:
+    built = bridge.quicktx.build(plan, utxos, protocol_params)
+    signed = sender.sign_tx(built["tx_cbor"])
+
+    governance_signed = sender.sign_tx(
+        built["tx_cbor"],
+        roles={SigningRole.PAYMENT, SigningRole.DREP},
+    )
+```
+
+A Python `RecoveryPhrase` wrapper should redact `repr()` and `str()`. New secret-import ABI calls
+should accept a mutable `bytearray` where practical so the wrapper can overwrite it after import,
+while documenting that earlier `str` and native copies may remain.
+
+#### Rust
+
+```rust
+let sender = bridge.accounts().from_mnemonic(
+    &mnemonic,
+    Network::Testnet,
+    AccountPath::new(0, 0),
+)?;
+
+let built = bridge.quicktx().build(&plan, &utxos, &params, None)?;
+let signed = sender.sign_tx(&built.tx_cbor, &[SigningRole::Payment])?;
+```
+
+The Rust Account will borrow the Bridge so it cannot outlive the isolate and will implement `Drop` to
+close its native handle. Recovery phrases should use `secrecy::SecretString`/`zeroize`, not plain
+`String` or JSON. The current secret-bearing, untyped JSON account results are specifically deprecated
+by this decision.
+
+#### Go
+
+```go
+sender, err := bridge.Accounts.FromMnemonic(
+	mnemonic,
+	ccl.Testnet,
+	ccl.AccountPath{Account: 0, Address: 0},
+)
+if err != nil {
+	return err
+}
+defer sender.Close()
+
+built, err := bridge.QuickTx.Build(plan, utxos, params, nil)
+if err != nil {
+	return err
+}
+signed, err := sender.SignTx(built.TxCbor, ccl.Payment)
+```
+
+Go will use a typed `SigningRole`, not variadic strings. Secret import/export should prefer a mutable
+`[]byte` or redacted `RecoveryPhrase` over an ordinary immutable `string`. `Close` is explicit; a
+finalizer may only be a fallback.
 
 Implementations for hardware wallets, browser/CIP-30 wallets, KMS/remote services, and air-gapped
 workflows are outside the initial implementation, but the abstraction must allow them without
