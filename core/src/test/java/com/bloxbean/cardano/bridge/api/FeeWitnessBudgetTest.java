@@ -161,4 +161,35 @@ class FeeWitnessBudgetTest {
 
         assertFeeCoversSignedSize(yaml, scriptOnlyUtxos, account::sign);
     }
+
+    /**
+     * Plan-level {@code required_signers} are stamped into the tx body and each must be witnessed,
+     * but CCL's fee estimation never counts them — the budget has to.
+     */
+    @Test
+    void feeCoversRequiredSigners() throws Exception {
+        Account cosigner = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 5);
+        String cosignerKeyHash = HexUtil.encodeHexString(
+                new com.bloxbean.cardano.client.address.Address(cosigner.baseAddress())
+                        .getPaymentCredentialHash().orElseThrow());
+
+        String yaml = """
+            version: 1.0
+            context:
+              fee_payer: %s
+              required_signers:
+                - %s
+            transaction:
+              - tx:
+                  from: %s
+                  intents:
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "3000000"
+            """.formatted(sender, cosignerKeyHash, sender, account.enterpriseAddress());
+
+        assertFeeCoversSignedSize(yaml, utxos(), t -> cosigner.sign(account.sign(t)));
+    }
 }

@@ -125,7 +125,11 @@ public class QuickTxService {
      * none — the fee payer's witness is already counted from the UTXOs.
      */
     private static int countCertificateWitnesses(TxPlan plan) {
-        int total = 0;
+        // Plan-level required_signers are stamped into the tx body (compose ->
+        // withRequiredSigners) and each must be witnessed, but CCL's fee estimation never counts
+        // them. One may coincide with the fee payer's own credential (already counted from the
+        // UTXOs) — that only overpays by one witness; underbudgeting gets the tx rejected.
+        int total = plan.getRequiredSigners() == null ? 0 : plan.getRequiredSigners().size();
         for (AbstractTx<?> tx : plan.getTxs()) {
             List<TxIntent> intents = tx.getIntentions();
             if (intents == null) {
