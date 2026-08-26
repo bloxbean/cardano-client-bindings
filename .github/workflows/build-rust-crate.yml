@@ -17,7 +17,7 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -40,7 +40,7 @@ jobs:
   # Package + verify-build the crate exactly as `cargo publish` would, without uploading.
   package:
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       CRATE_VERSION: ${{ needs.validate.outputs.version }}
     steps:

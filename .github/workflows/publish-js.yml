@@ -17,7 +17,7 @@ jobs:
 
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Final human gate before the irreversible npm publish: the job pauses until a required reviewer
     # of the `release` environment approves (configured in repo settings). See RELEASING.md.
     environment: release

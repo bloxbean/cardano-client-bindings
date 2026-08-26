@@ -12,7 +12,7 @@ jobs:
         include:
           - os: ubuntu-latest
             label: Linux x86_64
-          - os: macos-14
+          - os: macos-15
             label: macOS ARM64
     runs-on: ${{ matrix.os }}
     steps:
