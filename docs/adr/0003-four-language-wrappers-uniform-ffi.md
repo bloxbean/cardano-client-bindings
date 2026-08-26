@@ -21,7 +21,9 @@ fetched ([ADR-0002](0002-offline-stateless-no-provider.md)).
 
 We accept that explicit inputs are slightly more work for users today, and **plan an optional
 convenience layer** (provider/evaluator helpers) per wrapper to make it easier — without moving logic
-out of the core or breaking the offline contract (TODO §2b/§2c).
+out of the core or breaking the offline contract. *(Since shipped: chain-data providers in
+[ADR-0011](0011-wrapper-side-chain-data-providers.md), evaluators in
+[ADR-0013](0013-transaction-evaluators.md).)*
 
 ## Consequences
 
@@ -30,7 +32,9 @@ out of the core or breaking the offline contract (TODO §2b/§2c).
   ([ADR-0006](0006-txplan-yaml-transaction-format.md)), which deleted the fluent builders.
 - Four FFI integrations to maintain, each with quirks (e.g. Go threading —
   [ADR-0010](0010-go-isolate-thread-affinity.md)).
-- Until the convenience layer ships, users fetch chain data themselves.
+- Users may still fetch chain data themselves; the optional convenience layer
+  ([ADR-0011](0011-wrapper-side-chain-data-providers.md) /
+  [ADR-0013](0013-transaction-evaluators.md)) removes the need to in the common case.
 
 ## Alternatives considered
 

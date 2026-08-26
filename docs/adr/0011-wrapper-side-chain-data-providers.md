@@ -36,7 +36,9 @@ will:
   optional `providers` Cargo feature** so the default crate pulls in no HTTP/TLS stack.
 
 Out of scope: provider modules inside `libccl` (forbidden by ADR-0002); UTxO-selection strategies;
-exec-unit evaluators (the §2b sibling, still planned).
+exec-unit evaluators (the §2b sibling — since shipped in
+[ADR-0013](0013-transaction-evaluators.md), which also gave `build_with` its optional `evaluator`
+argument).
 
 ## Consequences
 

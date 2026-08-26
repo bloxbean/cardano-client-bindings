@@ -8,6 +8,12 @@
 > [ADR-0014](0014-go-distribution-purego-runtime-resolution.md) — Go drops cgo for **purego** and
 > resolves the library at **runtime**. The "Go via cgo / build-time linking / Go-C-follow-the-same-
 > shape" descriptions below are superseded for Go; the bundling decision for Python/JS still stands.
+>
+> **Update (musl):** "musl/Alpine remain unbuilt" below is superseded by
+> [ADR-0008](0008-linux-glibc-baseline-portability.md)'s 2026-07-08/2026-07-15 updates — a
+> `linux-musl-x86_64` library is built and shipped, the fetching wrappers (Rust, Go) pick it up
+> automatically, and npm has a musl platform package selected via the `libc` field. Only the
+> **musllinux wheel publishing** is still deferred (to the Python publish workflow).
 
 ## Context
 
@@ -79,8 +85,9 @@ matrix, `auditwheel repair` to relabel the Linux wheel `manylinux_2_28_x86_64` (
   artifact per OS/arch, and users on an unsupported platform fall back to source/`CCL_LIB_PATH`.
 - The set of shippable platforms is bounded by what we build: `linux-x86_64` + `linux-aarch64` (both
   glibc-baseline), `macos-aarch64`, and `windows-x86_64`. `macos-x86_64` (Intel) is **not** built —
-  Oracle GraalVM is dropping Intel-Mac support (its 25.1 line ships none). `windows-arm64` and
-  musl/Alpine remain unbuilt, so wheels can't exist for those yet.
+  Oracle GraalVM is dropping Intel-Mac support (its 25.1 line ships none). `windows-arm64` remains
+  unbuilt; musl/Alpine has since gained its own `linux-musl-x86_64` artifact (see the musl Update
+  above), though its *wheel* is still unpublished.
 - Each ecosystem needs its own bundling code and its own publishing story; the four will land incrementally,
   not atomically.
 - A lib a version behind its wrapper still fails confusingly — bundling makes version-lock easier (same
