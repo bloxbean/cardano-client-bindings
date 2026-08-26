@@ -1,0 +1,278 @@
+name: Build Python wheels
+
+# Reusable (workflow_call) build + validation of the platform wheels — everything except publishing.
+# Called by publish-py.yml (release) and publish-py-dry-run.yml (PR validation).
+#
+# One wheel per supported target, each bundling that platform's libccl.* into ccl/_libs/ so a
+# `pip install` needs no CCL_LIB_PATH (see docs/adr/0012-native-lib-bundled-in-wrapper-packages.md).
+#
+# The version comes from `version` in gradle.properties (single source of truth); on a v* tag the tag
+# must match it. Unlike JS/Rust — whose manifests are stamped from gradle.properties in publish CI —
+# the Python version lives in the checked-in wrappers/python/pyproject.toml, so this workflow asserts
+# it matches rather than restamping it. Mirrors build-js-packages.yml / build-rust-crate.yml.
+
+on:
+  workflow_call:
+    inputs:
+      retention-days:
+        description: >-
+          Artifact retention. Defaults to a short window because PR dry runs dominate the volume;
+          the release path passes a longer one, since its publish job downloads these artifacts
+          only after a human approves the `release` environment.
+        type: number
+        default: 1
+    outputs:
+      version:
+        description: Package version read from gradle.properties
+        value: ${{ jobs.validate.outputs.version }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from gradle.properties
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^version=//p' gradle.properties | tr -d '[:space:]')
+          if [ -z "$VERSION" ]; then
+            echo "No version found in gradle.properties" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Git tag $GITHUB_REF_NAME does not match gradle.properties version $VERSION (expected tag v$VERSION)" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Fail before five native builds (~10 min each) rather than after, and before a wheel is built
+      # carrying a version that isn't the one being released.
+      - name: Check pyproject.toml is in sync with gradle.properties
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          COUNT=$(grep -c '^version = "' wrappers/python/pyproject.toml || true)
+          if [ "$COUNT" != "1" ]; then
+            echo "Expected exactly one 'version = \"...\"' line in wrappers/python/pyproject.toml, found $COUNT" >&2
+            exit 1
+          fi
+          PY_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' wrappers/python/pyproject.toml)
+          if [ "$PY_VERSION" != "$VERSION" ]; then
+            echo "wrappers/python/pyproject.toml version is $PY_VERSION but gradle.properties says $VERSION" >&2
+            echo "Run ./gradlew syncVersions and commit the resulting files." >&2
+            exit 1
+          fi
+          echo "pyproject.toml version $PY_VERSION matches gradle.properties."
+
+  # macOS (arm64) and Windows: wheels tag correctly from the build platform, no retag needed.
+  wheels-native:
+    name: wheel (${{ matrix.platform }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: macos-aarch64
+          - os: windows-latest
+            platform: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25.0.3'
+          distribution: 'graalvm'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install build tooling
+        shell: bash
+        run: python -m pip install --upgrade build wheel
+      - name: Build the wheel (bundles the native lib)
+        shell: bash
+        run: ./gradlew :wrappers:python:wheel
+      # setup-python's interpreter is a universal2 build, so bdist_wheel tags the wheel universal2 —
+      # but the bundled dylib is arm64-only (macOS x86_64 is not built; see RELEASING.md). pip treats
+      # universal2 as compatible with Intel Macs, so left alone this wheel would install there and
+      # then fail to load, instead of the intended "no matching distribution". Correct only the
+      # architecture and keep the macOS version part, which tracks the runner image.
+      - name: Relabel macOS wheel -> arm64
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eux
+          cd wrappers/python/dist
+          for w in ./*.whl; do
+            case "$w" in
+              *universal2*)
+                TAG=$(echo "$w" | sed -E 's/.*-(macosx_[0-9]+_[0-9]+)_universal2\.whl/\1_arm64/')
+                python -m wheel tags --platform-tag "$TAG" --remove "$w" ;;
+            esac
+          done
+      - name: List built wheel
+        shell: bash
+        run: ls -la wrappers/python/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: wrappers/python/dist/*.whl
+          retention-days: ${{ inputs.retention-days }}
+
+  # Linux: build in an OLD-glibc container (manylinux_2_28) so the bundled .so keeps its glibc-2.17
+  # baseline (ADR-0008), then relabel the wheel's platform tag from linux_* to manylinux_2_28_* — the
+  # lib is manylinux-compliant by construction (its glibc floor is continuously proven by
+  # portable-linux-lib.yml), so this is a valid retag, not a claim.
+  wheels-linux:
+    name: wheel (${{ matrix.platform }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            image: quay.io/pypa/manylinux_2_28_x86_64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
+            manylinux_tag: manylinux_2_28_x86_64
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            image: quay.io/pypa/manylinux_2_28_aarch64
+            graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-aarch64_bin.tar.gz
+            manylinux_tag: manylinux_2_28_aarch64
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure build prerequisites
+        run: dnf install -y zlib-devel || true
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz "${{ matrix.graalvm_url }}"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+      - name: Set up Python (manylinux) + build tooling
+        run: |
+          set -eux
+          echo "/opt/python/cp311-cp311/bin" >> "$GITHUB_PATH"
+          /opt/python/cp311-cp311/bin/python -m pip install --upgrade build wheel
+          ln -sf /opt/python/cp311-cp311/bin/python3 /usr/local/bin/python3
+      - name: Build the wheel (bundles the native lib)
+        run: ./gradlew :wrappers:python:wheel --no-daemon --stacktrace
+      - name: Relabel wheel -> manylinux
+        run: |
+          set -eux
+          cd wrappers/python/dist
+          python -m wheel tags --platform-tag ${{ matrix.manylinux_tag }} --remove ./*.whl
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform }}
+          path: wrappers/python/dist/*.whl
+          retention-days: ${{ inputs.retention-days }}
+
+  # Linux/musl (Alpine): the glibc wheels above cannot load on musl, and the project ships no sdist,
+  # so without this wheel `pip install cardano-client-lib` on Alpine fails outright with "no matching
+  # distribution". Build the lib with native-image --libc=musl, then relabel the wheel's platform tag
+  # to musllinux_1_2_x86_64 — the PEP 600 tag pip matches on. See RELEASING.md ("musl / Alpine").
+  #
+  # x86_64 only: GraalVM's --libc=musl hardcodes the x86_64-linux-musl-gcc compiler name and never
+  # looks for an aarch64 one, so musl/aarch64 cannot be built. See ADR-0008.
+  wheels-musl:
+    name: wheel (linux-musl-x86_64)
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Oracle GraalVM 25.0.3
+        run: |
+          set -eux
+          mkdir -p /opt/graalvm
+          curl -fsSL -o /tmp/graalvm.tar.gz \
+            "https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz"
+          tar xzf /tmp/graalvm.tar.gz -C /opt/graalvm --strip-components=1
+          echo "JAVA_HOME=/opt/graalvm" >> "$GITHUB_ENV"
+          echo "/opt/graalvm/bin" >> "$GITHUB_PATH"
+
+      - name: Install musl toolchain (musl-gcc + musl-linked zlib)
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y musl-tools musl-dev
+          # native-image --libc=musl needs a musl-linked static zlib (libz.a).
+          ZV=1.3.1
+          curl -fsSL -o /tmp/zlib.tar.gz \
+            "https://github.com/madler/zlib/releases/download/v${ZV}/zlib-${ZV}.tar.gz"
+          tar xzf /tmp/zlib.tar.gz -C /tmp
+          cd "/tmp/zlib-${ZV}"
+          CC=musl-gcc ./configure --static --prefix=/usr/local/musl
+          make -j"$(nproc)"
+          sudo make install
+          sudo cp /usr/local/musl/lib/libz.a /usr/lib/x86_64-linux-musl/ 2>/dev/null || true
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build wheel
+
+      - name: Build the wheel against musl (bundles the native lib)
+        run: ./gradlew :wrappers:python:wheel -PmuslBuild --no-daemon --stacktrace
+
+      - name: Assert the bundled lib really is musl-linked
+        run: |
+          set -eux
+          SO=wrappers/python/ccl/_libs/libccl.so
+          # A glibc build NEEDs libc.so.6; the musl one must not. Guards against silently shipping a
+          # glibc .so under a musllinux tag — which would fail only on a user's Alpine box.
+          if readelf -d "$SO" | grep -q 'libc.so.6'; then
+            echo "FAIL: glibc-linked .so in the musl wheel" >&2
+            exit 1
+          fi
+
+      - name: Relabel wheel -> musllinux
+        run: |
+          set -eux
+          cd wrappers/python/dist
+          python -m wheel tags --platform-tag musllinux_1_2_x86_64 --remove ./*.whl
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-musl-x86_64
+          path: wrappers/python/dist/*.whl
+          retention-days: ${{ inputs.retention-days }}
+
+  # Prove a produced wheel actually installs and imports with no CCL_LIB_PATH set — the thing a
+  # `pip install` user depends on. glibc/x86_64 here; the musl wheel is exercised on a real Alpine
+  # container by musl-alpine.yml, and macOS/Windows have no runner available in this job.
+  verify:
+    needs: [wheels-native, wheels-linux, wheels-musl]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      # Also the place to eyeball the platform tags the release will carry.
+      - name: List built wheels
+        run: ls -la dist
+      - name: Install the linux-x86_64 wheel and import it
+        run: |
+          set -eux
+          WHEEL=$(ls dist/*manylinux*x86_64.whl)
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet "$WHEEL"
+          cd /tmp && env -u CCL_LIB_PATH -u LD_LIBRARY_PATH /tmp/venv/bin/python -c \
+            "import ccl; lib = ccl.CclLib(); assert lib.version(); print('OK: wheel loads its bundled lib, version', lib.version())"

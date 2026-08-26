@@ -9,6 +9,14 @@ name: Build npm packages
 
 on:
   workflow_call:
+    inputs:
+      retention-days:
+        description: >-
+          Artifact retention. Defaults to a short window because PR dry runs dominate the volume;
+          the release path passes a longer one, since its publish job downloads these artifacts
+          only after a human approves the `release` environment.
+        type: number
+        default: 1
     outputs:
       version:
         description: Package version read from gradle.properties
@@ -16,7 +24,7 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -47,7 +55,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             platform: macos-aarch64
             libext: dylib
             npm_os: darwin
@@ -94,6 +102,7 @@ jobs:
         with:
           name: npmpkg-${{ matrix.platform }}
           path: platform-${{ matrix.platform }}.tgz
+          retention-days: ${{ inputs.retention-days }}
 
   # Linux: build the lib in the manylinux_2_28 container (glibc-2.17 baseline, ADR-0008), then
   # assemble the platform pkg with tar (no node needed in the container).
@@ -108,7 +117,7 @@ jobs:
       matrix:
         include:
           - platform: linux-x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             image: quay.io/pypa/manylinux_2_28_x86_64
             graalvm_url: https://download.oracle.com/graalvm/25/archive/graalvm-jdk-25.0.3_linux-x64_bin.tar.gz
             npm_cpu: x64
@@ -161,6 +170,7 @@ jobs:
         with:
           name: npmpkg-${{ matrix.platform }}
           path: platform-${{ matrix.platform }}.tgz
+          retention-days: ${{ inputs.retention-days }}
 
   # Linux/musl (Alpine): the glibc .so above cannot load on musl, so ship a separate package built
   # with native-image --libc=musl. Without this an Alpine user installs the glibc package — `os` and
@@ -171,7 +181,7 @@ jobs:
   pkg-musl:
     name: npm pkg (linux-musl-x86_64)
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       PKG_VERSION: ${{ needs.validate.outputs.version }}
     steps:
@@ -244,10 +254,11 @@ jobs:
         with:
           name: npmpkg-linux-musl-x86_64
           path: platform-linux-musl-x86_64.tgz
+          retention-days: ${{ inputs.retention-days }}
 
   verify:
     needs: [validate, pkg-native, pkg-linux, pkg-musl]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       PKG_VERSION: ${{ needs.validate.outputs.version }}
     steps:

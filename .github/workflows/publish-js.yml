@@ -14,10 +14,15 @@ on:
 jobs:
   build:
     uses: ./.github/workflows/build-js-packages.yml
+    with:
+      # The publish job downloads these AFTER the `release` approval, so they must outlive a
+      # human gate. PR dry runs keep the workflow's short default instead. Must stay <= the
+      # repository's artifact retention setting (currently 7 days) or it is silently clamped.
+      retention-days: 5
 
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Final human gate before the irreversible npm publish: the job pauses until a required reviewer
     # of the `release` environment approves (configured in repo settings). See RELEASING.md.
     environment: release

@@ -1,0 +1,24 @@
+name: Python wheels dry run
+
+# PR validation of the PyPI publish pipeline: runs the shared build workflow (which builds every
+# platform wheel and installs one to prove it loads its bundled lib) with no publish step anywhere.
+# Triggers only on PRs targeting develop that touch the pipeline or the Python packaging config, so
+# develop -> main promotion PRs carrying these changes don't re-run it.
+#
+# Deliberately not `wrappers/python/**`: the wheel matrix is five native builds, and ordinary
+# binding changes are already covered by ci.yml.
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/publish-py.yml'
+      - '.github/workflows/build-py-wheels.yml'
+      - '.github/workflows/publish-py-dry-run.yml'
+      - 'wrappers/python/pyproject.toml'
+      - 'wrappers/python/setup.py'
+      - 'wrappers/python/build.gradle'
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-py-wheels.yml
