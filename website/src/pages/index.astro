@@ -98,7 +98,7 @@ const features = [
 
   <!-- Navbar -->
   <header class="sticky top-0 z-40 border-b border-white/5 bg-surface/80 backdrop-blur-md">
-    <nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
+    <nav class="mx-auto flex max-w-5xl items-center justify-between px-6 py-3.5">
       <a href={base + '/'} class="flex items-center gap-2.5 font-semibold text-white">
         <img src={`${base}/favicon.svg`} alt="" class="h-7 w-7" />
         <span>Cardano Client Bindings</span>
@@ -118,7 +118,7 @@ const features = [
     <section class="relative overflow-hidden">
       <ParticleBackground />
       <div class="glow-blob left-1/2 top-0 h-80 w-[42rem] -translate-x-1/2 bg-brand/20"></div>
-      <div class="relative z-10 mx-auto flex max-w-6xl flex-col items-center gap-12 px-6 pb-20 pt-16 lg:flex-row lg:gap-8 sm:pt-24">
+      <div class="relative z-10 mx-auto flex max-w-5xl flex-col items-center gap-12 px-6 pb-20 pt-16 lg:flex-row lg:gap-8 sm:pt-24">
         <div class="flex-1 text-center lg:text-left">
           <p class="mb-5 inline-flex items-center gap-2 rounded-full border border-brand/30 bg-brand/10 px-4 py-1.5 text-xs font-semibold tracking-wide text-brand-light">
             <span class="h-1.5 w-1.5 rounded-full bg-teal"></span>
@@ -145,13 +145,13 @@ const features = [
             </a>
           </div>
         </div>
-        <div class="w-full max-w-xl flex-1"><HeroIllustration /></div>
+        <div class="w-full max-w-lg flex-1"><HeroIllustration /></div>
       </div>
     </section>
 
     <!-- Stats -->
     <section class="border-y border-white/5 bg-surface-dark/60">
-      <div class="mx-auto grid max-w-6xl grid-cols-2 gap-8 px-6 py-10 sm:grid-cols-4">
+      <div class="mx-auto grid max-w-5xl grid-cols-2 gap-8 px-6 py-10 sm:grid-cols-4">
         {stats.map((s) => (
           <div class="text-center">
             <div class="grad-text font-mono text-4xl font-bold">{s.n}</div>
@@ -162,7 +162,7 @@ const features = [
     </section>
 
     <!-- Terminal: same semantics in every language -->
-    <section class="relative mx-auto max-w-5xl px-6 py-20 sm:py-24">
+    <section class="relative mx-auto max-w-4xl px-6 py-20 sm:py-24">
       <div class="glow-blob -left-40 top-24 h-72 w-72 bg-teal/10"></div>
       <h2 class="mb-3 text-center text-3xl font-bold tracking-tight text-white sm:text-4xl">Same semantics in every language</h2>
       <p class="mx-auto mb-10 max-w-2xl text-center text-text-muted">
@@ -203,7 +203,7 @@ const features = [
     <!-- Features -->
     <section class="relative border-t border-white/5 bg-surface-dark/40 py-20 sm:py-24">
       <div class="glow-blob -right-32 top-10 h-80 w-80 bg-brand/10"></div>
-      <div class="relative z-10 mx-auto max-w-6xl px-6">
+      <div class="relative z-10 mx-auto max-w-5xl px-6">
         <h2 class="mb-12 text-center text-3xl font-bold tracking-tight text-white sm:text-4xl">Why these bindings</h2>
         <div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((f) => (
@@ -280,7 +280,7 @@ const features = [
   </main>
 
   <footer class="border-t border-white/5 py-10">
-    <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 text-sm text-text-muted">
+    <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-4 px-6 text-sm text-text-muted">
       <span>© {new Date().getFullYear()} BloxBean — MIT License</span>
       <div class="flex gap-6">
         <a href={docs('/overview/')} class="transition hover:text-white">Documentation</a>
