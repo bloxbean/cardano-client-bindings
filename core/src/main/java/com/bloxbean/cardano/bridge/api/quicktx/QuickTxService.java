@@ -9,7 +9,9 @@ import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.common.cbor.CborSerializationUtil;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.plutus.spec.ExUnits;
+import com.bloxbean.cardano.client.quicktx.AbstractTx;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
+import com.bloxbean.cardano.client.quicktx.intent.TxIntent;
 import com.bloxbean.cardano.client.quicktx.serialization.TxPlan;
 import com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer;
 import com.bloxbean.cardano.client.transaction.spec.Transaction;
@@ -17,9 +19,11 @@ import com.bloxbean.cardano.client.util.HexUtil;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Builds unsigned Cardano transactions from a CCL {@link TxPlan} (YAML), fully offline.
@@ -78,8 +82,13 @@ public class QuickTxService {
                     new scalus.bloxbean.ScalusTransactionEvaluator(protocolParams, utxoSupplier));
         }
 
-        // Budget witnesses for fee estimation of the (still unsigned) transaction.
-        txContext.additionalSignersCount(Math.max(1, plan.getTxs().size()));
+        // Budget witnesses for fee estimation of the (still unsigned) transaction. CCL already
+        // counts the payment-key witnesses implied by the selected input UTXOs; what it cannot see
+        // is which certificate keys will witness later, so derive that from the plan's intents.
+        // (The previous blanket max(1, txCount) covered at most one certificate role per tx and
+        // underestimated the fee of any tx combining roles — e.g. stake_registration +
+        // drep_registration — which a node rejects with FeeTooSmallUTxO.)
+        txContext.additionalSignersCount(countCertificateWitnesses(plan));
 
         Transaction transaction = txContext.build();
 
@@ -93,6 +102,57 @@ public class QuickTxService {
         result.put("tx_hash", txHash);
         result.put("fee", fee);
         return YamlSerializer.serialize(result);
+    }
+
+    /**
+     * Number of additional vkey witnesses the plan's certificates and votes will need on top of the
+     * payment-key witnesses CCL derives from the selected input UTXOs.
+     *
+     * <p>Each tx contributes one witness per <em>distinct key role</em> its intents require: the
+     * stake key (stake registration/deregistration/delegation/withdrawal, vote delegation), the
+     * DRep key (DRep lifecycle), the voter key (votes), and the pool key (pool lifecycle). Several
+     * intents sharing a role still need only one witness. Payment-only intents (payment, minting,
+     * metadata, donation, governance proposals, script and input intents) add none — the fee
+     * payer's witness is already counted from the UTXOs. Extra signers demanded by a native-script
+     * policy are not visible in the plan and are not budgeted (unchanged behavior).
+     */
+    private static int countCertificateWitnesses(TxPlan plan) {
+        int total = 0;
+        for (AbstractTx<?> tx : plan.getTxs()) {
+            List<TxIntent> intents = tx.getIntentions();
+            if (intents == null) {
+                continue;
+            }
+            Set<String> roles = new HashSet<>();
+            for (TxIntent intent : intents) {
+                switch (intent.getType()) {
+                    case "stake_registration":
+                    case "stake_deregistration":
+                    case "stake_delegation":
+                    case "stake_withdrawal":
+                    case "voting_delegation":
+                        roles.add("stake");
+                        break;
+                    case "drep_registration":
+                    case "drep_update":
+                    case "drep_deregistration":
+                        roles.add("drep");
+                        break;
+                    case "voting":
+                        roles.add("voter");
+                        break;
+                    case "pool_registration":
+                    case "pool_update":
+                    case "pool_retirement":
+                        roles.add("pool");
+                        break;
+                    default:
+                        break;
+                }
+            }
+            total += roles.size();
+        }
+        return total;
     }
 
     private static List<Utxo> parseUtxos(String utxosJson) throws Exception {
