@@ -7,7 +7,7 @@
 
 # Using Cardano Client Bindings with AI Agents
 
-Source: https://bloxbean.github.io/cardano-client-bindings/ai/
+Source: https://pages.bloxbean.com/cardano-client-bindings/ai/
 
 Cardano Client Bindings is designed to be **AI-friendly**: the API surface is small and identical across all four languages, transactions are plain YAML, and everything an agent needs fits in one document. Point your AI tool at the artifacts below and it can write correct code against the bindings without any training data about them.
 
@@ -18,8 +18,8 @@ Point your AI agent at the **[AI Starter Pack](../starter-pack/)** or the full d
 | File | When to use it |
 |---|---|
 | **[`/ai/starter-pack.md`](../starter-pack/)** | The single highest-leverage artifact. Distills the offline contract, the API groups, TxPlan YAML with the intent catalog, error codes, signing roles, and the known limitations agents trip over. |
-| **[`/llms.txt`](https://bloxbean.github.io/cardano-client-bindings/llms.txt)** | Curated index of this docsite, following [llmstxt.org](https://llmstxt.org/). Small, agent-friendly. |
-| **[`/llms-full.txt`](https://bloxbean.github.io/cardano-client-bindings/llms-full.txt)** | The full docsite concatenated as a single markdown file, for full-coverage ingestion. |
+| **[`/llms.txt`](https://pages.bloxbean.com/cardano-client-bindings/llms.txt)** | Curated index of this docsite, following [llmstxt.org](https://llmstxt.org/). Small, agent-friendly. |
+| **[`/llms-full.txt`](https://pages.bloxbean.com/cardano-client-bindings/llms-full.txt)** | The full docsite concatenated as a single markdown file, for full-coverage ingestion. |
 
 ## Per-tool setup
 
@@ -28,14 +28,14 @@ Point your AI agent at the **[AI Starter Pack](../starter-pack/)** or the full d
 Drop the starter pack into your project as `CLAUDE.md` (or append it to an existing one):
 
 ```bash
-curl -o CLAUDE.md https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack.md
+curl -o CLAUDE.md https://pages.bloxbean.com/cardano-client-bindings/ai/starter-pack.md
 ```
 
 Claude Code reads `CLAUDE.md` at the start of every session, so the agent always has the bindings' contract in context. For multi-project setups, reference the hosted version from your global `~/.claude/CLAUDE.md`:
 
 ```markdown
 When working with cardano-client-lib bindings (Python/Go/Rust/JS `ccl` packages),
-follow https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack/
+follow https://pages.bloxbean.com/cardano-client-bindings/ai/starter-pack/
 ```
 
 ### Cursor
@@ -44,7 +44,7 @@ Add a project rule:
 
 ```bash
 mkdir -p .cursor/rules
-curl -o .cursor/rules/ccl-bindings.mdc https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack.md
+curl -o .cursor/rules/ccl-bindings.mdc https://pages.bloxbean.com/cardano-client-bindings/ai/starter-pack.md
 ```
 
 ### Continue (VS Code / JetBrains)
@@ -54,7 +54,7 @@ Add a URL context provider in `.continue/config.json`:
 ```json
 {
   "contextProviders": [
-    { "name": "url", "params": { "url": "https://bloxbean.github.io/cardano-client-bindings/llms-full.txt" } }
+    { "name": "url", "params": { "url": "https://pages.bloxbean.com/cardano-client-bindings/llms-full.txt" } }
   ]
 }
 ```
@@ -79,7 +79,7 @@ These are the failure modes the starter pack exists to prevent:
 
 # Cardano Client Bindings — AI Starter Pack
 
-Source: https://bloxbean.github.io/cardano-client-bindings/ai/starter-pack/
+Source: https://pages.bloxbean.com/cardano-client-bindings/ai/starter-pack/
 
 > **Read this entire document before generating code that uses these bindings.** It distills the offline contract, the API surface, the TxPlan YAML transaction format, error codes, signing rules, and the known limitations that AI agents most commonly get wrong. This pack is optimized for AI ingestion; the human-friendly guides are on the docsite.
 
@@ -324,7 +324,7 @@ Predicates (`validate`, `validate_mnemonic`, `verify`) return false instead of r
 
 # Overview
 
-Source: https://bloxbean.github.io/cardano-client-bindings/overview/
+Source: https://pages.bloxbean.com/cardano-client-bindings/overview/
 
 Cardano Client Bindings compiles [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib) into a native shared library (`libccl.so` / `libccl.dylib` / `libccl.dll`) using GraalVM native-image. Any language can call CCL's offline Cardano operations via FFI — **no JVM required at runtime**.
 
@@ -391,7 +391,7 @@ The native library is a **~50–60 MB** platform-specific binary (the embedded [
 
 # Getting Started
 
-Source: https://bloxbean.github.io/cardano-client-bindings/getting-started/
+Source: https://pages.bloxbean.com/cardano-client-bindings/getting-started/
 
 Pick your language, install the package, and you're building transactions offline in minutes — the native library comes bundled or is fetched automatically; there is nothing else to install and **no JVM**.
 
@@ -473,7 +473,7 @@ The transaction is described as [TxPlan YAML](../reference/txplan/); the library
 
 # Cardano Client Lib for JavaScript (Bun)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/js/
+Source: https://pages.bloxbean.com/cardano-client-bindings/js/
 
 `@bloxbean/cardano-client-lib` brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to JavaScript as a native library. No JVM, no remote service: the heavy lifting happens inside `libccl`, a GraalVM native-image build of CCL that ships with the package.
 
@@ -593,7 +593,7 @@ Runnable examples live in [`wrappers/js/examples/`](../../wrappers/js/examples):
 
 # JavaScript API Reference
 
-Source: https://bloxbean.github.io/cardano-client-bindings/js/api/
+Source: https://pages.bloxbean.com/cardano-client-bindings/js/api/
 
 All functionality hangs off a `CclBridge` instance. Import what you need from the package root:
 
@@ -816,7 +816,7 @@ platformSuffix(): string                             // e.g. "macos-aarch64", "l
 
 # Building Transactions (JavaScript)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/js/transactions/
+Source: https://pages.bloxbean.com/cardano-client-bindings/js/transactions/
 
 This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from JavaScript.
 
@@ -1012,7 +1012,7 @@ For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with
 
 # Providers & Evaluators (JavaScript)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/js/providers/
+Source: https://pages.bloxbean.com/cardano-client-bindings/js/providers/
 
 The native library is offline by design — it never makes a network call. Providers and evaluators are small wrapper-side HTTP conveniences for feeding `quicktx.buildWith` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need them: call `quicktx.build` directly.
 
@@ -1104,7 +1104,7 @@ Every provider/evaluator request is bounded by a 60-second timeout (`AbortSignal
 
 # Troubleshooting (JavaScript)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/js/troubleshooting/
+Source: https://pages.bloxbean.com/cardano-client-bindings/js/troubleshooting/
 
 ## How the native library is found
 
@@ -1194,7 +1194,7 @@ export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
 
 # Cardano Client Lib for Go
 
-Source: https://bloxbean.github.io/cardano-client-bindings/go/
+Source: https://pages.bloxbean.com/cardano-client-bindings/go/
 
 The `ccl` Go package brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Go as a native library. No JVM, **no cgo, no C toolchain**: the shared library is loaded at runtime with [purego](https://github.com/ebitengine/purego).
 
@@ -1324,7 +1324,7 @@ go run ./examples/account
 
 # Go API Reference
 
-Source: https://bloxbean.github.io/cardano-client-bindings/go/api/
+Source: https://pages.bloxbean.com/cardano-client-bindings/go/api/
 
 Everything lives in package `ccl`:
 
@@ -1588,7 +1588,7 @@ plutusResult, err := bridge.QuickTx.Build(yaml, utxos, params,
 
 # Building Transactions (Go)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/go/transactions/
+Source: https://pages.bloxbean.com/cardano-client-bindings/go/transactions/
 
 This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from Go.
 
@@ -1762,7 +1762,7 @@ For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with
 
 # Providers & Evaluators (Go)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/go/providers/
+Source: https://pages.bloxbean.com/cardano-client-bindings/go/providers/
 
 The native library is offline by design — it never makes a network call. Providers and evaluators are small wrapper-side HTTP conveniences for feeding `QuickTx.BuildWith` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need them: call `QuickTx.Build` directly.
 
@@ -1856,7 +1856,7 @@ Every provider/evaluator request is bounded by a 60-second HTTP client timeout; 
 
 # Troubleshooting (Go)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/go/troubleshooting/
+Source: https://pages.bloxbean.com/cardano-client-bindings/go/troubleshooting/
 
 ## How the native library is found
 
@@ -1941,7 +1941,7 @@ export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
 
 # Cardano Client Lib for Rust
 
-Source: https://bloxbean.github.io/cardano-client-bindings/rust/
+Source: https://pages.bloxbean.com/cardano-client-bindings/rust/
 
 The `cardano-client-lib` crate (imported as `ccl`) brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Rust as a native library. No JVM at runtime: the crate links against `libccl`, a GraalVM native-image build of CCL fetched automatically at build time.
 
@@ -2073,7 +2073,7 @@ cargo run --example evaluator --features providers
 
 # Rust API Reference
 
-Source: https://bloxbean.github.io/cardano-client-bindings/rust/api/
+Source: https://pages.bloxbean.com/cardano-client-bindings/rust/api/
 
 ```rust
 use ccl::{Bridge, Network, CclError, Result};
@@ -2286,7 +2286,7 @@ let plutus = bridge.quicktx().build(&yaml, &utxos, &params,
 
 # Building Transactions (Rust)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/rust/transactions/
+Source: https://pages.bloxbean.com/cardano-client-bindings/rust/transactions/
 
 This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from Rust.
 
@@ -2468,7 +2468,7 @@ For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with
 
 # Providers & Evaluators (Rust)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/rust/providers/
+Source: https://pages.bloxbean.com/cardano-client-bindings/rust/providers/
 
 The native library is offline by design — it never makes a network call. The optional `providers` module contains small HTTP conveniences for feeding `quicktx().build_with` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need it: call `quicktx().build` directly and skip the feature.
 
@@ -2570,7 +2570,7 @@ HTTP failures surface as `CclError { code: CCL_ERROR_GENERAL, message: "<context
 
 # Troubleshooting (Rust)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/rust/troubleshooting/
+Source: https://pages.bloxbean.com/cardano-client-bindings/rust/troubleshooting/
 
 ## How the native library is obtained
 
@@ -2648,7 +2648,7 @@ cargo build
 
 # Cardano Client Lib for Python
 
-Source: https://bloxbean.github.io/cardano-client-bindings/python/
+Source: https://pages.bloxbean.com/cardano-client-bindings/python/
 
 The `ccl` Python package (distribution name: `cardano-client-lib`) brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Python as a native library. No JVM, no C extension: pure `ctypes` over `libccl`, a GraalVM native-image build of CCL.
 
@@ -2765,7 +2765,7 @@ Runnable examples live in [`wrappers/python/examples/`](../../wrappers/python/ex
 
 # Python API Reference
 
-Source: https://bloxbean.github.io/cardano-client-bindings/python/api/
+Source: https://pages.bloxbean.com/cardano-client-bindings/python/api/
 
 ```python
 from ccl import CclLib, Network, CclError, CclClosedError
@@ -2972,7 +2972,7 @@ plutus_result = lib.quicktx.build(yaml, utxos, params,
 
 # Building Transactions (Python)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/python/transactions/
+Source: https://pages.bloxbean.com/cardano-client-bindings/python/transactions/
 
 This guide walks the full life of a transaction: describe it in [TxPlan YAML](../../reference/txplan/), build it offline, sign it with the right keys, and submit it with your own HTTP client. The YAML shapes for every intent — staking, governance, pools, minting, Plutus — are cataloged in the [TxPlan reference](../../reference/txplan/#intent-catalog--verified-shapes); this page shows how to drive them from Python.
 
@@ -3147,7 +3147,7 @@ For spending a script UTXO (`script_collect_from`), supply the locked UTXO (with
 
 # Providers & Evaluators (Python)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/python/providers/
+Source: https://pages.bloxbean.com/cardano-client-bindings/python/providers/
 
 The native library is offline by design — it never makes a network call. Providers and evaluators are small wrapper-side HTTP conveniences (stdlib `urllib`, no extra dependencies) for feeding `quicktx.build_with` with chain data. If you already have UTXOs and protocol parameters from your own infrastructure, you don't need them: call `quicktx.build` directly.
 
@@ -3230,7 +3230,7 @@ Provider GETs are bounded at 30 seconds and evaluator POSTs at 60 seconds; a hun
 
 # Troubleshooting (Python)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/python/troubleshooting/
+Source: https://pages.bloxbean.com/cardano-client-bindings/python/troubleshooting/
 
 ## How the native library is found
 
@@ -3312,7 +3312,7 @@ export CCL_LIB_PATH=$PWD/core/build/native/nativeCompile
 
 # QuickTx — TxPlan (YAML) Transaction Builder
 
-Source: https://bloxbean.github.io/cardano-client-bindings/reference/txplan/
+Source: https://pages.bloxbean.com/cardano-client-bindings/reference/txplan/
 
 QuickTx builds unsigned Cardano transactions **fully offline** from a CCL
 [**TxPlan**](https://github.com/bloxbean/cardano-client-lib) — a YAML document describing what the
@@ -3874,7 +3874,7 @@ See each wrapper's `examples/transaction.*` for a complete build-and-sign progra
 
 # Platforms & Packages
 
-Source: https://bloxbean.github.io/cardano-client-bindings/reference/platforms/
+Source: https://pages.bloxbean.com/cardano-client-bindings/reference/platforms/
 
 The native library (`libccl`) is a platform-specific binary built with GraalVM native-image. This page is the single answer to "does it run on my machine, and how big is it?".
 
@@ -3940,7 +3940,7 @@ Each language's *Troubleshooting* page covers the loader environment variables a
 
 # Caveats & Limitations
 
-Source: https://bloxbean.github.io/cardano-client-bindings/reference/limitations/
+Source: https://pages.bloxbean.com/cardano-client-bindings/reference/limitations/
 
 An honest list — read this before building on the bindings. Items are marked **by design** (a deliberate architectural decision, see the [ADRs](../architecture/)) or **current limitation** (expected to improve).
 
@@ -3996,7 +3996,7 @@ macOS Intel and Windows ARM64 have no prebuilt library; Alpine Python installs f
 
 # Architecture (ADRs)
 
-Source: https://bloxbean.github.io/cardano-client-bindings/reference/architecture/
+Source: https://pages.bloxbean.com/cardano-client-bindings/reference/architecture/
 
 Significant decisions are recorded as [Architecture Decision Records](https://github.com/bloxbean/cardano-client-bindings/tree/develop/docs/adr) in the repository — the *why* behind choices that aren't obvious from the code. The short version:
 
