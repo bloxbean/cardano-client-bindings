@@ -36,8 +36,10 @@ GitHub Release for the tag.
 
 The task updates every checked-in wrapper manifest, lockfile pin, download version, and native-library
 compatibility constant. `./gradlew checkVersions` guards the invariant in wrapper test runs. JS and
-Rust are also stamped again from `gradle.properties` in publish CI as a defensive check. On a `v*`
-tag the tag must equal `v<version>`, so a mistyped tag can't publish a mismatched version.
+Rust are also stamped again from `gradle.properties` in publish CI as a defensive check; Python's
+`pyproject.toml` is *asserted* against it instead (the wheel build reads the checked-in file, so a
+drifted version fails the build with a pointer to `syncVersions`). On a `v*` tag the tag must equal
+`v<version>`, so a mistyped tag can't publish a mismatched version.
 
 | Wrapper | Fields synchronized by `syncVersions` | Manual bump needed? |
 |---|---|---|
@@ -74,8 +76,8 @@ Each ecosystem has a different distribution model:
 | **Rust** | crate source | crates.io | **fetched** by `build.rs` from the release (crates.io can't host the binary) |
 | **Go** | *(none)* | *(none — the git repo is the module)* | **fetched** by the loader at runtime |
 
-Python, JS, and Rust each publish to a registry (gated publish workflows / `cargo publish`, requiring
-credentials). **Go does not** — see below.
+Python, JS, and Rust each publish to a registry from a `release`-gated publish workflow, using that
+registry's trusted publishing (OIDC) — no stored credentials anywhere. **Go does not** — see below.
 
 ### musl / Alpine
 
@@ -129,16 +131,17 @@ Nobody pushes `v*` tags by hand — direct tag pushes are blocked by a repositor
    ruleset.
 3. On merge, [`tag-release.yml`](.github/workflows/tag-release.yml) creates and pushes
    `v<version>` (using a GitHub App token so the tag fires the downstream workflows), which triggers
-   `release.yml`, `publish-js.yml`, and `publish-rust.yml`.
-4. `publish-js.yml` and `publish-rust.yml` each build, then **pause** on their environment
-   (`npm-release` / `crates-release`) until a release code owner approves the final publish. Both
+   `release.yml`, `publish-js.yml`, `publish-rust.yml`, and `publish-py.yml`.
+4. `publish-js.yml`, `publish-rust.yml`, and `publish-py.yml` each build, then **pause** on the
+   shared `release` environment until a release code owner approves the final publish. All three
    registries are irreversible — a published version can never be overwritten, only unpublished
-   (npm, within a window) or yanked (crates.io) — so the approval is the last chance to stop.
+   (npm, within a window), yanked (crates.io), or deleted-without-reuse (PyPI) — so the approval is
+   the last chance to stop.
 
 Why a GitHub App token (not the default `GITHUB_TOKEN`): GitHub does not fire `on: push` workflows
 for refs pushed by `GITHUB_TOKEN` (a recursion guard), so a `GITHUB_TOKEN`-pushed tag would not
-trigger `release.yml` / `publish-js.yml` / `publish-rust.yml`. The App token is a normal actor, so
-the tag fans out.
+trigger `release.yml` / `publish-js.yml` / `publish-rust.yml` / `publish-py.yml`. The App token is a
+normal actor, so the tag fans out.
 
 ### One-time repo settings (admin)
 
@@ -150,14 +153,19 @@ These enforce the flow and are configured in GitHub settings, not code:
   bypass list empty (do not add `Maintain`/`Write` roles — anyone on it skips code-owner review).
 - **`v*` tag ruleset**: restrict tag creation; bypass list = the release App only, so a `v*` tag can
   only come from the approved-PR auto-tag.
-- **`npm-release` / `crates-release` environments**: required reviewers = the release code owners;
-  enable "Prevent self-review". These are the human gates on the two irreversible publishes.
-- **Trusted publishing** (no API-token secrets — both registries mint a short-lived token from the
+- **`release` environment**: required reviewers = the release code owners; enable "Prevent
+  self-review". One environment shared by all three publish workflows — it is the human gate on
+  every irreversible publish.
+- **Trusted publishing** (no API-token secrets — every registry mints a short-lived token from the
   GitHub OIDC identity): configure the publisher on
-  [npmjs.com](https://docs.npmjs.com/trusted-publishers) against `publish-js.yml` + `npm-release`,
-  and on [crates.io](https://crates.io/crates/cardano-client-lib/settings) against
-  `publish-rust.yml` + `crates-release`. crates.io needs the crate to exist, so the **first** Rust
-  release is a one-off manual `cargo publish` from a maintainer's machine (see step 3).
+  [npmjs.com](https://docs.npmjs.com/trusted-publishers) against `publish-js.yml` + `release`, on
+  [crates.io](https://crates.io/crates/cardano-client-lib/settings) against `publish-rust.yml` +
+  `release`, and on [PyPI](https://docs.pypi.org/trusted-publishers/) against `publish-py.yml` +
+  `release`. Each publisher matches on the **top-level workflow filename** and the environment name,
+  so renaming either breaks the OIDC exchange until it is re-registered. crates.io needs the crate
+  to exist, so the **first** Rust release is a one-off manual `cargo publish` from a maintainer's
+  machine (see step 3); PyPI accepts a *pending* publisher, so the first wheel upload creates the
+  project.
 
 ## Release checklist
 
@@ -166,12 +174,14 @@ These enforce the flow and are configured in GitHub settings, not code:
        `./gradlew checkVersions` passes, get the PR approved by a release code owner, and merge it
        to `main`.
 2. [ ] Merge auto-creates `vX.Y.Z` → `release.yml` builds + uploads the 5 platform tarballs +
-       `SHA256SUMS`; `publish-js.yml` and `publish-rust.yml` build, then wait on their approvals.
+       `SHA256SUMS`; `publish-js.yml`, `publish-rust.yml`, and `publish-py.yml` build, then wait on
+       the `release` approval. `publish-py.yml` also attaches its 5 wheels to the release before the
+       approval gate, so they are downloadable regardless of the PyPI outcome.
 3. [ ] Verify the release assets are named `cardano-client-lib-vX.Y.Z-<platform>.tar.gz`. **The Rust
        crate is source-only** — its `build.rs` downloads these at the consumer's build time, so they
        must be uploaded *before* approving the crates.io publish, or a `cargo add` will fail.
-4. [ ] Approve `npm-release` (npm) and `crates-release` (crates.io) to publish. Publish Python
-       (PyPI) via its (still manual) step.
+4. [ ] Approve the `release` environment on `publish-js.yml` (npm), `publish-rust.yml`
+       (crates.io), and `publish-py.yml` (PyPI) to publish.
 5. [ ] Tag `wrappers/go/vX.Y.Z` and push (Go module release — no build step, separate tag).
 6. [ ] Smoke-test each: a clean `pip install` / `npm install` / `cargo add` / `go get` with no
        `CCL_LIB_PATH` set.
