@@ -137,7 +137,7 @@ Each wrapper will expose an idiomatic transaction signer abstraction:
 |---------|---------------|-----------|--------------------|
 | JavaScript/TypeScript | `Account` object | `close()` / `Symbol.dispose` | `TransactionSigner` interface |
 | Python | `Account` object/context manager | `close()` / `with` | `Protocol` or equivalent |
-| Rust | `Account<'bridge>` | `Drop` plus explicit close where useful | trait |
+| Rust | `Account` (owned handle) | `Drop` plus explicit close where useful | trait |
 | Go | `*Account` tied to `*Bridge` | explicit `Close()` | interface |
 
 The following representative API sketches establish the intended ownership, lifecycle, and signing
@@ -203,8 +203,21 @@ let built = bridge.quicktx().build(&plan, &utxos, &params, None)?;
 let signed = sender.sign_tx(&built.tx_cbor, &[SigningRole::Payment])?;
 ```
 
-The Rust Account will borrow the Bridge so it cannot outlive the isolate and will implement `Drop` to
-close its native handle. Recovery phrases should use `secrecy::SecretString`/`zeroize`, not plain
+The Rust Account will be an **owned value holding shared ownership of the bridge's isolate state**
+(reference-counted internally), not a type that borrows the Bridge with a lifetime parameter
+(`Account<'bridge>`). Validity is enforced at runtime, exactly as the handle invariants above
+require for every wrapper: a call on an Account whose Bridge has been closed — or whose own handle
+was closed — fails with a normal CCL error rather than touching freed native memory. `Drop` closes
+the native handle; explicit close remains available.
+
+Rationale for owned over borrowed: a borrowed `Account<'bridge>` cannot be stored in the same
+struct as its `Bridge` (a self-referential borrow), which is precisely what long-lived applications
+want to do, and it forces `'static`/global-Bridge workarounds in threaded and async code. Owned
+handles keep Rust's failure model identical to Python, Go, and JavaScript (same stale-handle error,
+same negative tests), and the choice is wrapper-internal: it can be revisited in a breaking crate
+release without touching the C ABI or other wrappers.
+
+Recovery phrases should use `secrecy::SecretString`/`zeroize`, not plain
 `String` or JSON. The current secret-bearing, untyped JSON account results are specifically deprecated
 by this decision.
 
