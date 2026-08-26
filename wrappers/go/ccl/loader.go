@@ -19,11 +19,11 @@ import (
 // defaultLibVersion pins the libccl release fetched when the library isn't already present. Override
 // at runtime with CCL_LIB_VERSION.
 //
-// Unlike the other wrappers, Go cannot derive this: the module is consumed straight from git source,
-// so there is no build step to stamp it from gradle.properties (Rust does exactly that in build.rs).
-// It therefore has to be a committed constant — so TestVersionConstantsMatchGradle enforces that it
-// equals "v" + the gradle.properties version, and a stale pin fails CI instead of 404ing on a user.
-const defaultLibVersion = "v0.1.0-pre4"
+// Unlike the other wrappers, Go cannot derive this at consumer build time: the module is consumed
+// straight from git source. The repository's `syncVersions` Gradle task writes this committed
+// constant from gradle.properties, and TestVersionConstantsMatchGradle guards it against drift so a
+// stale pin fails CI instead of 404ing on a user.
+const defaultLibVersion = "v0.1.0-pre6"
 
 const releaseBaseURL = "https://github.com/bloxbean/cardano-client-bindings/releases/download"
 

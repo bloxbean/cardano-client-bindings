@@ -1,0 +1,9 @@
+name = "ccl-bridge/redeemer-check"
+version = "0.1.0"
+
+description = "Minimal mint validator for integration tests: passes iff the redeemer is the integer 42."
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v2.2.0"
+source = "github"

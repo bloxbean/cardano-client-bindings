@@ -46,9 +46,15 @@ class DevKitHelper:
         raise RuntimeError(f"devnet reset failed after 3 attempts: {last_err}")
 
     def _wait_healthy(self, budget_seconds):
-        """Poll until the chain-data API (yaci-store, fed by the node) answers with parameters.
+        """Poll until the chain-data API answers with parameters AND the submit path reaches the
+        backend submit-api.
 
-        /admin/devnet alone is no proof: it stays 200 while the node socket is dead.
+        /admin/devnet alone is no proof: it stays 200 while the node socket is dead. The submit
+        probe matters because a reset's bootstrap can fail to start the submit-api entirely
+        ("Network.Socket.bind: resource busy" — the previous instance hadn't released port 8090);
+        chain data then works but every submit gets "Connection refused" until the next reset.
+        Probing with a garbage body: any deserialization/ledger 400 proves the submit-api is
+        alive; a body wrapping "Connection refused" does not.
         """
         deadline = time.monotonic() + budget_seconds
         while time.monotonic() < deadline:
@@ -56,12 +62,30 @@ class DevKitHelper:
             try:
                 url = f"{self.base_url}/epochs/parameters"
                 with urllib.request.urlopen(url, timeout=5) as resp:
-                    if resp.status == 200:
-                        json.loads(resp.read())
-                        return True
+                    if resp.status != 200:
+                        continue
+                    json.loads(resp.read())
+                if self._submit_path_alive():
+                    return True
             except (urllib.error.URLError, OSError, ValueError):
                 continue
         return False
+
+    def _submit_path_alive(self):
+        req = urllib.request.Request(
+            f"{self.base_url}/tx/submit",
+            method="POST",
+            data=b"\x00",
+            headers={"Content-Type": "application/cbor"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5):
+                return True  # a 2xx would mean it is certainly alive
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")
+            return "Connection refused" not in body
+        except (urllib.error.URLError, OSError):
+            return False
 
     def topup(self, address, ada_amount=100):
         """Fund an address with ADA.
@@ -137,6 +161,23 @@ class DevKitHelper:
         url = f"{self.base_url}/txs/{tx_hash}"
         with urllib.request.urlopen(url, timeout=30) as resp:
             return json.loads(resp.read())
+
+    def get_latest_epoch(self):
+        """Current epoch, for intents whose certificates carry epoch bounds (e.g. pool retirement).
+
+        Prefers the protocol-params response (Blockfrost-style params carry "epoch"), falls back
+        to the Blockfrost-compatible /epochs/latest.
+        """
+        pp = self.get_protocol_params()
+        epoch = pp.get("epoch")
+        if isinstance(epoch, int):
+            return epoch
+        if isinstance(epoch, str):
+            return int(epoch)
+        url = f"{self.base_url}/epochs/latest"
+        with urllib.request.urlopen(url, timeout=30) as resp:
+            latest = json.loads(resp.read())
+        return int(latest["epoch"])
 
     def wait_for_block(self, seconds=2):
         """Wait for a new block to be produced."""

@@ -68,7 +68,12 @@ func devkitReset() {
 }
 
 // devkitWaitHealthy polls until the chain-data API (yaci-store, fed by the node) answers with
-// protocol parameters. /admin/devnet alone is no proof: it stays 200 while the node socket is dead.
+// protocol parameters AND the submit path reaches the backend submit-api. /admin/devnet alone is
+// no proof: it stays 200 while the node socket is dead. The submit probe matters because a reset's
+// bootstrap can fail to start the submit-api entirely ("Network.Socket.bind: resource busy" — the
+// previous instance hadn't released port 8090); chain data then works but every submit gets
+// "Connection refused" until the next reset. Probing with a garbage body: any deserialization /
+// ledger 400 proves the submit-api is alive; a body wrapping "Connection refused" does not.
 func devkitWaitHealthy(budget time.Duration) bool {
 	deadline := time.Now().Add(budget)
 	client := &http.Client{Timeout: 5 * time.Second}
@@ -80,11 +85,24 @@ func devkitWaitHealthy(budget time.Duration) bool {
 		}
 		ok := resp.StatusCode == 200
 		resp.Body.Close()
-		if ok {
+		if !ok {
+			continue
+		}
+		if devkitSubmitPathAlive(client) {
 			return true
 		}
 	}
 	return false
+}
+
+func devkitSubmitPathAlive(client *http.Client) bool {
+	resp, err := client.Post(devkitURL+"/tx/submit", "application/cbor", bytes.NewReader([]byte{0x00}))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return !strings.Contains(string(body), "Connection refused")
 }
 
 func devkitTopup(address string, adaAmount int) error {
@@ -406,6 +424,9 @@ transaction:
 	waitForBlock()
 	if total := totalLovelace(mustUtxos(t, r1.BaseAddress)); total != 3_000_000 {
 		t.Errorf("expected 3 ADA for r1, got %d", total)
+	}
+	if total := totalLovelace(mustUtxos(t, r2.BaseAddress)); total != 2_000_000 {
+		t.Errorf("expected 2 ADA for r2, got %d", total)
 	}
 }
 

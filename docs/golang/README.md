@@ -1,0 +1,124 @@
+# Cardano Client Lib for Go
+
+The `ccl` Go package brings [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib)'s offline Cardano operations — key derivation, address handling, transaction building and signing, Plutus data, governance keys — to Go as a native library. No JVM, **no cgo, no C toolchain**: the shared library is loaded at runtime with [purego](https://github.com/ebitengine/purego).
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [API reference](api.md) | Every type and method: `Bridge`, Account, Address, Crypto, Tx, Plutus, Script, Gov, Wallet, QuickTx |
+| [Building transactions](transactions.md) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
+| [Providers & evaluators](providers.md) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
+| [Troubleshooting](troubleshooting.md) | Native library download & resolution, platform support, common errors |
+| [TxPlan (YAML) reference](../quicktx.md) | The transaction description format used by `QuickTx.Build` — shared by all four language wrappers |
+
+## Installation
+
+```bash
+go get github.com/bloxbean/cardano-client-bindings/wrappers/go
+```
+
+```go
+import "github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
+```
+
+Requires Go ≥ 1.21. On first use, the package downloads the prebuilt native library (`libccl`) for your platform from the project's GitHub releases into your user cache directory (`os.UserCacheDir()/cardano-client-bindings/<version>/`) — a one-time, per-version download. No environment variables or build flags are needed.
+
+To use a locally built library instead (or on a platform without prebuilt binaries), set `CCL_LIB_PATH` — see [troubleshooting](troubleshooting.md#how-the-native-library-is-found).
+
+## Quick start
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/bloxbean/cardano-client-bindings/wrappers/go/ccl"
+)
+
+func main() {
+	bridge, err := ccl.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer bridge.Close()
+
+	// Create a new account (24-word mnemonic, testnet addresses).
+	account, err := bridge.Account.Create(ccl.Testnet)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(account.BaseAddress)  // addr_test1...
+	fmt.Println(account.StakeAddress) // stake_test1...
+
+	// Restore it later from the mnemonic.
+	restored, _ := bridge.Account.FromMnemonic(account.Mnemonic, ccl.Testnet, 0, 0)
+	_ = restored
+}
+```
+
+### Build, sign, and inspect a transaction — fully offline
+
+Transactions are described as a [TxPlan YAML document](../quicktx.md). You supply the UTXOs and protocol parameters (from any source — see [providers](providers.md) for ready-made ones), and get back an unsigned transaction:
+
+```go
+yaml := fmt.Sprintf(`
+version: 1.0
+transaction:
+  - tx:
+      from: %s
+      intents:
+        - type: payment
+          address: %s
+          amounts:
+            - unit: lovelace
+              quantity: "5000000"
+`, sender.BaseAddress, receiver)
+
+result, err := bridge.QuickTx.Build(yaml, utxos, protocolParams)
+// result.TxCbor, result.TxHash, result.Fee
+
+signed, err := bridge.Account.SignTx(sender.Mnemonic, ccl.Testnet, 0, 0, result.TxCbor)
+// submit `signed` with any HTTP client — the library never talks to the network
+```
+
+With a provider, fetching the chain data is one call:
+
+```go
+provider := ccl.NewYaciProvider("") // local Yaci DevKit ("" = default URL)
+result, err := bridge.QuickTx.BuildWith(yaml, provider, sender.BaseAddress)
+```
+
+## Design in one paragraph
+
+The native library is **offline and stateless** — it derives, builds, signs, hashes, and serializes, but never performs I/O. Anything that touches the network (fetching UTXOs, protocol parameters, submitting transactions, remote script evaluation) lives in the wrapper or in your code, where you control HTTP. Plutus execution units are computed offline in-process (via Scalus) by default, so even script transactions build without a network connection.
+
+## Concurrency
+
+A `*Bridge` is safe to share across goroutines: all native calls are funneled to one dedicated, pinned OS thread (a GraalVM isolate thread is bound to the OS thread that created it), so calls are serialized. For parallel native work, create multiple `Bridge` instances. Always `defer bridge.Close()`; calls after `Close` return `ccl.ErrBridgeClosed` rather than crashing.
+
+## Networks
+
+```go
+ccl.Mainnet // 0
+ccl.Testnet // 1
+ccl.Preprod // 2
+ccl.Preview // 3
+```
+
+Every key-derivation method takes a typed `ccl.Network` — passing a bare `int` is a compile error. Note the values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Mainnet = 0`, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api.md#networks).
+
+## Examples
+
+Runnable examples live in [`wrappers/go/examples/`](../../wrappers/go/examples):
+
+- `examples/account` — create/restore accounts, derive keys and DRep id
+- `examples/primitives` — mnemonics, Blake2b hashing, Ed25519 sign/verify, address parsing
+- `examples/transaction` — offline QuickTx build + sign
+- `examples/evaluator` — Plutus mint with offline Scalus units vs. remote Blockfrost evaluation
+
+```bash
+go run ./examples/account
+```
