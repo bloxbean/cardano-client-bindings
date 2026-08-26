@@ -214,16 +214,13 @@ public class QuickTxService {
      * signer will attach, which only overpays; underbudgeting gets the tx rejected.
      */
     private static void collectScriptKeyHashes(NativeScript script, Set<String> roles) {
-        if (script instanceof ScriptPubkey pubkey) {
-            roles.add("nskey:" + pubkey.getKeyHash());
-        } else if (script instanceof ScriptAll all) {
-            all.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
-        } else if (script instanceof ScriptAny any) {
-            any.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
-        } else if (script instanceof ScriptAtLeast atLeast) {
-            atLeast.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
+        switch (script) {
+            case ScriptPubkey pubkey -> roles.add("nskey:" + pubkey.getKeyHash());
+            case ScriptAll all -> all.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
+            case ScriptAny any -> any.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
+            case ScriptAtLeast atLeast -> atLeast.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
+            default -> { } // RequireTimeBefore / RequireTimeAfter carry no keys.
         }
-        // RequireTimeBefore / RequireTimeAfter carry no keys.
     }
 
     private static List<Utxo> parseUtxos(String utxosJson) throws Exception {
