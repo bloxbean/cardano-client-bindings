@@ -4,8 +4,9 @@ import starlight from '@astrojs/starlight';
 import tailwindcss from '@tailwindcss/vite';
 import llmsIntegration from './scripts/llms-integration.mjs';
 
-// TODO: switch to the final custom domain once decided (mirrors julc.dev).
-const SITE = 'https://bloxbean.github.io';
+// Current host: the org-wide GitHub Pages domain (bloxbean.github.io redirects here).
+// TODO: switch to the final cardano-client-lib docs domain when it exists.
+const SITE = 'https://pages.bloxbean.com';
 const BASE = process.env.DOCS_BASE ?? '/cardano-client-bindings';
 
 export default defineConfig({

@@ -27,4 +27,4 @@ The `scripts/llms-integration.mjs` Astro integration publishes, at build time an
 
 ## Deployment
 
-`.github/workflows/website-deploy.yml` builds and publishes `website/dist` to GitHub Pages on a `dv*` tag (or manual dispatch), matching JuLC's flow. The site currently assumes the GitHub Pages project path (`https://bloxbean.github.io/cardano-client-bindings`); when a custom domain is chosen, set it in `astro.config.mjs` (`SITE`, drop `BASE`), add a `public/CNAME`, and update the hard-coded URLs in the AI pages.
+`.github/workflows/website-deploy.yml` builds and publishes `website/dist` to GitHub Pages on a `dv*` tag (or manual dispatch), matching JuLC's flow. The site currently assumes the GitHub Pages project path (`https://pages.bloxbean.com/cardano-client-bindings`); when a custom domain is chosen, set it in `astro.config.mjs` (`SITE`, drop `BASE`), add a `public/CNAME`, and update the hard-coded URLs in the AI pages.
