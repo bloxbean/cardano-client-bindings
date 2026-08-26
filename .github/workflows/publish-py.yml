@@ -29,8 +29,9 @@ jobs:
     uses: ./.github/workflows/build-py-wheels.yml
     with:
       # The publish job downloads these AFTER the `release` approval, so they must outlive a
-      # human gate. PR dry runs keep the workflow's short default instead.
-      retention-days: 14
+      # human gate. PR dry runs keep the workflow's short default instead. Must stay <= the
+      # repository's artifact retention setting (currently 7 days) or it is silently clamped.
+      retention-days: 5
 
   # Attach the wheels to the GitHub release. Deliberately NOT behind the `release` environment: a
   # release asset can be replaced or deleted, so it needs no last-chance approval, and this way the
