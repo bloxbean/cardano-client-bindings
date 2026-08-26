@@ -131,6 +131,12 @@ Signing roles will be typed in each wrapper and represented by a validated enum/
 ABI. The default Account signature uses the payment key. Stake, DRep, and committee authorization is
 selected explicitly; the API will not silently sign with every key the Account controls.
 
+A bit mask is deliberately **unordered**, unlike today's `sign_tx_with_keys` role list, whose
+documentation says roles are "applied in order". Witnesses form a set in the transaction witness
+structure, so application order does not affect validity; the native side will add witnesses in a
+fixed canonical order (payment, stake, DRep, committee cold, committee hot) so signed outputs are
+deterministic and byte-identical across wrappers.
+
 Each wrapper will expose an idiomatic transaction signer abstraction:
 
 | Wrapper | Account shape | Lifecycle | Signer abstraction |
