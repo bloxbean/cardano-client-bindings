@@ -31,6 +31,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -137,29 +138,16 @@ public class QuickTxService {
             }
             Set<String> roles = new HashSet<>();
             for (TxIntent intent : intents) {
-                switch (intent.getType()) {
-                    case "stake_registration":
-                    case "stake_deregistration":
-                    case "stake_delegation":
-                    case "stake_withdrawal":
-                    case "voting_delegation":
-                        roles.add("stake");
-                        break;
-                    case "drep_registration":
-                    case "drep_update":
-                    case "drep_deregistration":
-                        roles.add("drep");
-                        break;
-                    case "voting":
-                        roles.add("voter");
-                        break;
-                    case "pool_registration":
-                    case "pool_update":
-                    case "pool_retirement":
-                        roles.add("pool");
-                        break;
-                    default:
-                        break;
+                String role = switch (intent.getType()) {
+                    case "stake_registration", "stake_deregistration", "stake_delegation",
+                         "stake_withdrawal", "voting_delegation" -> "stake";
+                    case "drep_registration", "drep_update", "drep_deregistration" -> "drep";
+                    case "voting" -> "voter";
+                    case "pool_registration", "pool_update", "pool_retirement" -> "pool";
+                    default -> null;
+                };
+                if (role != null) {
+                    roles.add(role);
                 }
                 // Native scripts carry their required signer key hashes in the plan itself:
                 // budget one witness per distinct ScriptPubkey. This matters when the tx spends
@@ -180,24 +168,22 @@ public class QuickTxService {
     /** The native script an intent carries, if any — deserialized from hex when not yet resolved. */
     private static NativeScript nativeScriptOf(TxIntent intent) {
         try {
-            if (intent instanceof NativeScriptAttachmentIntent attachment) {
-                if (attachment.getScript() != null) {
-                    return attachment.getScript();
-                }
-                return deserializeNativeScript(attachment.getScriptHex());
-            }
-            if (intent instanceof MintingIntent minting) {
-                if (minting.getScript() instanceof NativeScript script) {
-                    return script;
-                }
-                if (minting.getScript() == null && Integer.valueOf(0).equals(minting.getScriptType())) {
-                    return deserializeNativeScript(minting.getScriptHex());
-                }
-            }
+            return switch (intent) {
+                case NativeScriptAttachmentIntent attachment when attachment.getScript() != null ->
+                        attachment.getScript();
+                case NativeScriptAttachmentIntent attachment ->
+                        deserializeNativeScript(attachment.getScriptHex());
+                case MintingIntent minting when minting.getScript() instanceof NativeScript script ->
+                        script;
+                case MintingIntent minting when minting.getScript() == null
+                        && Objects.equals(minting.getScriptType(), 0) ->
+                        deserializeNativeScript(minting.getScriptHex());
+                default -> null;
+            };
         } catch (Exception e) {
             // Unparseable script: leave it unbudgeted — the build itself surfaces the real error.
+            return null;
         }
-        return null;
     }
 
     private static NativeScript deserializeNativeScript(String hex) throws Exception {
