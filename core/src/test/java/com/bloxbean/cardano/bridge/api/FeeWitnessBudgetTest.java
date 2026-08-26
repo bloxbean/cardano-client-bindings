@@ -63,9 +63,13 @@ class FeeWitnessBudgetTest {
 
     /** Build the tx offline, apply the given signers, and assert paid fee ≥ min fee of the signed size. */
     private void assertFeeCoversSignedSize(Tx tx, UnaryOperator<Transaction> signer) throws Exception {
-        String yaml = TxPlan.from(tx).feePayer(sender).toYaml();
+        assertFeeCoversSignedSize(TxPlan.from(tx).feePayer(sender).toYaml(), utxos(), signer);
+    }
+
+    private void assertFeeCoversSignedSize(String yaml, String utxosJson,
+                                           UnaryOperator<Transaction> signer) throws Exception {
         var result = YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+                .readTree(service.buildTransaction(yaml, utxosJson, protocolParamsJson, null));
 
         long fee = Long.parseLong(result.get("fee").asText());
         Transaction unsigned = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));
@@ -105,5 +109,56 @@ class FeeWitnessBudgetTest {
     void feeCoversPlainPayment() throws Exception {
         Tx tx = new Tx().payToAddress(account.enterpriseAddress(), Amount.ada(5)).from(sender);
         assertFeeCoversSignedSize(tx, account::sign);
+    }
+
+    /**
+     * Regression (caught live by the DevKit suite): spending from a native-script address whose
+     * UTXO covers the whole transaction selects no vkey-owned inputs, so CCL's UTXO-derived signer
+     * count is zero — the script's {@code sig} witness must be budgeted from the plan's script, or
+     * the node rejects with {@code FeeTooSmallUTxO} (observed short by exactly one witness).
+     */
+    @Test
+    void feeCoversNativeScriptSpendFromScriptOnlyInputs() throws Exception {
+        byte[] paymentKeyHash = new com.bloxbean.cardano.client.address.Address(sender)
+                .getPaymentCredentialHash().orElseThrow();
+        var script = new com.bloxbean.cardano.client.transaction.spec.script.ScriptPubkey(
+                HexUtil.encodeHexString(paymentKeyHash));
+        String scriptHex = HexUtil.encodeHexString(script.serializeScriptBody());
+        byte[] scriptAddrBytes = new byte[29];
+        scriptAddrBytes[0] = (byte) 0x70; // testnet enterprise script address header
+        System.arraycopy(script.getScriptHash(), 0, scriptAddrBytes, 1, 28);
+        String scriptAddress = new com.bloxbean.cardano.client.address.Address(scriptAddrBytes).toBech32();
+
+        String scriptTxHash = "b".repeat(64);
+        String yaml = """
+            version: 1.0
+            context:
+              fee_payer: %s
+            transaction:
+              - tx:
+                  from: %s
+                  change_address: %s
+                  inputs:
+                    - type: collect_from
+                      utxo_refs:
+                        - tx_hash: %s
+                          output_index: 0
+                  intents:
+                    - type: payment
+                      address: %s
+                      amounts:
+                        - unit: lovelace
+                          quantity: "3000000"
+                  scripts:
+                    - type: native_script
+                      script_hex: %s
+            """.formatted(sender, sender, sender, scriptTxHash, sender, scriptHex);
+        // Only the script-address UTXO is supplied, so the built tx has no vkey-owned inputs.
+        String scriptOnlyUtxos = """
+            [{"tx_hash":"%s","output_index":0,"address":"%s",
+              "amount":[{"unit":"lovelace","quantity":"10000000"}]}]
+            """.formatted(scriptTxHash, scriptAddress);
+
+        assertFeeCoversSignedSize(yaml, scriptOnlyUtxos, account::sign);
     }
 }

@@ -9,10 +9,18 @@ import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.common.cbor.CborSerializationUtil;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.plutus.spec.ExUnits;
+import co.nstant.in.cbor.model.Array;
 import com.bloxbean.cardano.client.quicktx.AbstractTx;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
+import com.bloxbean.cardano.client.quicktx.intent.MintingIntent;
+import com.bloxbean.cardano.client.quicktx.intent.NativeScriptAttachmentIntent;
 import com.bloxbean.cardano.client.quicktx.intent.TxIntent;
 import com.bloxbean.cardano.client.quicktx.serialization.TxPlan;
+import com.bloxbean.cardano.client.transaction.spec.script.NativeScript;
+import com.bloxbean.cardano.client.transaction.spec.script.ScriptAll;
+import com.bloxbean.cardano.client.transaction.spec.script.ScriptAny;
+import com.bloxbean.cardano.client.transaction.spec.script.ScriptAtLeast;
+import com.bloxbean.cardano.client.transaction.spec.script.ScriptPubkey;
 import com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer;
 import com.bloxbean.cardano.client.transaction.spec.Transaction;
 import com.bloxbean.cardano.client.util.HexUtil;
@@ -111,10 +119,10 @@ public class QuickTxService {
      * <p>Each tx contributes one witness per <em>distinct key role</em> its intents require: the
      * stake key (stake registration/deregistration/delegation/withdrawal, vote delegation), the
      * DRep key (DRep lifecycle), the voter key (votes), and the pool key (pool lifecycle). Several
-     * intents sharing a role still need only one witness. Payment-only intents (payment, minting,
-     * metadata, donation, governance proposals, script and input intents) add none — the fee
-     * payer's witness is already counted from the UTXOs. Extra signers demanded by a native-script
-     * policy are not visible in the plan and are not budgeted (unchanged behavior).
+     * intents sharing a role still need only one witness. Native scripts (minting policies and
+     * {@code native_script} attachments) contribute one witness per distinct {@code ScriptPubkey}
+     * key hash in the script tree. Plain payment/metadata/donation/proposal and Plutus intents add
+     * none — the fee payer's witness is already counted from the UTXOs.
      */
     private static int countCertificateWitnesses(TxPlan plan) {
         int total = 0;
@@ -149,10 +157,69 @@ public class QuickTxService {
                     default:
                         break;
                 }
+                // Native scripts carry their required signer key hashes in the plan itself:
+                // budget one witness per distinct ScriptPubkey. This matters when the tx spends
+                // from a script address — such inputs contribute no vkey signer to CCL's
+                // UTXO-derived count, so without this the script's witness goes unbudgeted
+                // (observed live: a sig-script spend whose script UTXO covered the whole tx was
+                // rejected with FeeTooSmallUTxO, short by exactly one witness).
+                NativeScript nativeScript = nativeScriptOf(intent);
+                if (nativeScript != null) {
+                    collectScriptKeyHashes(nativeScript, roles);
+                }
             }
             total += roles.size();
         }
         return total;
+    }
+
+    /** The native script an intent carries, if any — deserialized from hex when not yet resolved. */
+    private static NativeScript nativeScriptOf(TxIntent intent) {
+        try {
+            if (intent instanceof NativeScriptAttachmentIntent attachment) {
+                if (attachment.getScript() != null) {
+                    return attachment.getScript();
+                }
+                return deserializeNativeScript(attachment.getScriptHex());
+            }
+            if (intent instanceof MintingIntent minting) {
+                if (minting.getScript() instanceof NativeScript script) {
+                    return script;
+                }
+                if (minting.getScript() == null && Integer.valueOf(0).equals(minting.getScriptType())) {
+                    return deserializeNativeScript(minting.getScriptHex());
+                }
+            }
+        } catch (Exception e) {
+            // Unparseable script: leave it unbudgeted — the build itself surfaces the real error.
+        }
+        return null;
+    }
+
+    private static NativeScript deserializeNativeScript(String hex) throws Exception {
+        if (hex == null || hex.isEmpty()) {
+            return null;
+        }
+        byte[] bytes = HexUtil.decodeHexString(hex);
+        return NativeScript.deserialize((Array) CborSerializationUtil.deserialize(bytes));
+    }
+
+    /**
+     * Adds one role entry per distinct {@code ScriptPubkey} key hash in the script tree. For
+     * {@code any}/{@code atLeast} scripts every key is counted — possibly more witnesses than the
+     * signer will attach, which only overpays; underbudgeting gets the tx rejected.
+     */
+    private static void collectScriptKeyHashes(NativeScript script, Set<String> roles) {
+        if (script instanceof ScriptPubkey pubkey) {
+            roles.add("nskey:" + pubkey.getKeyHash());
+        } else if (script instanceof ScriptAll all) {
+            all.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
+        } else if (script instanceof ScriptAny any) {
+            any.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
+        } else if (script instanceof ScriptAtLeast atLeast) {
+            atLeast.getScripts().forEach(s -> collectScriptKeyHashes(s, roles));
+        }
+        // RequireTimeBefore / RequireTimeAfter carry no keys.
     }
 
     private static List<Utxo> parseUtxos(String utxosJson) throws Exception {
