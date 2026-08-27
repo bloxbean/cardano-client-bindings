@@ -70,6 +70,13 @@ func signSubmit(t *testing.T, yaml string, utxos []map[string]interface{}, pp ma
 	if additionalSigners < 0 {
 		additionalSigners = 0
 	}
+	return signSubmitN(t, yaml, utxos, pp, execUnits, additionalSigners, keys...)
+}
+
+// signSubmitN is signSubmit with an explicit additional-signers budget, for transactions whose
+// inputs imply no payment key (e.g. a script-only-input spend).
+func signSubmitN(t *testing.T, yaml string, utxos []map[string]interface{}, pp map[string]interface{}, execUnits []map[string]interface{}, additionalSigners int, keys ...string) string {
+	t.Helper()
 	var result *TxResult
 	var err error
 	if execUnits != nil {
@@ -1023,7 +1030,9 @@ transaction:
 	}
 	spendUtxos := append([]map[string]interface{}{}, scriptUtxos...)
 	spendUtxos = append(spendUtxos, feeUtxos...)
-	signSubmit(t, spendYaml, spendUtxos, pp, nil, "payment")
+	// Script-only-input spend: the inputs imply no payment-key witness, so the budget is the
+	// script's one sig key — passed explicitly, exactly as a real caller must.
+	signSubmitN(t, spendYaml, spendUtxos, pp, nil, 1, "payment")
 
 	assertUtxoConsumed(t, scriptAddress, lockHash)
 }
