@@ -21,6 +21,7 @@ export const CCL_ERROR_INVALID_ADDRESS = -7;
 export const CCL_ERROR_INSUFFICIENT_FUNDS = -8;
 export const CCL_ERROR_INVALID_TRANSACTION = -9;
 export const CCL_ERROR_TX_BUILD = -10;
+export const CCL_ERROR_INVALID_HANDLE = -11;
 
 // Network selectors.
 //
@@ -31,6 +32,18 @@ export const CCL_ERROR_TX_BUILD = -10;
 //
 // The genuine on-chain id is the `network_id` field returned by `address.info()` — an account made
 // with MAINNET (0) has `address.info().network_id === 1`, and one made with TESTNET (1) has 0.
+/**
+ * Typed signing roles for managed accounts. Combine with `|`; witnesses are applied in canonical
+ * order (payment, stake, DRep, committee cold, committee hot) regardless of combination order.
+ */
+export const SigningRole = Object.freeze({
+  PAYMENT: 1,
+  STAKE: 1 << 1,
+  DREP: 1 << 2,
+  COMMITTEE_COLD: 1 << 3,
+  COMMITTEE_HOT: 1 << 4,
+});
+
 export const MAINNET = 0;
 export const TESTNET = 1;
 export const PREPROD = 2;
@@ -319,6 +332,7 @@ export class CclBridge {
     this.gov = new GovApi(this);
     this.wallet = new WalletApi(this);
     this.quicktx = new QuickTxApi(this);
+    this.accounts = new AccountsApi(this);
   }
 
   /**
@@ -691,5 +705,109 @@ export class QuickTxApi {
       execUnits = await evaluator.evaluate(draft.tx_cbor, utxos);
     }
     return this.build(txplanYaml, utxos, protocolParams, execUnits, additionalSigners);
+  }
+}
+
+/**
+ * A managed account (ADR-0016) bound to one CIP-1852 payment leaf
+ * (`m/1852'/1815'/account'/0/addressIndex`).
+ *
+ * One handle is one payment address; open further Accounts for further address indices. The
+ * stake/DRep/committee keys sit at their standard role indices independent of `addressIndex`, so
+ * Accounts at different address indices of one account index share a single stake/DRep identity.
+ *
+ * Lifecycle: call {@link Account#close} (idempotent) or use `using` / `Symbol.dispose`; any use
+ * after close throws a {@link CclError} with code `CCL_ERROR_INVALID_HANDLE` (-11). String
+ * representations never contain secret material.
+ */
+export class Account {
+  constructor(bridge, handle) {
+    this._b = bridge;
+    this._handle = handle;
+  }
+
+  /**
+   * Public account data: `{ base_address, enterprise_address, stake_address, network,
+   * account_index, address_index, drep_id }`. Never contains secrets.
+   */
+  get info() {
+    const rc = this._b._lib.ccl_account_get_info(this._b._threadPtr, this._handle);
+    return JSON.parse(this._b._check(rc));
+  }
+
+  /**
+   * Sign a transaction with the selected roles; returns the signed CBOR hex.
+   *
+   * `roles` is a {@link SigningRole} combination (bit mask), e.g.
+   * `SigningRole.PAYMENT | SigningRole.STAKE` for a stake-certificate transaction. An empty mask
+   * is rejected — signing never silently uses every key.
+   */
+  signTx(txCborHex, roles = SigningRole.PAYMENT) {
+    const rc = this._b._lib.ccl_account_sign_tx_handle(
+      this._b._threadPtr, this._handle, cstr(txCborHex), roles);
+    return this._b._check(rc);
+  }
+
+  /**
+   * One-shot export of a freshly created account's recovery phrase.
+   *
+   * Only available on accounts from {@link AccountsApi#create}, and only once — the phrase is
+   * removed on retrieval. Accounts opened from a mnemonic throw (the caller already holds the
+   * phrase). Persist the returned value securely; nothing else ever returns it.
+   */
+  exportRecoveryPhrase() {
+    const rc = this._b._lib.ccl_account_export_recovery_phrase(this._b._threadPtr, this._handle);
+    return this._b._check(rc);
+  }
+
+  /** Release the native account state. Idempotent; further use throws with code -11. */
+  close() {
+    const handle = this._handle;
+    this._handle = 0n; // 0 is never a valid handle
+    if (handle && this._b._threadPtr !== null) {
+      const rc = this._b._lib.ccl_account_close(this._b._threadPtr, handle);
+      this._b._check(rc);
+    }
+  }
+
+  [Symbol.dispose]() {
+    this.close();
+  }
+
+  toString() {
+    return this._handle ? `<ccl.Account handle=${this._handle}>` : '<ccl.Account closed>';
+  }
+}
+
+/** Managed-accounts namespace (`bridge.accounts`, ADR-0016). */
+export class AccountsApi {
+  constructor(bridge) {
+    this._b = bridge;
+  }
+
+  /**
+   * Open an account from a mnemonic at fixed derivation indices; returns an {@link Account}.
+   * The mnemonic crosses the FFI boundary once, here; no later operation needs it.
+   */
+  fromMnemonic(mnemonic, network, accountIndex = 0, addressIndex = 0) {
+    checkNetwork(network);
+    const out = new BigInt64Array(1);
+    const rc = this._b._lib.ccl_account_open_mnemonic(
+      this._b._threadPtr, network, cstr(mnemonic), accountIndex, addressIndex, ptr(out));
+    this._b._check(rc);
+    return new Account(this._b, out[0]);
+  }
+
+  /**
+   * Create a brand-new account (fresh 24-word mnemonic); returns an {@link Account}.
+   * No secret is returned here — retrieve the recovery phrase once, deliberately, with
+   * {@link Account#exportRecoveryPhrase}.
+   */
+  create(network) {
+    checkNetwork(network);
+    const out = new BigInt64Array(1);
+    const rc = this._b._lib.ccl_account_create_handle(this._b._threadPtr, network, ptr(out));
+    this._b._check(rc);
+    return new Account(this._b, out[0]);
   }
 }
