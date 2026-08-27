@@ -76,6 +76,8 @@ const (
 	ErrInvalidTransaction = -9
 	// ErrTxBuild is a malformed TxPlan — the most common failure on the core build path.
 	ErrTxBuild = -10
+	// ErrInvalidHandle is an unknown, closed, or foreign account handle (ADR-0016).
+	ErrInvalidHandle = -11
 )
 
 // CclError represents an error from the CCL native library.
@@ -144,6 +146,9 @@ type Bridge struct {
 	calls chan func()
 
 	Account *AccountApi
+	// Accounts is the managed-accounts namespace (ADR-0016): handle-based accounts that keep the
+	// mnemonic out of per-operation calls.
+	Accounts *AccountsApi
 	Address *AddressApi
 	Crypto  *CryptoApi
 	Tx      *TxApi
@@ -175,6 +180,7 @@ func New() (*Bridge, error) {
 	}
 
 	b.Account = &AccountApi{bridge: b}
+	b.Accounts = &AccountsApi{bridge: b}
 	b.Address = &AddressApi{bridge: b}
 	b.Crypto = &CryptoApi{bridge: b}
 	b.Tx = &TxApi{bridge: b}
