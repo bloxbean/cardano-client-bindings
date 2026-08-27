@@ -187,6 +187,11 @@ public final class AccountService {
         return accounts.size();
     }
 
+    /** Number of unexported recovery phrases pending (test/diagnostic aid). */
+    static int pendingPhraseCount() {
+        return pendingRecoveryPhrases.size();
+    }
+
     static Account lookup(long handle) {
         Account managed = accounts.get(handle);
         if (managed == null) {

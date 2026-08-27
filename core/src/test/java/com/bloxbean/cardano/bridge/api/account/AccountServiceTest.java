@@ -221,6 +221,28 @@ class AccountServiceTest {
     }
 
     @Test
+    void closeLeavesNoStateBehind_inEitherMap() {
+        int baseOpen = AccountService.openCount();
+        int basePending = AccountService.pendingPhraseCount();
+
+        long imported = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, 0, 0);
+        long created = AccountService.createNew(TESTNET);
+        long exported = AccountService.createNew(TESTNET);
+        AccountService.exportRecoveryPhrase(exported);
+
+        assertEquals(baseOpen + 3, AccountService.openCount());
+        assertEquals(basePending + 1, AccountService.pendingPhraseCount(),
+                "imported accounts pend no phrase; the exported one was consumed");
+
+        AccountService.close(imported);
+        AccountService.close(created);
+        AccountService.close(exported);
+        assertEquals(baseOpen, AccountService.openCount(), "every handle removed");
+        assertEquals(basePending, AccountService.pendingPhraseCount(),
+                "close drops an unexported phrase too — no secret outlives its handle");
+    }
+
+    @Test
     void invalidOpenArguments_rejected() {
         assertThrows(IllegalArgumentException.class,
                 () -> AccountService.openMnemonic(99, TEST_MNEMONIC, 0, 0));
