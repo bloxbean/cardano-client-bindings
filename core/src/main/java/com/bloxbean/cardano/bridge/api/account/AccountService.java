@@ -69,13 +69,13 @@ public final class AccountService {
     public static Map<String, Object> info(long handle) {
         Account managed = lookup(handle);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("base_address", managed.cclAccount.baseAddress());
-        result.put("enterprise_address", managed.cclAccount.enterpriseAddress());
-        result.put("stake_address", managed.cclAccount.stakeAddress());
-        result.put("network", managed.networkId);
-        result.put("account_index", managed.accountIndex);
-        result.put("address_index", managed.addressIndex);
-        result.put("drep_id", managed.cclAccount.drepId());
+        result.put("base_address", managed.cclAccount().baseAddress());
+        result.put("enterprise_address", managed.cclAccount().enterpriseAddress());
+        result.put("stake_address", managed.cclAccount().stakeAddress());
+        result.put("network", managed.networkId());
+        result.put("account_index", managed.accountIndex());
+        result.put("address_index", managed.addressIndex());
+        result.put("drep_id", managed.cclAccount().drepId());
         return result;
     }
 
@@ -114,19 +114,19 @@ public final class AccountService {
                     com.bloxbean.cardano.client.transaction.spec.Transaction.deserialize(
                             com.bloxbean.cardano.client.util.HexUtil.decodeHexString(txCborHex.trim()));
             if ((roleMask & ROLE_PAYMENT) != 0) {
-                tx = managed.cclAccount.sign(tx);
+                tx = managed.cclAccount().sign(tx);
             }
             if ((roleMask & ROLE_STAKE) != 0) {
-                tx = managed.cclAccount.signWithStakeKey(tx);
+                tx = managed.cclAccount().signWithStakeKey(tx);
             }
             if ((roleMask & ROLE_DREP) != 0) {
-                tx = managed.cclAccount.signWithDRepKey(tx);
+                tx = managed.cclAccount().signWithDRepKey(tx);
             }
             if ((roleMask & ROLE_COMMITTEE_COLD) != 0) {
-                tx = managed.cclAccount.signWithCommitteeColdKey(tx);
+                tx = managed.cclAccount().signWithCommitteeColdKey(tx);
             }
             if ((roleMask & ROLE_COMMITTEE_HOT) != 0) {
-                tx = managed.cclAccount.signWithCommitteeHotKey(tx);
+                tx = managed.cclAccount().signWithCommitteeHotKey(tx);
             }
             return tx.serializeToHex();
         } catch (RuntimeException e) {
