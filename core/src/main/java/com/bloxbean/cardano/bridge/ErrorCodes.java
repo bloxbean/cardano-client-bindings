@@ -32,6 +32,8 @@ public final class ErrorCodes {
     public static final int CCL_ERROR_INVALID_TRANSACTION = -9;
     /** Building a transaction from a QuickTx spec failed. */
     public static final int CCL_ERROR_TX_BUILD = -10;
+    /** The supplied account handle is unknown, closed, or belongs to another isolate. */
+    public static final int CCL_ERROR_INVALID_HANDLE = -11;
 
     private ErrorCodes() {}
 }
