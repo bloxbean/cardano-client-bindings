@@ -1,4 +1,5 @@
 mod ffi;
+pub mod accounts;
 
 #[cfg(feature = "providers")]
 pub mod providers;
@@ -26,6 +27,7 @@ pub mod error_codes {
     pub const CCL_ERROR_INVALID_TRANSACTION: i32 = -9;
     /// Malformed TxPlan — the most common failure on the core build path.
     pub const CCL_ERROR_TX_BUILD: i32 = -10;
+    pub const CCL_ERROR_INVALID_HANDLE: i32 = -11;
 }
 
 /// Which Cardano network to derive addresses/keys for.
@@ -141,10 +143,64 @@ fn to_cstring(s: &str) -> Result<CString> {
 ///     .collect();
 /// # Ok::<(), ccl::CclError>(())
 /// ```
+/// Close-aware view of the bridge's isolate thread, shared with owned [`accounts::Account`]s.
+pub(crate) struct BridgeShared {
+    pub(crate) thread: std::cell::Cell<*mut ffi::graal_isolatethread_t>,
+}
+
+impl BridgeShared {
+    /// The live isolate thread, or a typed error once the Bridge has been dropped.
+    pub(crate) fn thread(&self) -> Result<*mut ffi::graal_isolatethread_t> {
+        let t = self.thread.get();
+        if t.is_null() {
+            return Err(CclError {
+                code: error_codes::CCL_ERROR_INVALID_HANDLE,
+                message: "Bridge is closed; this Account's handle is no longer valid".to_string(),
+            });
+        }
+        Ok(t)
+    }
+}
+
+pub(crate) fn get_result_at(thread: *mut ffi::graal_isolatethread_t) -> String {
+    unsafe {
+        let ptr = ffi::ccl_get_result(thread);
+        if ptr.is_null() {
+            return String::new();
+        }
+        let result = CStr::from_ptr(ptr as *const c_char).to_string_lossy().into_owned();
+        ffi::ccl_free_string(thread, ptr);
+        result
+    }
+}
+
+pub(crate) fn get_error_at(thread: *mut ffi::graal_isolatethread_t) -> String {
+    unsafe {
+        let ptr = ffi::ccl_get_last_error(thread);
+        if ptr.is_null() {
+            return String::new();
+        }
+        let result = CStr::from_ptr(ptr as *const c_char).to_string_lossy().into_owned();
+        ffi::ccl_free_string(thread, ptr);
+        result
+    }
+}
+
+pub(crate) fn check_at(thread: *mut ffi::graal_isolatethread_t, rc: i32) -> Result<String> {
+    if rc != error_codes::CCL_SUCCESS {
+        return Err(CclError { code: rc, message: get_error_at(thread) });
+    }
+    Ok(get_result_at(thread))
+}
+
 pub struct Bridge {
     #[allow(dead_code)]
     isolate: *mut ffi::graal_isolate_t,
     thread: *mut ffi::graal_isolatethread_t,
+    // Shared with owned Accounts (Rc: the Bridge is !Send, so no atomics needed). Drop nulls the
+    // cell before tearing the isolate down, hard-invalidating every outstanding Account: their
+    // calls then fail with a normal CclError instead of touching a dead isolate.
+    pub(crate) shared: std::rc::Rc<BridgeShared>,
     // Raw pointers are already !Send + !Sync, so no negative impl is needed — but that is a load-
     // bearing property of this type, not an accident, and removing this field must not silently
     // make it Send again.
@@ -171,6 +227,7 @@ impl Bridge {
         let bridge = Bridge {
             isolate,
             thread,
+            shared: std::rc::Rc::new(BridgeShared { thread: std::cell::Cell::new(thread) }),
             _not_send: PhantomData,
         };
         bridge.check_version()?;
@@ -201,42 +258,8 @@ impl Bridge {
         Ok(())
     }
 
-    fn get_result(&self) -> String {
-        unsafe {
-            let ptr = ffi::ccl_get_result(self.thread);
-            if ptr.is_null() {
-                return String::new();
-            }
-            let result = CStr::from_ptr(ptr as *const c_char)
-                .to_string_lossy()
-                .into_owned();
-            ffi::ccl_free_string(self.thread, ptr);
-            result
-        }
-    }
-
-    fn get_error(&self) -> String {
-        unsafe {
-            let ptr = ffi::ccl_get_last_error(self.thread);
-            if ptr.is_null() {
-                return String::new();
-            }
-            let result = CStr::from_ptr(ptr as *const c_char)
-                .to_string_lossy()
-                .into_owned();
-            ffi::ccl_free_string(self.thread, ptr);
-            result
-        }
-    }
-
     fn check(&self, rc: i32) -> Result<String> {
-        if rc != error_codes::CCL_SUCCESS {
-            return Err(CclError {
-                code: rc,
-                message: self.get_error(),
-            });
-        }
-        Ok(self.get_result())
+        check_at(self.thread, rc)
     }
 
     /// Get the library version.
@@ -286,6 +309,11 @@ impl Bridge {
     }
 
     /// Get the quicktx namespace API.
+    /// Managed accounts (ADR-0016): open once, hold an owned Account, sign with typed roles.
+    pub fn accounts(&self) -> accounts::AccountsApi<'_> {
+        accounts::AccountsApi { bridge: self }
+    }
+
     pub fn quicktx(&self) -> QuickTxApi<'_> {
         QuickTxApi { bridge: self }
     }
@@ -293,6 +321,9 @@ impl Bridge {
 
 impl Drop for Bridge {
     fn drop(&mut self) {
+        // Invalidate outstanding Accounts before the isolate dies: their calls become typed
+        // errors, never dangling-isolate dereferences.
+        self.shared.thread.set(ptr::null_mut());
         if !self.thread.is_null() {
             unsafe {
                 ffi::graal_tear_down_isolate(self.thread);
