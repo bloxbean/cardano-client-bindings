@@ -108,6 +108,81 @@ class ManagedAccountServiceTest {
                 () -> ManagedAccountService.info(first), "the closed handle stays dead");
     }
 
+    // --- Signing: typed role mask, byte-identical with the mnemonic-per-call path ---
+
+    /** An unsigned stake-registration tx built offline, for signing tests. */
+    private String unsignedTx() throws Exception {
+        var service = new com.bloxbean.cardano.bridge.api.quicktx.QuickTxService();
+        Account reference = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
+        String yaml = com.bloxbean.cardano.client.quicktx.serialization.TxPlan
+                .from(new com.bloxbean.cardano.client.quicktx.Tx()
+                        .registerStakeAddress(reference.stakeAddress())
+                        .from(reference.baseAddress()))
+                .feePayer(reference.baseAddress()).toYaml();
+        String utxos = """
+            [{"tx_hash":"%s","output_index":0,"address":"%s",
+              "amount":[{"unit":"lovelace","quantity":"2000000000"}]}]
+            """.formatted("a".repeat(64), reference.baseAddress());
+        String params;
+        try (var is = getClass().getClassLoader().getResourceAsStream("protocol-params.json")) {
+            params = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer
+                .getYamlMapper().readTree(service.buildTransaction(yaml, utxos, params, null, 1));
+        return result.get("tx_cbor").asText();
+    }
+
+    /** Sign via the mnemonic-per-call mechanism (what ccl_account_sign_tx_multi does). */
+    private String signLegacy(String txCborHex, boolean stake, boolean drep) throws Exception {
+        Account account = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
+        var tx = com.bloxbean.cardano.client.transaction.spec.Transaction.deserialize(
+                com.bloxbean.cardano.client.util.HexUtil.decodeHexString(txCborHex));
+        tx = account.sign(tx);
+        if (stake) tx = account.signWithStakeKey(tx);
+        if (drep) tx = account.signWithDRepKey(tx);
+        return tx.serializeToHex();
+    }
+
+    @Test
+    void signParity_byteIdenticalWithLegacyPath_acrossRoleCombos() throws Exception {
+        long handle = open(0, 0);
+        String unsigned = unsignedTx();
+
+        assertEquals(signLegacy(unsigned, false, false),
+                ManagedAccountService.signTx(handle, unsigned,
+                        ManagedAccountService.ROLE_PAYMENT));
+        assertEquals(signLegacy(unsigned, true, false),
+                ManagedAccountService.signTx(handle, unsigned,
+                        ManagedAccountService.ROLE_PAYMENT | ManagedAccountService.ROLE_STAKE));
+        assertEquals(signLegacy(unsigned, true, true),
+                ManagedAccountService.signTx(handle, unsigned,
+                        ManagedAccountService.ROLE_PAYMENT | ManagedAccountService.ROLE_STAKE
+                                | ManagedAccountService.ROLE_DREP));
+    }
+
+    @Test
+    void signMaskValidation_zeroAndUnknownBitsRejected() throws Exception {
+        long handle = open(0, 0);
+        String unsigned = unsignedTx();
+        assertThrows(IllegalArgumentException.class,
+                () -> ManagedAccountService.signTx(handle, unsigned, 0),
+                "empty mask must not silently sign with every key");
+        assertThrows(IllegalArgumentException.class,
+                () -> ManagedAccountService.signTx(handle, unsigned, 1 << 7));
+        assertThrows(IllegalArgumentException.class,
+                () -> ManagedAccountService.signTx(handle, "  ", ManagedAccountService.ROLE_PAYMENT));
+    }
+
+    @Test
+    void signOnClosedHandle_failsTyped() throws Exception {
+        long handle = open(0, 0);
+        String unsigned = unsignedTx();
+        ManagedAccountService.close(handle);
+        assertThrows(ManagedAccountService.UnknownHandleException.class,
+                () -> ManagedAccountService.signTx(handle, unsigned,
+                        ManagedAccountService.ROLE_PAYMENT));
+    }
+
     @Test
     void invalidOpenArguments_rejected() {
         assertThrows(IllegalArgumentException.class,

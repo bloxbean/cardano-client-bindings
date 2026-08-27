@@ -93,6 +93,63 @@ public final class ManagedAccountService {
         return result;
     }
 
+    // Typed signing roles (ADR-0016): a validated bit mask, deliberately unordered — witnesses form
+    // a set — with a fixed canonical application order so signed outputs are byte-identical across
+    // wrappers.
+    public static final int ROLE_PAYMENT = 1;
+    public static final int ROLE_STAKE = 1 << 1;
+    public static final int ROLE_DREP = 1 << 2;
+    public static final int ROLE_COMMITTEE_COLD = 1 << 3;
+    public static final int ROLE_COMMITTEE_HOT = 1 << 4;
+    private static final int ALL_ROLES = ROLE_PAYMENT | ROLE_STAKE | ROLE_DREP
+            | ROLE_COMMITTEE_COLD | ROLE_COMMITTEE_HOT;
+
+    /**
+     * Signs a transaction with the account keys selected by {@code roleMask}, applied in canonical
+     * order (payment, stake, DRep, committee cold, committee hot). The mask must be non-zero and
+     * contain no unknown bits — the API never silently signs with every key the account controls.
+     *
+     * @return the signed transaction as CBOR hex
+     * @throws IllegalArgumentException for an empty/unknown mask or blank transaction
+     */
+    public static String signTx(long handle, String txCborHex, int roleMask) {
+        if (txCborHex == null || txCborHex.isBlank()) {
+            throw new IllegalArgumentException("Transaction CBOR hex is required");
+        }
+        if (roleMask == 0) {
+            throw new IllegalArgumentException("Role mask must select at least one signing role");
+        }
+        if ((roleMask & ~ALL_ROLES) != 0) {
+            throw new IllegalArgumentException("Unknown bits in role mask: " + roleMask);
+        }
+        ManagedAccount managed = lookup(handle);
+        try {
+            com.bloxbean.cardano.client.transaction.spec.Transaction tx =
+                    com.bloxbean.cardano.client.transaction.spec.Transaction.deserialize(
+                            com.bloxbean.cardano.client.util.HexUtil.decodeHexString(txCborHex.trim()));
+            if ((roleMask & ROLE_PAYMENT) != 0) {
+                tx = managed.account.sign(tx);
+            }
+            if ((roleMask & ROLE_STAKE) != 0) {
+                tx = managed.account.signWithStakeKey(tx);
+            }
+            if ((roleMask & ROLE_DREP) != 0) {
+                tx = managed.account.signWithDRepKey(tx);
+            }
+            if ((roleMask & ROLE_COMMITTEE_COLD) != 0) {
+                tx = managed.account.signWithCommitteeColdKey(tx);
+            }
+            if ((roleMask & ROLE_COMMITTEE_HOT) != 0) {
+                tx = managed.account.signWithCommitteeHotKey(tx);
+            }
+            return tx.serializeToHex();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("Transaction signing failed: " + e.getMessage(), e);
+        }
+    }
+
     /** Closes a handle. Idempotent: closing an unknown or already-closed handle is a no-op. */
     public static void close(long handle) {
         accounts.remove(handle);

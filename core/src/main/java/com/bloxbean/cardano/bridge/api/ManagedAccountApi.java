@@ -100,6 +100,42 @@ public final class ManagedAccountApi {
     }
 
     /**
+     * Signs a transaction with the account keys selected by a typed role mask.
+     *
+     * <p>Exported as {@code ccl_account_sign_tx_handle}. {@code role_mask} bits: {@code 1}=payment,
+     * {@code 2}=stake, {@code 4}=DRep, {@code 8}=committee cold, {@code 16}=committee hot. The mask
+     * is unordered (witnesses form a set); keys are applied in canonical order so signed outputs are
+     * byte-identical across wrappers. A zero or unknown-bit mask fails — the API never silently
+     * signs with every key the account controls. On success the result is the signed transaction
+     * CBOR hex.
+     *
+     * @param thread      the current isolate thread
+     * @param handle      an open account handle
+     * @param txCborPtr   the unsigned (or partially signed) transaction CBOR hex (UTF-8 C string)
+     * @param roleMask    bit mask of signing roles (non-zero, known bits only)
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_HANDLE} /
+     *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT} /
+     *         {@link ErrorCodes#CCL_ERROR_INVALID_TRANSACTION}
+     */
+    @CEntryPoint(name = "ccl_account_sign_tx_handle")
+    public static int signTx(IsolateThread thread, long handle, CCharPointer txCborPtr, int roleMask) {
+        try {
+            String txCborHex = NativeString.toJavaString(txCborPtr);
+            ResultState.set(ManagedAccountService.signTx(handle, txCborHex, roleMask));
+            return ErrorCodes.CCL_SUCCESS;
+        } catch (ManagedAccountService.UnknownHandleException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_HANDLE;
+        } catch (IllegalArgumentException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+        } catch (Exception e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_TRANSACTION;
+        }
+    }
+
+    /**
      * Closes an account handle, releasing its native state.
      *
      * <p>Exported as {@code ccl_account_close}. Idempotent: closing an unknown or already-closed
