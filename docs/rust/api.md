@@ -63,6 +63,7 @@ Error codes (`ccl::error_codes`):
 | `CCL_ERROR_INSUFFICIENT_FUNDS` | -8 | UTXOs can't cover outputs + fee |
 | `CCL_ERROR_INVALID_TRANSACTION` | -9 | Bad transaction |
 | `CCL_ERROR_TX_BUILD` | -10 | TxPlan build failure (most common `quicktx().build` error — usually a malformed plan) |
+| `CCL_ERROR_INVALID_HANDLE` | -11 | Unknown or closed account handle, or a Bridge that was dropped |
 
 Predicate methods (`validate`, `validate_mnemonic`, `verify`) return `bool` and never error.
 
@@ -89,6 +90,33 @@ pub fn sign_tx_with_keys(&self, mnemonic: &str, network: Network, account_index:
 let signed = bridge.account().sign_tx_with_keys(
     mnemonic, Network::Testnet, 0, 0, &result.tx_cbor, &["payment", "drep"])?;
 ```
+
+## bridge.accounts() — managed accounts
+
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
+signing path — the mnemonic-per-call `bridge.account()` API remains for compatibility.
+
+```rust
+use ccl::accounts::SigningRole;
+
+let acct = bridge.accounts().from_mnemonic(&mnemonic, Network::Testnet, 0, 0)?;
+let info = acct.info()?;                          // serde_json::Value — never the mnemonic
+let signed = acct.sign_tx(&tx_cbor, SigningRole::PAYMENT | SigningRole::STAKE)?;
+// Drop closes the handle; acct.close() is the explicit, idempotent form
+```
+
+- The `Account` is an **owned value**, not a borrow: it can live in the same struct as its
+  `Bridge`. Dropping the `Bridge` hard-invalidates outstanding accounts — their calls fail with
+  `CCL_ERROR_INVALID_HANDLE` (-11), never by touching a dead isolate. Like the `Bridge`, an
+  `Account` is `!Send`.
+- `create(network)` — fresh 24-word account; **no secret in the result**. Retrieve the phrase once,
+  deliberately, with `export_recovery_phrase()` — a second call fails, as does export on a
+  mnemonic-opened account.
+- `sign_tx(&tx_cbor, roles)` — typed `SigningRole` combined with `|`; witnesses apply in canonical
+  order, byte-identical to `account().sign_tx_with_keys`. An empty mask is rejected.
+- The `Debug` representation shows only the handle.
+
+An account is bound to **one CIP-1852 payment leaf** (`m/1852'/1815'/account'/0/address_index`): one handle, one payment address — open further accounts for further address indices. The stake/DRep/committee keys sit at their standard role indices *independent of* `address_index`, so accounts at different address indices of one account index **share a single stake/DRep identity**.
 
 ## bridge.address()
 

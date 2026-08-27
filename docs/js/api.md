@@ -65,6 +65,7 @@ Error codes on `CclError.code`:
 | `CCL_ERROR_INSUFFICIENT_FUNDS` | -8 | UTXOs can't cover outputs + fee |
 | `CCL_ERROR_INVALID_TRANSACTION` | -9 | Bad transaction |
 | `CCL_ERROR_TX_BUILD` | -10 | TxPlan build failure (most common `quicktx.build` error — usually a malformed plan) |
+| `CCL_ERROR_INVALID_HANDLE` | -11 | Unknown or closed account handle |
 
 Validation-style methods (`address.validate`, `crypto.validateMnemonic`, `crypto.verify`) return `false` instead of throwing.
 
@@ -95,6 +96,36 @@ type SigningKeyRole = "payment" | "stake" | "drep" | "committee_cold" | "committ
 // A DRep registration needs the payment key (fee) and the DRep key (certificate):
 const signed = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, result.tx_cbor, ["payment", "drep"]);
 ```
+
+## bridge.accounts — managed accounts
+
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
+signing path — the mnemonic-per-call `bridge.account` API remains for compatibility.
+
+```javascript
+import { SigningRole } from '@bloxbean/cardano-client-lib';
+
+const acct = bridge.accounts.fromMnemonic(mnemonic, TESTNET);   // or bridge.accounts.create(...)
+try {
+  acct.info;                                     // public data only — never the mnemonic
+  const signed = acct.signTx(txCbor, SigningRole.PAYMENT | SigningRole.STAKE);
+} finally {
+  acct.close();                                  // or: using acct = ... (Symbol.dispose)
+}
+// after close: further use throws CclError with code -11
+```
+
+- `fromMnemonic(mnemonic, network, accountIndex = 0, addressIndex = 0)` — the mnemonic crosses the
+  FFI boundary once, here.
+- `create(network)` — fresh 24-word account; **no secret in the result**. Retrieve the phrase once,
+  deliberately, with `acct.exportRecoveryPhrase()` — a second call fails, as does export on a
+  mnemonic-opened account.
+- `signTx(txCborHex, roles = SigningRole.PAYMENT)` — typed roles combined with `|`; witnesses apply
+  in canonical order, byte-identical to `account.signTxWithKeys`. An empty mask is rejected.
+- `close()` is idempotent; `Symbol.dispose` supports `using`-declarations. `String(acct)` shows only
+  the handle.
+
+An account is bound to **one CIP-1852 payment leaf** (`m/1852'/1815'/account'/0/address_index`): one handle, one payment address — open further accounts for further address indices. The stake/DRep/committee keys sit at their standard role indices *independent of* `address_index`, so accounts at different address indices of one account index **share a single stake/DRep identity**.
 
 ## bridge.address
 

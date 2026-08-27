@@ -59,6 +59,7 @@ Error codes on `CclError.code` (also available as `CclLib.CCL_ERROR_*` constants
 | `CCL_ERROR_INSUFFICIENT_FUNDS` | -8 | UTXOs can't cover outputs + fee |
 | `CCL_ERROR_INVALID_TRANSACTION` | -9 | Bad transaction |
 | `CCL_ERROR_TX_BUILD` | -10 | TxPlan build failure (most common `quicktx.build` error — usually a malformed plan) |
+| `CCL_ERROR_INVALID_HANDLE` | -11 | Unknown or closed account handle (raised as `CclInvalidHandleError`) |
 
 Predicate methods (`address.validate`, `crypto.validate_mnemonic`, `crypto.verify`) return `False` instead of raising.
 
@@ -86,6 +87,32 @@ signed = lib.account.sign_tx_with_keys(mnemonic, result["tx_cbor"], ["payment", 
 ```
 
 > Note the argument order: unlike the other wrappers, `sign_tx`/`sign_tx_with_keys` take the transaction (and keys) **before** the network.
+
+## lib.accounts — managed accounts
+
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
+signing path — the mnemonic-per-call `lib.account` API remains for compatibility.
+
+```python
+from ccl import SigningRole, CclInvalidHandleError
+
+with lib.accounts.from_mnemonic(mnemonic, Network.TESTNET) as acct:   # or lib.accounts.create(...)
+    acct.info                                    # public data only — never the mnemonic
+    signed = acct.sign_tx(tx_cbor, SigningRole.PAYMENT | SigningRole.STAKE)
+# closed: further use raises CclInvalidHandleError (-11)
+```
+
+- `from_mnemonic(mnemonic, network, account_index=0, address_index=0) -> Account` — the mnemonic
+  crosses the FFI boundary once, here.
+- `create(network) -> Account` — fresh 24-word account; **no secret in the result**. Retrieve the
+  phrase once, deliberately, with `account.export_recovery_phrase()` — a second call fails, as does
+  export on a mnemonic-opened account.
+- `sign_tx(tx_cbor_hex, roles=SigningRole.PAYMENT)` — typed roles (`PAYMENT`, `STAKE`, `DREP`,
+  `COMMITTEE_COLD`, `COMMITTEE_HOT`), combined with `|`; witnesses apply in canonical order, so the
+  output is byte-identical to `lib.account.sign_tx_with_keys`. An empty mask is rejected.
+- `close()` is idempotent; the context manager calls it. `repr(account)` shows only the handle.
+
+An account is bound to **one CIP-1852 payment leaf** (`m/1852'/1815'/account'/0/address_index`): one handle, one payment address — open further accounts for further address indices. The stake/DRep/committee keys sit at their standard role indices *independent of* `address_index`, so accounts at different address indices of one account index **share a single stake/DRep identity**.
 
 ## lib.address
 

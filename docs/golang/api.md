@@ -78,6 +78,7 @@ Native failures surface as `*CclError` — match with `errors.As`. Error codes:
 | `ErrInsufficientFunds` | -8 | UTXOs can't cover outputs + fee |
 | `ErrInvalidTransaction` | -9 | Bad transaction |
 | `ErrTxBuild` | -10 | TxPlan build failure (most common `QuickTx.Build` error — usually a malformed plan) |
+| `ErrInvalidHandle` | -11 | Unknown or closed account handle |
 
 Predicate methods (`Address.Validate`, `Crypto.ValidateMnemonic`, `Crypto.Verify`) return `bool` and never error.
 
@@ -113,6 +114,34 @@ signed, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, result
 ```
 
 Without the extra witness the node rejects the transaction with `MissingVKeyWitnessesUTXOW`.
+
+## bridge.Accounts — managed accounts
+
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
+signing path — the mnemonic-per-call `bridge.Account` API remains for compatibility.
+
+```go
+acct, err := bridge.Accounts.FromMnemonic(mnemonic, ccl.Testnet, 0, 0)  // or bridge.Accounts.Create(...)
+defer acct.Close()
+
+info, _ := acct.Info()                            // *AccountPublicInfo — never the mnemonic
+signed, err := acct.SignTx(txCbor, ccl.RolePayment|ccl.RoleStake)
+// after Close: further use fails with ErrInvalidHandle (-11)
+```
+
+- `FromMnemonic(mnemonic, network, accountIndex, addressIndex)` — the mnemonic crosses the FFI
+  boundary once, here.
+- `Create(network)` — fresh 24-word account; **no secret in the result**. Retrieve the phrase once,
+  deliberately, with `acct.ExportRecoveryPhrase()` — a second call fails, as does export on a
+  mnemonic-opened account.
+- `SignTx(txCborHex, roles)` — typed `SigningRole` bit mask (`RolePayment`, `RoleStake`, `RoleDRep`,
+  `RoleCommitteeCold`, `RoleCommitteeHot`); witnesses apply in canonical order, byte-identical to
+  `Account.SignTxWithKeys`. An empty mask is rejected.
+- `Close()` is explicit and idempotent — close Accounts like files; there is no finalizer. All
+  Account calls ride the Bridge's dedicated isolate thread, so concurrent goroutine use is safe
+  (and serialized). `String()` shows only the handle.
+
+An account is bound to **one CIP-1852 payment leaf** (`m/1852'/1815'/account'/0/address_index`): one handle, one payment address — open further accounts for further address indices. The stake/DRep/committee keys sit at their standard role indices *independent of* `address_index`, so accounts at different address indices of one account index **share a single stake/DRep identity**.
 
 ## bridge.Address
 
