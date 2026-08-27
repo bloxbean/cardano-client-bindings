@@ -661,10 +661,19 @@ type QuickTxApi struct {
 // CCL Utxo / ProtocolParams models). The transaction is built offline and never submitted —
 // sign the returned TxCbor and submit it yourself.
 //
+// additionalSigners budgets vkey witnesses for fee estimation, beyond those the input UTXOs imply
+// (one per sender). You know how many keys will sign: 0 for a plain payment, 1 for a stake or DRep
+// certificate (payment+stake signing), 2 for both in one tx, the number of sig keys for a
+// native-script spend, plus one per plan-level required signer. Undercounting yields a fee the node
+// rejects with FeeTooSmallUTxO; overcounting only overpays (~4,400 lovelace per extra witness).
+//
 // For Plutus script transactions, pass the redeemers' execution units as the optional execUnits
 // argument: a slice of {mem, steps} (one per redeemer, in transaction order). Omit them to have the
 // bridge compute them offline with Scalus.
-func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}, execUnits ...interface{}) (*TxResult, error) {
+func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}, additionalSigners int, execUnits ...interface{}) (*TxResult, error) {
+	if additionalSigners < 0 {
+		return nil, fmt.Errorf("additionalSigners must be >= 0, got %d", additionalSigners)
+	}
 	utxosJSON, err := json.Marshal(utxos)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal utxos: %w", err)
@@ -685,7 +694,7 @@ func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interf
 	}
 
 	result, err := q.bridge.invoke(func() int32 {
-		return cclQuicktxBuild(q.bridge.thread, yaml, string(utxosJSON), string(ppJSON), execStr)
+		return cclQuicktxBuild(q.bridge.thread, yaml, string(utxosJSON), string(ppJSON), execStr, int32(additionalSigners))
 	})
 	if err != nil {
 		return nil, err

@@ -51,7 +51,7 @@ fn test_integration_simple_ada_transfer() {
     let pp = devkit_get_protocol_params();
 
     let yaml = payment_yaml(&sender, &receiver, "5000000");
-    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build failed");
+    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None, 0).expect("build failed");
     assert!(!result.tx_cbor.is_empty());
     assert_eq!(result.tx_hash.len(), 64);
 
@@ -102,7 +102,7 @@ fn test_integration_multiple_receivers() {
          \x20             quantity: \"2000000\"\n"
     );
 
-    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build failed");
+    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None, 0).expect("build failed");
     let signed_tx = bridge
         .account()
         .sign_tx(&mnemonic, ccl::Network::Testnet, 0, 0, &result.tx_cbor)
@@ -131,7 +131,7 @@ fn test_integration_insufficient_funds() {
     let pp = devkit_get_protocol_params();
 
     let yaml = payment_yaml(&sender, &receiver, "100000000");
-    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None);
+    let result = bridge.quicktx().build(&yaml, &utxos, &pp, None, 0);
     assert!(result.is_err(), "expected insufficient funds error");
 }
 
@@ -153,7 +153,7 @@ fn test_integration_build_with_yaci_provider() {
     let yaml = payment_yaml(&sender, &receiver, "5000000");
     let result = bridge
         .quicktx()
-        .build_with(&yaml, &provider, &sender, None)
+        .build_with(&yaml, &provider, &sender, 0, None)
         .expect("build_with failed");
 
     assert!(!result.tx_cbor.is_empty());
@@ -185,7 +185,7 @@ fn test_integration_donation_treasury() {
             "current_treasury_value: 0",
             &format!("current_treasury_value: {}", treasury),
         );
-        let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build");
+        let result = bridge.quicktx().build(&yaml, &utxos, &pp, None, 0).expect("build");
         let signed = bridge
             .account()
             .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor)

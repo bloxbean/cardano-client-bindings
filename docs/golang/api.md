@@ -232,8 +232,8 @@ type WalletInfo struct {
 ## bridge.QuickTx
 
 ```go
-func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}, execUnits ...interface{}) (*TxResult, error)
-func (q *QuickTxApi) BuildWith(yaml string, provider ChainDataProvider, sender string, evaluator ...TransactionEvaluator) (*TxResult, error)
+func (q *QuickTxApi) Build(yaml string, utxos interface{}, protocolParams interface{}, additionalSigners int, execUnits ...interface{}) (*TxResult, error)
+func (q *QuickTxApi) BuildWith(yaml string, provider ChainDataProvider, sender string, additionalSigners int, evaluator ...TransactionEvaluator) (*TxResult, error)
 ```
 
 ```go
@@ -248,11 +248,14 @@ type TxResult struct {
 - `utxos` is a slice of CCL `Utxo` objects (typically `[]map[string]interface{}`): `{tx_hash, output_index, address, amount: [{unit, quantity}]}`. `unit` is `"lovelace"` or `policyId + assetNameHex`. Quantities are best passed as **strings**.
 - `protocolParams` is the CCL `ProtocolParams` model (typically `map[string]interface{}`); unknown fields are ignored.
 - `execUnits` — for Plutus transactions, pass one value: a slice of `{mem, steps}` maps, one per redeemer in transaction order. When omitted, the native library computes them **offline** with the embedded Scalus evaluator.
+- `additionalSigners` budgets vkey witnesses for fee estimation, **beyond those the input UTXOs imply** (one per sender). You know how many keys will sign: `0` for a plain payment, `1` for a stake or DRep certificate, `2` for both in one tx, the number of `sig` keys for a native-script spend, plus one per plan-level required signer. Undercounting yields a fee the node rejects with `FeeTooSmallUTxO`; overcounting only overpays (~4,400 lovelace per extra witness).
 - **`BuildWith`** fetches UTXOs and protocol parameters from a [provider](providers.md), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.
 
 ```go
-result, err := bridge.QuickTx.Build(yaml, utxos, params)
+result, err := bridge.QuickTx.Build(yaml, utxos, params, 0)          // plain payment
 
-plutusResult, err := bridge.QuickTx.Build(yaml, utxos, params,
+stakeResult, err := bridge.QuickTx.Build(yaml, utxos, params, 1)     // payment+stake signing
+
+plutusResult, err := bridge.QuickTx.Build(yaml, utxos, params, 0,
 	[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}})
 ```

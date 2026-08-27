@@ -108,7 +108,7 @@ class QuickTxIntentsTest {
         java.nio.file.Files.createDirectories(dir);
         java.nio.file.Files.writeString(dir.resolve(name + ".yaml"), yaml);
 
-        String resultYaml = service.buildTransaction(yaml, utxos(), protocolParamsJson, null);
+        String resultYaml = service.buildTransaction(yaml, utxos(), protocolParamsJson, null, 1);
         var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer
                 .getYamlMapper().readTree(resultYaml);
         assertFalse(result.get("tx_cbor").asText().isEmpty(), "tx_cbor should not be empty");
@@ -170,7 +170,7 @@ class QuickTxIntentsTest {
         java.nio.file.Files.writeString(dir.resolve("compose.yaml"), yaml);
 
         var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null, 1));
         assertFalse(result.get("tx_cbor").asText().isEmpty());
         assertEquals(64, result.get("tx_hash").asText().length());
         assertTrue(Long.parseLong(result.get("fee").asText()) > 0);
@@ -324,7 +324,7 @@ class QuickTxIntentsTest {
 
         String execUnits = "[{\"mem\": 2000000, \"steps\": 500000000}]";
         var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, execUnits));
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, execUnits, 1));
         assertFalse(result.get("tx_cbor").asText().isEmpty());
         assertEquals(64, result.get("tx_hash").asText().length());
         assertTrue(Long.parseLong(result.get("fee").asText()) > 0);
@@ -348,7 +348,7 @@ class QuickTxIntentsTest {
         java.nio.file.Files.writeString(dir.resolve("plutus_lock.yaml"), yaml);
 
         var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null, 1));
         assertFalse(result.get("tx_cbor").asText().isEmpty());
         assertEquals(64, result.get("tx_hash").asText().length());
     }
@@ -388,7 +388,7 @@ class QuickTxIntentsTest {
             """.formatted(scriptTxHash, scriptAddr, datum.getDatumHash(), FAKE_TX_HASH, sender);
         String execUnits = "[{\"mem\": 2000000, \"steps\": 500000000}]";
 
-        String resultYaml = service.buildTransaction(yaml, utxosJson, protocolParamsJson, execUnits);
+        String resultYaml = service.buildTransaction(yaml, utxosJson, protocolParamsJson, execUnits, 1);
         var result = com.bloxbean.cardano.client.quicktx.serialization.YamlSerializer
                 .getYamlMapper().readTree(resultYaml);
         assertFalse(result.get("tx_cbor").asText().isEmpty());

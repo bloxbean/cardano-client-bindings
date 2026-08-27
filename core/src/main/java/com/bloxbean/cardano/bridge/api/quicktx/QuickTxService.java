@@ -29,11 +29,15 @@ import java.util.Map;
  * submitted — the result is the unsigned CBOR plus its hash and fee.
  *
  * <p>Plutus script transactions are supported when the caller supplies the redeemers' execution
- * units (memory + CPU steps). Computing those units requires running the script in a UPLC
- * evaluator, which the caller does out-of-band (Ogmios, Blockfrost, Aiken, Scalus, …) and passes
- * in — exactly as it supplies UTXOs and protocol parameters. With units supplied, a
- * {@link StaticTransactionEvaluator} stamps them onto the redeemers, fully offline. A script
- * transaction built without execution units fails (no offline evaluator runs the script).
+ * units (memory + CPU steps); with none supplied, the embedded Scalus evaluator computes them
+ * offline.
+ *
+ * <p><b>Witness budgeting is caller-supplied</b>, exactly like UTXOs, protocol parameters, and
+ * execution units: the caller passes the number of signers beyond those implied by the input UTXOs
+ * ({@code additionalSigners}, forwarded to CCL's {@code additionalSignersCount}). The dev signing a
+ * transaction knows how many signers there will be; the bridge does not guess. An undercounted
+ * budget produces a fee the node rejects with {@code FeeTooSmallUTxO}; an overcount only overpays
+ * (~4,400 lovelace per extra witness at mainnet parameters).
  */
 public class QuickTxService {
 
@@ -45,10 +49,14 @@ public class QuickTxService {
      * @param protocolParamsJson JSON protocol parameters (CCL {@code ProtocolParams} model)
      * @param execUnitsJson      JSON array of redeemer execution units ({@code [{"mem","steps"}]},
      *                           one per redeemer in transaction order); null/empty for non-script txs
+     * @param additionalSigners  number of vkey witnesses beyond those implied by the input UTXOs
+     *                           (one per sender): e.g. {@code 0} for a plain payment, {@code 1} for
+     *                           a stake or DRep certificate, {@code 2} for both in one tx, the
+     *                           number of {@code sig} keys for a native-script spend
      * @return JSON string with {@code tx_cbor}, {@code tx_hash}, {@code fee}
      */
     public String buildTransaction(String yaml, String utxosJson, String protocolParamsJson,
-                                   String execUnitsJson) throws Exception {
+                                   String execUnitsJson, int additionalSigners) throws Exception {
         TxPlan plan = TxPlan.from(yaml);
 
         List<Utxo> utxos = parseUtxos(utxosJson);
@@ -78,8 +86,9 @@ public class QuickTxService {
                     new scalus.bloxbean.ScalusTransactionEvaluator(protocolParams, utxoSupplier));
         }
 
-        // Budget witnesses for fee estimation of the (still unsigned) transaction.
-        txContext.additionalSignersCount(Math.max(1, plan.getTxs().size()));
+        // Witness budget for fee estimation of the (still unsigned) transaction: caller-supplied,
+        // forwarded to CCL as-is (CCL adds the input-UTXO-implied signers itself).
+        txContext.additionalSignersCount(Math.max(0, additionalSigners));
 
         Transaction transaction = txContext.build();
 

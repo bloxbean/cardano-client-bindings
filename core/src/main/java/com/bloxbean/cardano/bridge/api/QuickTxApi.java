@@ -44,11 +44,19 @@ public final class QuickTxApi {
      * (or an empty array) for non-script transactions. A script transaction with no execution units
      * fails with {@link ErrorCodes#CCL_ERROR_TX_BUILD}.
      *
+     * <p>{@code additional_signers} budgets vkey witnesses for fee estimation, beyond those the
+     * input UTXOs imply (one per sender): {@code 0} for a plain payment, {@code 1} for a stake or
+     * DRep certificate, {@code 2} for both in one tx, the number of {@code sig} keys for a
+     * native-script spend. The dev signing the transaction knows how many signers there will be —
+     * the bridge does not guess. Undercounting yields a fee the node rejects with
+     * {@code FeeTooSmallUTxO}; overcounting only overpays (~4,400 lovelace per extra witness).
+     *
      * @param thread                the current isolate thread
      * @param yamlPtr               the TxPlan YAML (UTF-8 C string)
      * @param utxosJsonPtr          JSON array of UTXOs (UTF-8 C string)
      * @param protocolParamsJsonPtr JSON protocol parameters (UTF-8 C string)
      * @param execUnitsJsonPtr      JSON array of redeemer execution units, or null (UTF-8 C string)
+     * @param additionalSigners     signer count beyond the input-UTXO-implied witnesses (≥ 0)
      * @return {@link ErrorCodes#CCL_SUCCESS}; on failure
      *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT},
      *         {@link ErrorCodes#CCL_ERROR_INSUFFICIENT_FUNDS}, or
@@ -57,8 +65,12 @@ public final class QuickTxApi {
     @CEntryPoint(name = "ccl_quicktx_build")
     public static int build(IsolateThread thread, CCharPointer yamlPtr,
                             CCharPointer utxosJsonPtr, CCharPointer protocolParamsJsonPtr,
-                            CCharPointer execUnitsJsonPtr) {
+                            CCharPointer execUnitsJsonPtr, int additionalSigners) {
         try {
+            if (additionalSigners < 0) {
+                ErrorState.set("additional_signers must be >= 0");
+                return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+            }
             String yaml = NativeString.toJavaString(yamlPtr);
             if (yaml == null || yaml.isEmpty()) {
                 ErrorState.set("TxPlan YAML is required");
@@ -72,7 +84,7 @@ public final class QuickTxApi {
             }
             String execUnitsJson = NativeString.toJavaString(execUnitsJsonPtr);
 
-            String resultJson = service.buildTransaction(yaml, utxosJson, protocolParamsJson, execUnitsJson);
+            String resultJson = service.buildTransaction(yaml, utxosJson, protocolParamsJson, execUnitsJson, additionalSigners);
             ResultState.set(resultJson);
             return ErrorCodes.CCL_SUCCESS;
         } catch (IllegalArgumentException e) {
