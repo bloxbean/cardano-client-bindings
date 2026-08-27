@@ -78,11 +78,12 @@ def test_build_with_composes_fetch_and_build():
 
     qt = QuickTx(bridge=None)
     calls = []
-    qt.build = lambda y, u, p, e=None: (calls.append((y, u, p, e)), {"tx_cbor": "DRAFT"})[1]
+    qt.build = lambda y, u, p, e=None, additional_signers=0: (
+        calls.append((y, u, p, e, additional_signers)), {"tx_cbor": "DRAFT"})[1]
 
     # No evaluator → fetch chain data, then build once with no units (the offline Scalus default).
     qt.build_with("YAML", StubProvider(), "addrX")
-    assert calls == [("YAML", sentinel_utxos, sentinel_pp, None)]
+    assert calls == [("YAML", sentinel_utxos, sentinel_pp, None, 0)]
 
     # With an evaluator → two-pass: draft build, evaluate(draft), rebuild with the returned units.
     calls.clear()
@@ -95,6 +96,6 @@ def test_build_with_composes_fetch_and_build():
 
     qt.build_with("YAML", StubProvider(), "addrX", evaluator=StubEvaluator())
     assert calls == [
-        ("YAML", sentinel_utxos, sentinel_pp, None),                      # draft
-        ("YAML", sentinel_utxos, sentinel_pp, [{"mem": 1, "steps": 2}]),  # rebuild
+        ("YAML", sentinel_utxos, sentinel_pp, None, 0),                      # draft
+        ("YAML", sentinel_utxos, sentinel_pp, [{"mem": 1, "steps": 2}], 0),  # rebuild
     ]

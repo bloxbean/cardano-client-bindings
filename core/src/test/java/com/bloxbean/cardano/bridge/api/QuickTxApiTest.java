@@ -62,7 +62,7 @@ class QuickTxApiTest {
     private JsonNode build(String yaml) throws Exception {
         // The build result is YAML now; parse it with CCL's YAML mapper.
         return YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, null, 1));
     }
 
     private static void assertBuilt(JsonNode result) {
@@ -170,7 +170,7 @@ class QuickTxApiTest {
                         - unit: lovelace
                           quantity: "200000000"
             """.formatted(sender, receiver1);
-        assertThrows(Exception.class, () -> service.buildTransaction(yaml, utxos(), protocolParamsJson, null));
+        assertThrows(Exception.class, () -> service.buildTransaction(yaml, utxos(), protocolParamsJson, null, 1));
     }
 
     // An always-succeeds Plutus V2 minting policy. The script is never executed offline — the
@@ -197,7 +197,7 @@ class QuickTxApiTest {
         String execUnits = "[{\"mem\": 2000000, \"steps\": 500000000}]";
 
         JsonNode result = YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, execUnits));
+                .readTree(service.buildTransaction(yaml, utxos(), protocolParamsJson, execUnits, 1));
         assertBuilt(result);
 
         // The built tx must carry the redeemer with exactly the supplied execution units.
@@ -220,7 +220,7 @@ class QuickTxApiTest {
         }
         // No supplied units → the Scalus evaluator computes them offline by running the validator.
         JsonNode result = YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxos(), paramsWithCostModels, null));
+                .readTree(service.buildTransaction(yaml, utxos(), paramsWithCostModels, null, 1));
         assertBuilt(result);
 
         Transaction tx = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));

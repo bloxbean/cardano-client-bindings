@@ -28,8 +28,8 @@ transaction:
 "#);
 
 // 2. Build — offline; UTXO selection, fee, and change happen in the native lib
-let result = bridge.quicktx().build_with(&yaml, &provider, &sender, None)?;
-// (or bridge.quicktx().build(&yaml, &utxos, &protocol_params, None) with your own chain data)
+let result = bridge.quicktx().build_with(&yaml, &provider, &sender, 0, None)?;
+// (or bridge.quicktx().build(&yaml, &utxos, &protocol_params, None, additional_signers) with your own chain data)
 
 // 3. Sign — with the key roles the transaction's certificates require
 let signed = bridge.account().sign_tx(&mnemonic, Network::Testnet, 0, 0, &result.tx_cbor)?;
@@ -51,6 +51,8 @@ let signed = bridge.account().sign_tx(&mnemonic, Network::Testnet, 0, 0, &result
 | `pool_registration` / `pool_update` / `pool_retirement` | `&["payment", "stake"]` when the pool is keyed to the account's stake key |
 
 A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+The same table gives the fee's witness budget: pass `additional_signers = len(keys) - 1` to the build (the input UTXOs already cover the payment key). For a native-script spend whose only inputs sit at the script address, pass the number of the script's `sig` keys instead.
+
 
 ## Worked example: register and delegate stake
 
@@ -67,7 +69,7 @@ transaction:
           stake_address: {stake_address}
 "#);
 
-let reg = bridge.quicktx().build_with(&stake_yaml, &provider, &sender, None)?;
+let reg = bridge.quicktx().build_with(&stake_yaml, &provider, &sender, 1, None)?;
 let signed_reg = bridge.account().sign_tx_with_keys(
     &mnemonic, Network::Testnet, 0, 0, &reg.tx_cbor, &["payment", "stake"])?;
 // submit signed_reg; wait for inclusion before the next step
@@ -83,7 +85,7 @@ transaction:
           pool_id: pool1...
 "#);
 
-let deleg = bridge.quicktx().build_with(&deleg_yaml, &provider, &sender, None)?;
+let deleg = bridge.quicktx().build_with(&deleg_yaml, &provider, &sender, 1, None)?;
 let signed_deleg = bridge.account().sign_tx_with_keys(
     &mnemonic, Network::Testnet, 0, 0, &deleg.tx_cbor, &["payment", "stake"])?;
 ```
@@ -110,7 +112,7 @@ transaction:
           anchor_hash: {anchor_hash}
 "#);
 
-let reg = bridge.quicktx().build_with(&drep_yaml, &provider, &sender, None)?;
+let reg = bridge.quicktx().build_with(&drep_yaml, &provider, &sender, 1, None)?;
 let signed = bridge.account().sign_tx_with_keys(
     &mnemonic, Network::Testnet, 0, 0, &reg.tx_cbor, &["payment", "drep"])?;
 ```
@@ -135,7 +137,7 @@ transaction:
           script_type: 0
 "#);
 
-let mint = bridge.quicktx().build_with(&mint_yaml, &provider, &sender, None)?;
+let mint = bridge.quicktx().build_with(&mint_yaml, &provider, &sender, 0, None)?;
 let signed = bridge.account().sign_tx(&mnemonic, Network::Testnet, 0, 0, &mint.tx_cbor)?;
 ```
 
@@ -146,7 +148,7 @@ An empty `ScriptAll` policy (`820180`) needs no extra signature; a `sig`-keyed p
 By default execution units are computed **offline** (embedded Scalus evaluator) — a Plutus transaction is a normal build:
 
 ```rust
-let result = bridge.quicktx().build_with(&plutus_mint_yaml, &provider, &sender, None)?;
+let result = bridge.quicktx().build_with(&plutus_mint_yaml, &provider, &sender, 0, None)?;
 ```
 
 To cost against a real node instead, pass an evaluator — `build_with` then runs the two-pass flow (draft → remote evaluate → rebuild):
@@ -155,7 +157,7 @@ To cost against a real node instead, pass an evaluator — `build_with` then run
 use ccl::providers::BlockfrostEvaluator;
 
 let evaluator = BlockfrostEvaluator::new(&project_id, "preprod")?;
-let result = bridge.quicktx().build_with(&plutus_mint_yaml, &provider, &sender, Some(&evaluator))?;
+let result = bridge.quicktx().build_with(&plutus_mint_yaml, &provider, &sender, 0, Some(&evaluator))?;
 ```
 
 Or supply units yourself with the offline `build`:
@@ -163,7 +165,7 @@ Or supply units yourself with the offline `build`:
 ```rust
 use serde_json::json;
 
-let result = bridge.quicktx().build(&plutus_mint_yaml, &utxos, &params,
+let result = bridge.quicktx().build(&plutus_mint_yaml, &utxos, &params, 0,
     Some(&json!([{"mem": 2000000, "steps": 500000000}])))?;
 ```
 

@@ -61,7 +61,7 @@ fn intents_build_e2e() {
         let yaml = fs::read_to_string(&path).unwrap();
         let result = bridge
             .quicktx()
-            .build(&yaml, &u, &pp, None)
+            .build(&yaml, &u, &pp, None, 1)
             .unwrap_or_else(|e| panic!("build {:?}: {:?}", path.file_name().unwrap(), e));
         assert_eq!(result.tx_hash.len(), 64, "{:?}", path.file_name().unwrap());
         assert!(!result.tx_cbor.is_empty());
@@ -78,9 +78,9 @@ fn plutus_mint_e2e() {
                     "amount": [{"unit": "lovelace", "quantity": "2000000000"}]}]);
     let exec = json!([{"mem": 2000000, "steps": 500000000}]);
 
-    let result = bridge.quicktx().build(&yaml, &u, &protocol_params(), Some(&exec)).expect("mint");
+    let result = bridge.quicktx().build(&yaml, &u, &protocol_params(), Some(&exec), 0).expect("mint");
     assert_eq!(result.tx_hash.len(), 64);
-    assert!(bridge.quicktx().build(&yaml, &u, &protocol_params(), None).is_err());
+    assert!(bridge.quicktx().build(&yaml, &u, &protocol_params(), None, 0).is_err());
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn plutus_spend_e2e() {
     ]);
     let exec = json!([{"mem": 2000000, "steps": 500000000}]);
 
-    let result = bridge.quicktx().build(&yaml, &u, &protocol_params(), Some(&exec)).expect("spend");
+    let result = bridge.quicktx().build(&yaml, &u, &protocol_params(), Some(&exec), 0).expect("spend");
     assert_eq!(result.tx_hash.len(), 64);
-    assert!(bridge.quicktx().build(&yaml, &u, &protocol_params(), None).is_err());
+    assert!(bridge.quicktx().build(&yaml, &u, &protocol_params(), None, 0).is_err());
 }

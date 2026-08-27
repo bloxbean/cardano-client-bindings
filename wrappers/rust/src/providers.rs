@@ -16,7 +16,7 @@
 //! # let sender = "addr_test1...";
 //! let bridge = Bridge::new()?;
 //! let provider = BlockfrostProvider::new("proj_id", "preprod")?; // or YaciProvider::default()
-//! let result = bridge.quicktx().build_with(yaml, &provider, sender, None)?;
+//! let result = bridge.quicktx().build_with(yaml, &provider, sender, 0, None)?;
 //! # Ok::<(), ccl::CclError>(())
 //! ```
 
@@ -297,11 +297,14 @@ impl<'a> QuickTxApi<'a> {
     /// [`build`](QuickTxApi::build). With an `evaluator`, runs a two-pass (draft -> evaluate ->
     /// rebuild); without one, the native library's offline Scalus default computes any script units.
     /// To supply units yourself, call [`build`](QuickTxApi::build) directly.
+    /// `additional_signers` budgets fee witnesses beyond those implied by the input UTXOs — see
+    /// [`build`](QuickTxApi::build).
     pub fn build_with(
         &self,
         yaml: &str,
         provider: &dyn ChainDataProvider,
         sender: &str,
+        additional_signers: u32,
         evaluator: Option<&dyn TransactionEvaluator>,
     ) -> Result<TxResult> {
         let utxos = provider.utxos(sender)?;
@@ -309,12 +312,12 @@ impl<'a> QuickTxApi<'a> {
         let exec_units = match evaluator {
             Some(ev) => {
                 // Two-pass: draft (units computed offline by Scalus) -> remote evaluate -> rebuild.
-                let draft = self.build(yaml, &utxos, &protocol_params, None)?;
+                let draft = self.build(yaml, &utxos, &protocol_params, None, additional_signers)?;
                 Some(ev.evaluate(&draft.tx_cbor, &utxos)?)
             }
             None => None,
         };
-        self.build(yaml, &utxos, &protocol_params, exec_units.as_ref())
+        self.build(yaml, &utxos, &protocol_params, exec_units.as_ref(), additional_signers)
     }
 }
 

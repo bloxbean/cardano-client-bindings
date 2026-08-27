@@ -28,8 +28,8 @@ transaction:
 `, sender, receiver)
 
 // 2. Build — offline; UTXO selection, fee, and change happen in the native lib
-result, err := bridge.QuickTx.BuildWith(yaml, provider, sender)
-// (or bridge.QuickTx.Build(yaml, utxos, protocolParams) with your own chain data)
+result, err := bridge.QuickTx.BuildWith(yaml, provider, sender, 0)
+// (or bridge.QuickTx.Build(yaml, utxos, protocolParams, additionalSigners) with your own chain data)
 
 // 3. Sign — with the key roles the transaction's certificates require
 signed, err := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, result.TxCbor)
@@ -52,6 +52,8 @@ resp, err := http.Post(submitURL+"/tx/submit", "application/cbor", bytes.NewRead
 | `pool_registration` / `pool_update` / `pool_retirement` | `"payment", "stake"` when the pool is keyed to the account's stake key |
 
 A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+The same table gives the fee's witness budget: pass `additional_signers = len(keys) - 1` to the build (the input UTXOs already cover the payment key). For a native-script spend whose only inputs sit at the script address, pass the number of the script's `sig` keys instead.
+
 
 ## Worked example: register and delegate stake
 
@@ -68,7 +70,7 @@ transaction:
           stake_address: %s
 `, sender, account.StakeAddress)
 
-reg, err := bridge.QuickTx.BuildWith(stakeYaml, provider, sender)
+reg, err := bridge.QuickTx.BuildWith(stakeYaml, provider, sender, 1)
 signedReg, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, reg.TxCbor, "payment", "stake")
 // submit signedReg; wait for inclusion before the next step
 
@@ -83,7 +85,7 @@ transaction:
           pool_id: pool1...
 `, sender, account.StakeAddress)
 
-deleg, err := bridge.QuickTx.BuildWith(delegYaml, provider, sender)
+deleg, err := bridge.QuickTx.BuildWith(delegYaml, provider, sender, 1)
 signedDeleg, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, deleg.TxCbor, "payment", "stake")
 ```
 
@@ -107,7 +109,7 @@ transaction:
           anchor_hash: %s
 `, sender, drep.VerificationKeyHash, anchorHash)
 
-reg, err := bridge.QuickTx.BuildWith(drepYaml, provider, sender)
+reg, err := bridge.QuickTx.BuildWith(drepYaml, provider, sender, 1)
 signedReg, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, reg.TxCbor, "payment", "drep")
 ```
 
@@ -131,7 +133,7 @@ transaction:
           script_type: 0
 `, sender, receiver)
 
-mint, err := bridge.QuickTx.BuildWith(mintYaml, provider, sender)
+mint, err := bridge.QuickTx.BuildWith(mintYaml, provider, sender, 0)
 signedMint, err := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, mint.TxCbor)
 ```
 
@@ -142,20 +144,20 @@ An empty `ScriptAll` policy (`820180`) needs no extra signature; a `sig`-keyed p
 By default execution units are computed **offline** (embedded Scalus evaluator) — a Plutus transaction is a normal build:
 
 ```go
-result, err := bridge.QuickTx.BuildWith(plutusMintYaml, provider, sender)
+result, err := bridge.QuickTx.BuildWith(plutusMintYaml, provider, sender, 0)
 ```
 
 To cost against a real node instead, pass an evaluator — `BuildWith` then runs the two-pass flow (draft → remote evaluate → rebuild):
 
 ```go
 evaluator, _ := ccl.NewBlockfrostEvaluator(projectID, "preprod")
-result, err := bridge.QuickTx.BuildWith(plutusMintYaml, provider, sender, evaluator)
+result, err := bridge.QuickTx.BuildWith(plutusMintYaml, provider, sender, 0, evaluator)
 ```
 
 Or supply units yourself with the offline `Build`:
 
 ```go
-result, err := bridge.QuickTx.Build(plutusMintYaml, utxos, params,
+result, err := bridge.QuickTx.Build(plutusMintYaml, utxos, params, 0,
 	[]map[string]interface{}{{"mem": 2000000, "steps": 500000000}})
 ```
 

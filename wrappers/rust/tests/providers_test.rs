@@ -54,7 +54,7 @@ fn build_with_offline() {
     );
     let res = bridge
         .quicktx()
-        .build_with(&yaml, &StubProvider, SENDER, None)
+        .build_with(&yaml, &StubProvider, SENDER, 0, None)
         .expect("build_with");
     assert_eq!(res.tx_hash.len(), 64);
     assert!(!res.tx_cbor.is_empty());

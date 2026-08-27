@@ -66,13 +66,21 @@ def _reset_and_fund(devkit):
     return _devnet_pp(devkit)
 
 
-def _sign_submit(ccl_lib, devkit, yaml_str, utxos, pp, keys, exec_units=None):
+def _sign_submit(ccl_lib, devkit, yaml_str, utxos, pp, keys, exec_units=None,
+                 additional_signers=None):
     """Build the YAML with the given UTXOs + params, sign with the key roles, and submit.
+
+    ``additional_signers`` (the fee's witness budget beyond the input-implied payment key) defaults
+    to ``len(keys) - 1`` — the signer count is known here, exactly as it is for a real caller. Pass
+    it explicitly where the inputs imply no payment key (e.g. a script-only-input spend).
 
     The devnet's /tx/submit returns 200/202 only after the node has validated and accepted the tx (a
     rejected tx raises RuntimeError with the ledger error) — that acceptance is the proof.
     """
-    result = ccl_lib.quicktx.build(yaml_str, utxos, pp, exec_units=exec_units)
+    if additional_signers is None:
+        additional_signers = max(0, len(keys) - 1)
+    result = ccl_lib.quicktx.build(yaml_str, utxos, pp, exec_units=exec_units,
+                                   additional_signers=additional_signers)
     signed = ccl_lib.account.sign_tx_with_keys(
         INTENT_MNEMONIC, result["tx_cbor"], list(keys), Network.TESTNET, 0, 0)
     tx_hash = devkit.submit_tx(signed)
@@ -385,7 +393,8 @@ def test_drep_key_required(ccl_lib, devkit):
     """
     pp = _reset_and_fund(devkit)
     utxos = devkit.get_utxos(INTENT_SENDER)
-    built = ccl_lib.quicktx.build(_read_fixture("drep_registration.yaml"), utxos, pp)
+    built = ccl_lib.quicktx.build(_read_fixture("drep_registration.yaml"), utxos, pp,
+                                  additional_signers=1)
 
     # Sign with the payment key ONLY (sign_tx), omitting the DRep-key witness.
     signed_payment_only = ccl_lib.account.sign_tx(
@@ -596,7 +605,8 @@ def _balance_at(devkit, address):
 def _sign_submit_fee(ccl_lib, devkit, yaml_str, utxos, pp, keys, exec_units=None):
     """_sign_submit, additionally returning the tx fee so callers can assert the sender's exact
     balance change (the ledger read-back "submit accepted" alone can't give)."""
-    result = ccl_lib.quicktx.build(yaml_str, utxos, pp, exec_units=exec_units)
+    result = ccl_lib.quicktx.build(yaml_str, utxos, pp, exec_units=exec_units,
+                                   additional_signers=max(0, len(keys) - 1))
     signed = ccl_lib.account.sign_tx_with_keys(
         INTENT_MNEMONIC, result["tx_cbor"], list(keys), Network.TESTNET, 0, 0)
     assert devkit.submit_tx(signed)
@@ -785,7 +795,8 @@ transaction:
           script_hex: {script_hex}
 """
     fee_utxos = devkit.get_utxos(INTENT_SENDER)
-    _sign_submit(ccl_lib, devkit, spend_yaml, script_utxos + fee_utxos, pp, ["payment"])
+    _sign_submit(ccl_lib, devkit, spend_yaml, script_utxos + fee_utxos, pp, ["payment"],
+                 additional_signers=1)
 
     _assert_utxo_consumed(devkit, script_address, lock_hash)
 

@@ -188,9 +188,9 @@ getAddress(mnemonic: string, network: Network, index = 0): string
 
 ```ts
 build(txplanYaml: string, utxos: Utxo[], protocolParams: ProtocolParams,
-      execUnits?: ExecUnits[] | null): TxResult
+      execUnits?: ExecUnits[] | null, additionalSigners = 0): TxResult
 buildWith(txplanYaml: string, provider: ChainDataProvider, sender: string,
-          evaluator?: TransactionEvaluator | null): Promise<TxResult>
+          evaluator?: TransactionEvaluator | null, additionalSigners = 0): Promise<TxResult>
 ```
 
 `TxResult` = `{ tx_cbor, tx_hash, fee }` (all strings).
@@ -198,6 +198,7 @@ buildWith(txplanYaml: string, provider: ChainDataProvider, sender: string,
 - **`build`** is fully offline: you describe the transaction as [TxPlan YAML](../quicktx.md) and supply the chain data yourself. UTXO selection, fee calculation, and change handling happen inside the native library. It never submits — sign the returned `tx_cbor` and submit with any HTTP client.
 - `utxos` is an array of CCL `Utxo` objects: `{ tx_hash, output_index, address, amount: [{ unit, quantity }], data_hash?, inline_datum?, reference_script_hash? }`. `unit` is `"lovelace"` or `policyId + assetNameHex`.
 - `protocolParams` is the CCL `ProtocolParams` JSON model. Cost models in the deprecated numerically-keyed map form are normalized automatically (`normalizeCostModels`), preventing `PPViewHashesDontMatch` on Plutus transactions.
+- `additionalSigners` budgets vkey witnesses for fee estimation, **beyond those the input UTXOs imply** (one per sender). You know how many keys will sign: `0` for a plain payment, `1` for a stake or DRep certificate, `2` for both in one tx, the number of `sig` keys for a native-script spend, plus one per plan-level required signer. Undercounting yields a fee the node rejects with `FeeTooSmallUTxO`; overcounting only overpays (~4,400 lovelace per extra witness).
 - **Large numbers are safe.** Inputs are serialized with `lossless-json`, so quantities above 2^53 survive exactly.
 - `execUnits` — for Plutus transactions, `[{ mem, steps }]`, one entry per redeemer in transaction order. When omitted, the native library computes them **offline** with the embedded Scalus evaluator, so script transactions build with no network access. Supply your own to override, or use an [evaluator](providers.md#evaluators) for node-backed costing.
 - **`buildWith`** fetches UTXOs and protocol parameters from a [provider](providers.md), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.

@@ -61,7 +61,7 @@ transaction:
 `, sender.BaseAddress, receiver.BaseAddress)
 
 	// Build the unsigned transaction offline.
-	result, err := bridge.QuickTx.Build(yaml, utxos, protocolParams)
+	result, err := bridge.QuickTx.Build(yaml, utxos, protocolParams, 0)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -567,7 +567,7 @@ func TestQuickTxSimplePayment(t *testing.T) {
 	receiver, _ := bridge.Account.Create(Testnet)
 
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "5000000")
-	result, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 100_000_000), testProtocolParams())
+	result, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 100_000_000), testProtocolParams(), 0)
 	if err != nil {
 		t.Fatalf("Build() failed: %v", err)
 	}
@@ -597,7 +597,7 @@ transaction:
               quantity: "3000000"
 `, sender.BaseAddress, r1.BaseAddress, r2.BaseAddress)
 
-	result, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 100_000_000), testProtocolParams())
+	result, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 100_000_000), testProtocolParams(), 0)
 	if err != nil {
 		t.Fatalf("Build() failed: %v", err)
 	}
@@ -624,7 +624,7 @@ transaction:
               quantity: ${amount}
 `, receiver.BaseAddress, sender.BaseAddress)
 
-	result, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 100_000_000), testProtocolParams())
+	result, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 100_000_000), testProtocolParams(), 0)
 	if err != nil {
 		t.Fatalf("Build() failed: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestQuickTxInsufficientFunds(t *testing.T) {
 	receiver, _ := bridge.Account.Create(Testnet)
 
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "200000000")
-	_, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 1_000_000), testProtocolParams())
+	_, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 1_000_000), testProtocolParams(), 0)
 	if err == nil {
 		t.Fatal("expected insufficient funds error")
 	}

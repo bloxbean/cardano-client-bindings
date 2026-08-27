@@ -64,7 +64,7 @@ fn test_integration_drep_key_required() {
     let u = devkit_get_utxos(INTENT_SENDER);
     let built = bridge
         .quicktx()
-        .build(&read_fixture("drep_registration.yaml"), &u, &pp, None)
+        .build(&read_fixture("drep_registration.yaml"), &u, &pp, None, 1)
         .expect("build");
 
     // Sign with the payment key ONLY (sign_tx), omitting the DRep-key witness.
@@ -107,7 +107,7 @@ fn test_integration_donation() {
             "current_treasury_value: 0",
             &format!("current_treasury_value: {}", treasury),
         );
-        let result = bridge.quicktx().build(&yaml, &utxos, &pp, None).expect("build");
+        let result = bridge.quicktx().build(&yaml, &utxos, &pp, None, 0).expect("build");
         let signed = bridge
             .account()
             .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, &["payment"])
@@ -292,7 +292,7 @@ fn test_integration_voting() {
     let u3 = devkit_get_utxos(INTENT_SENDER);
     let proposal = bridge
         .quicktx()
-        .build(&read_fixture("governance_proposal.yaml"), &u3, &pp, None)
+        .build(&read_fixture("governance_proposal.yaml"), &u3, &pp, None, 0)
         .expect("build proposal");
     let action_tx_hash = proposal.tx_hash.clone();
     let signed_proposal = bridge
@@ -499,7 +499,7 @@ fn test_integration_aiken_mint_rejects() {
     let exec = plutus_exec_units();
     let result = bridge
         .quicktx()
-        .build(&read_fixture("plutus/aiken_mint_fail.yaml"), &utxos, &pp, Some(&exec))
+        .build(&read_fixture("plutus/aiken_mint_fail.yaml"), &utxos, &pp, Some(&exec), 0)
         .expect("build");
     let signed = bridge
         .account()
@@ -749,7 +749,7 @@ transaction:
             .clone(),
     );
     let spend_utxos = serde_json::Value::Array(spend_utxos);
-    sign_submit(&bridge, &spend_yaml, &spend_utxos, &pp, None, &["payment"]);
+    sign_submit_n(&bridge, &spend_yaml, &spend_utxos, &pp, None, &["payment"], 1);
 
     assert_utxo_consumed(&script_address, &lock_hash);
 }
@@ -804,7 +804,7 @@ fn test_integration_compose_two_senders() {
 
     let result = bridge
         .quicktx()
-        .build(&read_fixture("compose.yaml"), &utxos, &pp, None)
+        .build(&read_fixture("compose.yaml"), &utxos, &pp, None, 0)
         .expect("build");
     let once = bridge
         .account()
