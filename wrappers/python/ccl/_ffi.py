@@ -280,6 +280,10 @@ class CclLib:
         lib.ccl_account_sign_tx_handle.restype = c_int
         lib.ccl_account_close.argtypes = [c_void_p, ctypes.c_int64]
         lib.ccl_account_close.restype = c_int
+        lib.ccl_account_create_handle.argtypes = [c_void_p, c_int, POINTER(ctypes.c_int64)]
+        lib.ccl_account_create_handle.restype = c_int
+        lib.ccl_account_export_recovery_phrase.argtypes = [c_void_p, ctypes.c_int64]
+        lib.ccl_account_export_recovery_phrase.restype = c_int
 
     @property
     def _thread(self):

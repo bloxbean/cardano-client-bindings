@@ -286,6 +286,8 @@ export class CclBridge {
       ccl_account_get_info: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
       ccl_account_sign_tx_handle: { args: [FFIType.ptr, FFIType.i64, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
       ccl_account_close: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
+      ccl_account_create_handle: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+      ccl_account_export_recovery_phrase: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
     });
     } catch (e) {
       throw new Error(

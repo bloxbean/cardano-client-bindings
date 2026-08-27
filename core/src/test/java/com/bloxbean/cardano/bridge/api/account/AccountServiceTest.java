@@ -183,6 +183,43 @@ class AccountServiceTest {
                         AccountService.ROLE_PAYMENT));
     }
 
+    // --- Freshly created accounts and the one-shot recovery-phrase export ---
+
+    @Test
+    void createNew_exportsPhraseExactlyOnce_andPhraseRestoresSameAccount() {
+        long handle = AccountService.createNew(TESTNET);
+        opened.add(handle);
+
+        String baseAddress = (String) AccountService.info(handle).get("base_address");
+        String phrase = AccountService.exportRecoveryPhrase(handle);
+        assertEquals(24, phrase.trim().split("\\s+").length);
+
+        // The exported phrase restores the identical account.
+        Account restored = Account.createFromMnemonic(Networks.testnet(), phrase, 0, 0);
+        assertEquals(baseAddress, restored.baseAddress());
+
+        // One-shot: a second export fails, but the handle itself stays fully usable.
+        assertThrows(IllegalStateException.class,
+                () -> AccountService.exportRecoveryPhrase(handle));
+        assertEquals(baseAddress, AccountService.info(handle).get("base_address"));
+    }
+
+    @Test
+    void exportOnImportedAccount_fails_theCallerAlreadyHoldsThePhrase() {
+        long handle = open(0, 0);
+        assertThrows(IllegalStateException.class,
+                () -> AccountService.exportRecoveryPhrase(handle));
+    }
+
+    @Test
+    void exportAfterClose_failsWithHandleError_notStateError() {
+        long handle = AccountService.createNew(TESTNET);
+        AccountService.close(handle);
+        assertThrows(AccountService.UnknownHandleException.class,
+                () -> AccountService.exportRecoveryPhrase(handle),
+                "unknown-handle semantics take precedence; close also drops the pending phrase");
+    }
+
     @Test
     void invalidOpenArguments_rejected() {
         assertThrows(IllegalArgumentException.class,

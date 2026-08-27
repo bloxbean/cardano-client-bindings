@@ -74,6 +74,8 @@ var (
 	cclAccountGetInfo      func(thread uintptr, handle int64) int32
 	cclAccountSignTxHandle func(thread uintptr, handle int64, txCbor string, roleMask int32) int32
 	cclAccountCloseHandle  func(thread uintptr, handle int64) int32
+	cclAccountCreateHandle func(thread uintptr, network int32, outHandle *int64) int32
+	cclAccountExportRecoveryPhrase func(thread uintptr, handle int64) int32
 )
 
 var (
@@ -151,6 +153,8 @@ func ensureLoaded() error {
 		reg(&cclAccountGetInfo, "ccl_account_get_info")
 		reg(&cclAccountSignTxHandle, "ccl_account_sign_tx_handle")
 		reg(&cclAccountCloseHandle, "ccl_account_close")
+		reg(&cclAccountCreateHandle, "ccl_account_create_handle")
+		reg(&cclAccountExportRecoveryPhrase, "ccl_account_export_recovery_phrase")
 	})
 	return loadErr
 }

@@ -37,6 +37,11 @@ public final class AccountService {
     private static final AtomicLong nextHandle = new AtomicLong(1);
     private static final ConcurrentHashMap<Long, Account> accounts = new ConcurrentHashMap<>();
 
+    // Recovery phrases of freshly created (not imported) accounts, held only until exported or the
+    // handle closes. Kept out of the Account record so the ordinary object graph never carries the
+    // phrase; removal on export makes the export naturally one-shot.
+    private static final ConcurrentHashMap<Long, String> pendingRecoveryPhrases = new ConcurrentHashMap<>();
+
     private AccountService() {}
 
     /**
@@ -60,6 +65,41 @@ public final class AccountService {
         long handle = nextHandle.getAndIncrement();
         accounts.put(handle, new Account(cclAccount, networkId, accountIndex, addressIndex));
         return handle;
+    }
+
+    /**
+     * Creates a brand-new account (fresh 24-word mnemonic) and returns its handle. The recovery
+     * phrase is <b>not</b> part of the account's ordinary representation — retrieve it once,
+     * deliberately, via {@link #exportRecoveryPhrase(long)}.
+     */
+    public static long createNew(int networkId) {
+        Network network = NetworkMapper.toNetwork(networkId);
+        if (network == null) {
+            throw new IllegalArgumentException("Invalid network id: " + networkId);
+        }
+        var cclAccount = new com.bloxbean.cardano.client.account.Account(network);
+        long handle = nextHandle.getAndIncrement();
+        accounts.put(handle, new Account(cclAccount, networkId, 0, 0));
+        pendingRecoveryPhrases.put(handle, cclAccount.mnemonic());
+        return handle;
+    }
+
+    /**
+     * One-shot export of a freshly created account's recovery phrase. The phrase is removed on
+     * retrieval: a second call fails, as does calling it on an account opened from a mnemonic
+     * (the caller already has that phrase — re-serving it would only widen its exposure).
+     *
+     * @throws IllegalStateException when the phrase was already exported or the account was
+     *                               opened from a mnemonic
+     */
+    public static String exportRecoveryPhrase(long handle) {
+        lookup(handle); // typed -11 semantics for unknown/closed handles take precedence
+        String phrase = pendingRecoveryPhrases.remove(handle);
+        if (phrase == null) {
+            throw new IllegalStateException(
+                    "No recovery phrase to export: already exported, or the account was opened from a mnemonic");
+        }
+        return phrase;
     }
 
     /**
@@ -139,6 +179,7 @@ public final class AccountService {
     /** Closes a handle. Idempotent: closing an unknown or already-closed handle is a no-op. */
     public static void close(long handle) {
         accounts.remove(handle);
+        pendingRecoveryPhrases.remove(handle);
     }
 
     /** Number of currently open handles (test/diagnostic aid). */

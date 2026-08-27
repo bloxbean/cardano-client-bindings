@@ -72,6 +72,67 @@ public final class AccountApi {
     }
 
     /**
+     * Creates a brand-new account with a freshly generated 24-word mnemonic.
+     *
+     * <p>Exported as {@code ccl_account_create_handle}. On success writes the handle to
+     * {@code out_handle}; <b>no secret is returned</b> — the recovery phrase is retrievable once,
+     * deliberately, via {@code ccl_account_export_recovery_phrase}.
+     *
+     * @param thread    the current isolate thread
+     * @param networkId 0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param outHandle receives the opaque account handle (must be non-null)
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
+     *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT} / {@link ErrorCodes#CCL_ERROR_GENERAL}
+     */
+    @CEntryPoint(name = "ccl_account_create_handle")
+    public static int createNew(IsolateThread thread, int networkId, CLongPointer outHandle) {
+        try {
+            if (outHandle.isNull()) {
+                ErrorState.set("out_handle must be non-null");
+                return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+            }
+            outHandle.write(AccountService.createNew(networkId));
+            return ErrorCodes.CCL_SUCCESS;
+        } catch (IllegalArgumentException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_NETWORK;
+        } catch (Exception e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_GENERAL;
+        }
+    }
+
+    /**
+     * One-shot export of a freshly created account's recovery phrase.
+     *
+     * <p>Exported as {@code ccl_account_export_recovery_phrase}. The result is the BIP-39 phrase;
+     * it is removed on retrieval — a second call fails, as does calling this on an account opened
+     * from a mnemonic (the caller already holds that phrase). Secret access is deliberate by
+     * design: nothing else ever returns the phrase.
+     *
+     * @param thread the current isolate thread
+     * @param handle an open, freshly created account handle
+     * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_HANDLE} /
+     *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT}
+     */
+    @CEntryPoint(name = "ccl_account_export_recovery_phrase")
+    public static int exportRecoveryPhrase(IsolateThread thread, long handle) {
+        try {
+            ResultState.set(AccountService.exportRecoveryPhrase(handle));
+            return ErrorCodes.CCL_SUCCESS;
+        } catch (AccountService.UnknownHandleException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_HANDLE;
+        } catch (IllegalStateException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+        } catch (Exception e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_GENERAL;
+        }
+    }
+
+    /**
      * Public information for an open account.
      *
      * <p>Exported as {@code ccl_account_get_info}. On success the result is a JSON object:
