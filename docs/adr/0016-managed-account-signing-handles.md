@@ -104,6 +104,29 @@ and the retained account key will be overwritten on a best-effort basis when no 
 derivation and signing parity must be verified against mnemonic-backed CCL Accounts before this mode
 is enabled.
 
+### Derivation model
+
+The path model is **CIP-1852** (`m/1852'/1815'/account'/role/index`), matching CCL's `Account`
+semantics exactly. An account handle is **one payment leaf plus the account's role keys**: the
+payment key uses role `0` at the handle's `address_index`; the stake, DRep, and committee keys sit
+at their standard role indices **independent of `address_index`**. Consequently, two handles opened
+at different address indices of the same account share one stake/DRep identity — this is inherited
+CCL behavior, pinned by the signing-parity tests, and must be documented in every wrapper guide.
+
+Multiple addresses under one account are served in this ADR's scope by **opening one handle per
+leaf** (opening is cheap). A **wallet handle** — the managed successor to the mnemonic-per-call HD
+`wallet` API group: open the account-level node once, then `derive_address(handle, index)` and sign
+for any derived leaf (including multi-address senders) — is deliberate **future work**: it is purely
+additive to this ABI (new entry points, no changes to the account surface), and it is the
+prerequisite for retiring the old `wallet.*` group in the deprecation stage. Watch-only handles from
+account-level public derivation material are future work of the same additive kind. Arbitrary
+non-CIP-1852 derivation paths are **out of scope** for handles; the low-level raw-key APIs remain
+the escape hatch.
+
+All handle kinds share **one namespace** (a single isolate-local counter with kind-tagged entries),
+so a handle of one kind passed to another kind's entry point fails with a typed error rather than
+aliasing an object by numeric coincidence.
+
 ### Public information and recovery material
 
 An Account's ordinary representation will contain public information only. It must be safe to inspect
