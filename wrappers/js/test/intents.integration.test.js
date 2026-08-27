@@ -20,7 +20,7 @@
 //     DYLD_LIBRARY_PATH=../../core/build/native/nativeCompile bun test test/intents.integration.test.js
 
 import { describe, it, expect, beforeAll, afterAll, setDefaultTimeout } from "bun:test";
-import { CclBridge, TESTNET } from "../src/index.js";
+import { CclBridge, TESTNET, SigningRole } from "../src/index.js";
 import { DevKitHelper } from "./devkit-helper.js";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
@@ -160,6 +160,24 @@ describe("Intents Integration (DevKit)", () => {
   }
 
   // --- Stake certificates ---
+
+  // ADR-0016 end-to-end: build offline, sign with a managed Account handle (typed role mask, no
+  // mnemonic in the signing call), and have the node accept the transaction.
+  it("submits a transaction signed via a managed Account handle", async () => {
+    if (skip) return;
+    await resetAndFund();
+    const utxos = await devkit.getUtxos(INTENT_SENDER);
+    const built = bridge.quicktx.build(
+      readFixture("stake_registration.yaml"), utxos, await devnetPP(), null, 1);
+    const acct = bridge.accounts.fromMnemonic(INTENT_MNEMONIC, TESTNET);
+    let signed;
+    try {
+      signed = acct.signTx(built.tx_cbor, SigningRole.PAYMENT | SigningRole.STAKE);
+    } finally {
+      acct.close();
+    }
+    await submitExpectHash(signed);
+  });
 
   // Mirrors Go TestIntegrationStakeRegistration. The stake-registration certificate is witnessed by
   // the stake key, so sign with payment+stake.

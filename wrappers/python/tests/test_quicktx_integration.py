@@ -373,6 +373,20 @@ def test_plutus_spend(ccl_lib, devkit):
 
 # --- Governance / staking suite (mirrors intents_integration_test.go) ---
 
+def test_managed_account_handle_sign_submit(ccl_lib, devkit):
+    """ADR-0016 end-to-end: build offline, sign with a managed Account handle (typed role mask,
+    no mnemonic in the signing call), and have the node accept the transaction. The handle-based
+    signature must be as node-acceptable as the mnemonic-per-call path it replaces."""
+    from ccl import SigningRole
+    pp = _reset_and_fund(devkit)
+    utxos = devkit.get_utxos(INTENT_SENDER)
+    built = ccl_lib.quicktx.build(_read_fixture("stake_registration.yaml"), utxos, pp,
+                                  additional_signers=1)
+    with ccl_lib.accounts.from_mnemonic(INTENT_MNEMONIC, Network.TESTNET) as acct:
+        signed = acct.sign_tx(built["tx_cbor"], SigningRole.PAYMENT | SigningRole.STAKE)
+    assert devkit.submit_tx(signed)
+
+
 def test_stake_registration(ccl_lib, devkit):
     """Register a stake address (witnessed by payment + stake keys). Mirrors
     TestIntegrationStakeRegistration."""

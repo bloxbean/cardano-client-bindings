@@ -25,6 +25,35 @@ use ccl::Bridge;
 use common::*;
 use serde_json::json;
 
+// ADR-0016 end-to-end: build offline, sign with a managed Account (typed role mask, no mnemonic
+// in the signing call), and have the node accept the transaction.
+#[test]
+fn test_integration_managed_account_handle_sign_submit() {
+    if skip_if_no_devkit() {
+        return;
+    }
+    use ccl::accounts::SigningRole;
+    let bridge = Bridge::new().expect("create bridge");
+    devkit_reset();
+    wait_for_block();
+    devkit_topup(INTENT_SENDER, 6000);
+    wait_for_block();
+    let utxos = devkit_get_utxos(INTENT_SENDER);
+    let pp = devnet_pp();
+    let built = bridge
+        .quicktx()
+        .build(&read_fixture("stake_registration.yaml"), &utxos, &pp, None, 1)
+        .expect("build");
+    let acct = bridge
+        .accounts()
+        .from_mnemonic(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0)
+        .expect("open account");
+    let signed = acct
+        .sign_tx(&built.tx_cbor, SigningRole::PAYMENT | SigningRole::STAKE)
+        .expect("handle sign");
+    devkit_try_submit(&signed).expect("submit");
+}
+
 // Register a stake address (payment + stake witness). Mirrors TestIntegrationStakeRegistration.
 #[test]
 fn test_integration_stake_registration() {

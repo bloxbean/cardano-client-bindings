@@ -138,6 +138,38 @@ func assertUtxoConsumed(t *testing.T, address, txHash string) {
 	}
 }
 
+// ADR-0016 end-to-end: build offline, sign with a managed Account handle (typed role mask, no
+// mnemonic in the signing call), and have the node accept the transaction.
+func TestIntegrationManagedAccountHandleSignSubmit(t *testing.T) {
+	skipIfNoDevKit(t)
+	devkitReset()
+	waitForBlock()
+	if err := devkitTopup(intentSender, 6000); err != nil {
+		t.Fatalf("topup: %v", err)
+	}
+	waitForBlock()
+	utxos, err := devkitGetUtxos(intentSender)
+	if err != nil {
+		t.Fatalf("get utxos: %v", err)
+	}
+	built, err := bridge.QuickTx.Build(readIntentFixture(t, "stake_registration.yaml"), utxos, devnetPP(t), 1)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	acct, err := bridge.Accounts.FromMnemonic(intentMnemonic, Testnet, 0, 0)
+	if err != nil {
+		t.Fatalf("open account: %v", err)
+	}
+	defer acct.Close()
+	signed, err := acct.SignTx(built.TxCbor, RolePayment|RoleStake)
+	if err != nil {
+		t.Fatalf("handle sign: %v", err)
+	}
+	if _, err := devkitSubmitTx(signed); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+}
+
 func TestIntegrationStakeRegistration(t *testing.T) {
 	skipIfNoDevKit(t)
 	buildSignSubmit(t, "stake_registration.yaml", nil, "payment", "stake")
