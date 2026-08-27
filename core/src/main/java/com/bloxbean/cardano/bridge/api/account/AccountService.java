@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * echoes the mnemonic. (Deriving from the hardened account-level key and dropping the phrase — the
  * ADR's preferred mode — is gated on signing-parity verification and lands with the signing slice.)
  */
-public final class ManagedAccountService {
+public final class AccountService {
 
     /** Thrown when a handle is unknown, already closed, or from another isolate. */
     public static final class UnknownHandleException extends RuntimeException {
@@ -37,7 +37,7 @@ public final class ManagedAccountService {
     private static final AtomicLong nextHandle = new AtomicLong(1);
     private static final ConcurrentHashMap<Long, Account> accounts = new ConcurrentHashMap<>();
 
-    private ManagedAccountService() {}
+    private AccountService() {}
 
     /**
      * Opens an account from a mnemonic at fixed derivation indices and returns its handle.

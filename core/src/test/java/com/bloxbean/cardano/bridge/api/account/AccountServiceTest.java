@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * opaque and never reused as another account after close; unknown/closed/stale handles fail with a
  * typed error; close is idempotent; account info never carries secrets.
  */
-class ManagedAccountServiceTest {
+class AccountServiceTest {
 
     private static final String TEST_MNEMONIC =
             "test walk nut penalty hip pave soap entry language right filter choice";
@@ -25,14 +25,14 @@ class ManagedAccountServiceTest {
     private final List<Long> opened = new ArrayList<>();
 
     private long open(int accountIndex, int addressIndex) {
-        long handle = ManagedAccountService.openMnemonic(TESTNET, TEST_MNEMONIC, accountIndex, addressIndex);
+        long handle = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, accountIndex, addressIndex);
         opened.add(handle);
         return handle;
     }
 
     @AfterEach
     void tearDown() {
-        opened.forEach(ManagedAccountService::close);
+        opened.forEach(AccountService::close);
         opened.clear();
     }
 
@@ -41,7 +41,7 @@ class ManagedAccountServiceTest {
         long handle = open(0, 0);
         assertTrue(handle > 0, "handles start at 1; 0 is never valid");
 
-        Map<String, Object> info = ManagedAccountService.info(handle);
+        Map<String, Object> info = AccountService.info(handle);
         Account reference = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
         assertEquals(reference.baseAddress(), info.get("base_address"));
         assertEquals(reference.enterpriseAddress(), info.get("enterprise_address"));
@@ -54,7 +54,7 @@ class ManagedAccountServiceTest {
 
     @Test
     void infoNeverContainsSecrets() {
-        Map<String, Object> info = ManagedAccountService.info(open(0, 0));
+        Map<String, Object> info = AccountService.info(open(0, 0));
         for (var entry : info.entrySet()) {
             String key = entry.getKey().toLowerCase();
             assertFalse(key.contains("mnemonic") || key.contains("private") || key.contains("secret"),
@@ -74,38 +74,38 @@ class ManagedAccountServiceTest {
         assertNotEquals(first, other);
 
         // Interleaved use: each handle answers for its own derivation.
-        assertNotEquals(ManagedAccountService.info(first).get("base_address"),
-                ManagedAccountService.info(other).get("base_address"));
-        assertEquals(ManagedAccountService.info(first).get("base_address"),
-                ManagedAccountService.info(again).get("base_address"));
+        assertNotEquals(AccountService.info(first).get("base_address"),
+                AccountService.info(other).get("base_address"));
+        assertEquals(AccountService.info(first).get("base_address"),
+                AccountService.info(again).get("base_address"));
     }
 
     @Test
     void unknownHandleFails_withTypedException() {
-        assertThrows(ManagedAccountService.UnknownHandleException.class,
-                () -> ManagedAccountService.info(999_999_999L));
-        assertThrows(ManagedAccountService.UnknownHandleException.class,
-                () -> ManagedAccountService.info(0L), "0 must never be a valid handle");
+        assertThrows(AccountService.UnknownHandleException.class,
+                () -> AccountService.info(999_999_999L));
+        assertThrows(AccountService.UnknownHandleException.class,
+                () -> AccountService.info(0L), "0 must never be a valid handle");
     }
 
     @Test
     void useAfterClose_failsWithTypedException_andCloseIsIdempotent() {
         long handle = open(0, 0);
-        ManagedAccountService.close(handle);
-        assertThrows(ManagedAccountService.UnknownHandleException.class,
-                () -> ManagedAccountService.info(handle));
-        assertDoesNotThrow(() -> ManagedAccountService.close(handle), "double-close must be a no-op");
-        assertDoesNotThrow(() -> ManagedAccountService.close(123_456_789L), "closing unknown is a no-op");
+        AccountService.close(handle);
+        assertThrows(AccountService.UnknownHandleException.class,
+                () -> AccountService.info(handle));
+        assertDoesNotThrow(() -> AccountService.close(handle), "double-close must be a no-op");
+        assertDoesNotThrow(() -> AccountService.close(123_456_789L), "closing unknown is a no-op");
     }
 
     @Test
     void closedHandleIsNeverReassigned() {
         long first = open(0, 0);
-        ManagedAccountService.close(first);
+        AccountService.close(first);
         long next = open(0, 1);
         assertNotEquals(first, next, "handles are never reused after close");
-        assertThrows(ManagedAccountService.UnknownHandleException.class,
-                () -> ManagedAccountService.info(first), "the closed handle stays dead");
+        assertThrows(AccountService.UnknownHandleException.class,
+                () -> AccountService.info(first), "the closed handle stays dead");
     }
 
     // --- Signing: typed role mask, byte-identical with the mnemonic-per-call path ---
@@ -149,15 +149,15 @@ class ManagedAccountServiceTest {
         String unsigned = unsignedTx();
 
         assertEquals(signLegacy(unsigned, false, false),
-                ManagedAccountService.signTx(handle, unsigned,
-                        ManagedAccountService.ROLE_PAYMENT));
+                AccountService.signTx(handle, unsigned,
+                        AccountService.ROLE_PAYMENT));
         assertEquals(signLegacy(unsigned, true, false),
-                ManagedAccountService.signTx(handle, unsigned,
-                        ManagedAccountService.ROLE_PAYMENT | ManagedAccountService.ROLE_STAKE));
+                AccountService.signTx(handle, unsigned,
+                        AccountService.ROLE_PAYMENT | AccountService.ROLE_STAKE));
         assertEquals(signLegacy(unsigned, true, true),
-                ManagedAccountService.signTx(handle, unsigned,
-                        ManagedAccountService.ROLE_PAYMENT | ManagedAccountService.ROLE_STAKE
-                                | ManagedAccountService.ROLE_DREP));
+                AccountService.signTx(handle, unsigned,
+                        AccountService.ROLE_PAYMENT | AccountService.ROLE_STAKE
+                                | AccountService.ROLE_DREP));
     }
 
     @Test
@@ -165,33 +165,33 @@ class ManagedAccountServiceTest {
         long handle = open(0, 0);
         String unsigned = unsignedTx();
         assertThrows(IllegalArgumentException.class,
-                () -> ManagedAccountService.signTx(handle, unsigned, 0),
+                () -> AccountService.signTx(handle, unsigned, 0),
                 "empty mask must not silently sign with every key");
         assertThrows(IllegalArgumentException.class,
-                () -> ManagedAccountService.signTx(handle, unsigned, 1 << 7));
+                () -> AccountService.signTx(handle, unsigned, 1 << 7));
         assertThrows(IllegalArgumentException.class,
-                () -> ManagedAccountService.signTx(handle, "  ", ManagedAccountService.ROLE_PAYMENT));
+                () -> AccountService.signTx(handle, "  ", AccountService.ROLE_PAYMENT));
     }
 
     @Test
     void signOnClosedHandle_failsTyped() throws Exception {
         long handle = open(0, 0);
         String unsigned = unsignedTx();
-        ManagedAccountService.close(handle);
-        assertThrows(ManagedAccountService.UnknownHandleException.class,
-                () -> ManagedAccountService.signTx(handle, unsigned,
-                        ManagedAccountService.ROLE_PAYMENT));
+        AccountService.close(handle);
+        assertThrows(AccountService.UnknownHandleException.class,
+                () -> AccountService.signTx(handle, unsigned,
+                        AccountService.ROLE_PAYMENT));
     }
 
     @Test
     void invalidOpenArguments_rejected() {
         assertThrows(IllegalArgumentException.class,
-                () -> ManagedAccountService.openMnemonic(99, TEST_MNEMONIC, 0, 0));
+                () -> AccountService.openMnemonic(99, TEST_MNEMONIC, 0, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> ManagedAccountService.openMnemonic(TESTNET, "  ", 0, 0));
+                () -> AccountService.openMnemonic(TESTNET, "  ", 0, 0));
         assertThrows(IllegalArgumentException.class,
-                () -> ManagedAccountService.openMnemonic(TESTNET, TEST_MNEMONIC, -1, 0));
+                () -> AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, -1, 0));
         assertThrows(Exception.class,
-                () -> ManagedAccountService.openMnemonic(TESTNET, "not a valid mnemonic at all", 0, 0));
+                () -> AccountService.openMnemonic(TESTNET, "not a valid mnemonic at all", 0, 0));
     }
 }

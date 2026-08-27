@@ -1,7 +1,6 @@
-package com.bloxbean.cardano.bridge.api;
+package com.bloxbean.cardano.bridge.api.account;
 
 import com.bloxbean.cardano.bridge.ErrorCodes;
-import com.bloxbean.cardano.bridge.api.account.ManagedAccountService;
 import com.bloxbean.cardano.bridge.util.ErrorState;
 import com.bloxbean.cardano.bridge.util.JsonHelper;
 import com.bloxbean.cardano.bridge.util.NativeString;
@@ -21,9 +20,9 @@ import org.graalvm.nativeimage.c.type.CLongPointer;
  *
  * <p>See {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention.
  */
-public final class ManagedAccountApi {
+public final class AccountApi {
 
-    private ManagedAccountApi() {}
+    private AccountApi() {}
 
     /**
      * Opens an account from a mnemonic at fixed derivation indices.
@@ -52,7 +51,7 @@ public final class ManagedAccountApi {
                 return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
             }
             String mnemonic = NativeString.toJavaString(mnemonicPtr);
-            long handle = ManagedAccountService.openMnemonic(networkId, mnemonic, accountIndex, addressIndex);
+            long handle = AccountService.openMnemonic(networkId, mnemonic, accountIndex, addressIndex);
             outHandle.write(handle);
             return ErrorCodes.CCL_SUCCESS;
         } catch (IllegalArgumentException e) {
@@ -88,9 +87,9 @@ public final class ManagedAccountApi {
     @CEntryPoint(name = "ccl_account_get_info")
     public static int getInfo(IsolateThread thread, long handle) {
         try {
-            ResultState.set(JsonHelper.toJson(ManagedAccountService.info(handle)));
+            ResultState.set(JsonHelper.toJson(AccountService.info(handle)));
             return ErrorCodes.CCL_SUCCESS;
-        } catch (ManagedAccountService.UnknownHandleException e) {
+        } catch (AccountService.UnknownHandleException e) {
             ErrorState.set(e.getMessage());
             return ErrorCodes.CCL_ERROR_INVALID_HANDLE;
         } catch (Exception e) {
@@ -121,9 +120,9 @@ public final class ManagedAccountApi {
     public static int signTx(IsolateThread thread, long handle, CCharPointer txCborPtr, int roleMask) {
         try {
             String txCborHex = NativeString.toJavaString(txCborPtr);
-            ResultState.set(ManagedAccountService.signTx(handle, txCborHex, roleMask));
+            ResultState.set(AccountService.signTx(handle, txCborHex, roleMask));
             return ErrorCodes.CCL_SUCCESS;
-        } catch (ManagedAccountService.UnknownHandleException e) {
+        } catch (AccountService.UnknownHandleException e) {
             ErrorState.set(e.getMessage());
             return ErrorCodes.CCL_ERROR_INVALID_HANDLE;
         } catch (IllegalArgumentException e) {
@@ -149,7 +148,7 @@ public final class ManagedAccountApi {
     @CEntryPoint(name = "ccl_account_close")
     public static int close(IsolateThread thread, long handle) {
         try {
-            ManagedAccountService.close(handle);
+            AccountService.close(handle);
             return ErrorCodes.CCL_SUCCESS;
         } catch (Exception e) {
             ErrorState.set(e.getMessage());
