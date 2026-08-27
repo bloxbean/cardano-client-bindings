@@ -199,4 +199,22 @@ extern "C" {
         exec_units_json: *const c_char,
         additional_signers: c_int,
     ) -> c_int;
+
+    // Managed account handles (ADR-0016)
+    pub fn ccl_account_open_mnemonic(
+        thread: *mut graal_isolatethread_t,
+        network: c_int,
+        mnemonic: *const c_char,
+        account_index: c_int,
+        address_index: c_int,
+        out_handle: *mut i64,
+    ) -> c_int;
+    pub fn ccl_account_get_info(thread: *mut graal_isolatethread_t, handle: i64) -> c_int;
+    pub fn ccl_account_sign_tx_handle(
+        thread: *mut graal_isolatethread_t,
+        handle: i64,
+        tx_cbor: *const c_char,
+        role_mask: c_int,
+    ) -> c_int;
+    pub fn ccl_account_close(thread: *mut graal_isolatethread_t, handle: i64) -> c_int;
 }

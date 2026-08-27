@@ -281,6 +281,11 @@ export class CclBridge {
 
       // QuickTx
       ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
+      // Managed account handles (ADR-0016)
+      ccl_account_open_mnemonic: { args: [FFIType.ptr, FFIType.i32, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+      ccl_account_get_info: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
+      ccl_account_sign_tx_handle: { args: [FFIType.ptr, FFIType.i64, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
+      ccl_account_close: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
     });
     } catch (e) {
       throw new Error(

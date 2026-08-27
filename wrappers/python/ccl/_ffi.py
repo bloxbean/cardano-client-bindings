@@ -270,6 +270,17 @@ class CclLib:
         lib.ccl_quicktx_build.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p, c_int]
         lib.ccl_quicktx_build.restype = c_int
 
+        # Managed account handles (ADR-0016)
+        lib.ccl_account_open_mnemonic.argtypes = [c_void_p, c_int, c_char_p, c_int, c_int,
+                                                  POINTER(ctypes.c_int64)]
+        lib.ccl_account_open_mnemonic.restype = c_int
+        lib.ccl_account_get_info.argtypes = [c_void_p, ctypes.c_int64]
+        lib.ccl_account_get_info.restype = c_int
+        lib.ccl_account_sign_tx_handle.argtypes = [c_void_p, ctypes.c_int64, c_char_p, c_int]
+        lib.ccl_account_sign_tx_handle.restype = c_int
+        lib.ccl_account_close.argtypes = [c_void_p, ctypes.c_int64]
+        lib.ccl_account_close.restype = c_int
+
     @property
     def _thread(self):
         """The GraalVM IsolateThread for the *calling* thread, attaching it on first use.

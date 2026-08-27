@@ -68,6 +68,12 @@ var (
 	cclWalletGetAddress   func(thread uintptr, mnemonic string, network, index int32) int32
 
 	cclQuicktxBuild func(thread uintptr, yaml, utxos, params, execUnits string, additionalSigners int32) int32
+
+	// Managed account handles (ADR-0016)
+	cclAccountOpenMnemonic func(thread uintptr, network int32, mnemonic string, accountIndex, addressIndex int32, outHandle *int64) int32
+	cclAccountGetInfo      func(thread uintptr, handle int64) int32
+	cclAccountSignTxHandle func(thread uintptr, handle int64, txCbor string, roleMask int32) int32
+	cclAccountCloseHandle  func(thread uintptr, handle int64) int32
 )
 
 var (
@@ -141,6 +147,10 @@ func ensureLoaded() error {
 		reg(&cclWalletGetAddress, "ccl_wallet_get_address")
 
 		reg(&cclQuicktxBuild, "ccl_quicktx_build")
+		reg(&cclAccountOpenMnemonic, "ccl_account_open_mnemonic")
+		reg(&cclAccountGetInfo, "ccl_account_get_info")
+		reg(&cclAccountSignTxHandle, "ccl_account_sign_tx_handle")
+		reg(&cclAccountCloseHandle, "ccl_account_close")
 	})
 	return loadErr
 }
