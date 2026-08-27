@@ -184,17 +184,18 @@ pub fn get_address(&self, mnemonic: &str, network: Network, index: i32) -> Resul
 pub struct TxResult { pub tx_cbor: String, pub tx_hash: String, pub fee: String }
 
 pub fn build(&self, yaml: &str, utxos: &serde_json::Value, protocol_params: &serde_json::Value,
-             exec_units: Option<&serde_json::Value>) -> Result<TxResult>;
+             exec_units: Option<&serde_json::Value>, additional_signers: u32) -> Result<TxResult>;
 
 // with `--features providers`:
 pub fn build_with(&self, yaml: &str, provider: &dyn ChainDataProvider, sender: &str,
-                  evaluator: Option<&dyn TransactionEvaluator>) -> Result<TxResult>;
+                  additional_signers: u32, evaluator: Option<&dyn TransactionEvaluator>) -> Result<TxResult>;
 ```
 
 - **`build`** is fully offline: you describe the transaction as [TxPlan YAML](../quicktx.md) and supply the chain data yourself as `serde_json::Value`s. UTXO selection, fee calculation, and change handling happen inside the native library. It never submits — sign the returned `tx_cbor` and submit with any HTTP client.
 - `utxos` is a JSON array of CCL `Utxo` objects: `{tx_hash, output_index, address, amount: [{unit, quantity}]}`. `unit` is `"lovelace"` or `policyId + assetNameHex`. Quantities are best passed as **strings** (`"quantity": "5000000"`), matching the canonical CCL model.
 - `protocol_params` is the CCL `ProtocolParams` JSON model; unknown fields are ignored.
 - `exec_units` — for Plutus transactions, `Some(&json!([{"mem": ..., "steps": ...}]))`, one entry per redeemer in transaction order. Pass `None` to let the native library compute them **offline** with the embedded Scalus evaluator.
+- `additional_signers` budgets vkey witnesses for fee estimation, **beyond those the input UTXOs imply** (one per sender). You know how many keys will sign: `0` for a plain payment, `1` for a stake or DRep certificate, `2` for both in one tx, the number of `sig` keys for a native-script spend, plus one per plan-level required signer. Undercounting yields a fee the node rejects with `FeeTooSmallUTxO`; overcounting only overpays (~4,400 lovelace per extra witness).
 - **`build_with`** fetches UTXOs and protocol parameters from a [provider](providers.md), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.
 
 ```rust

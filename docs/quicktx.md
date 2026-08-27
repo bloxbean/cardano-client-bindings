@@ -9,7 +9,7 @@ The whole interface is YAML: **TxPlan YAML in → YAML result out**.
 
 ## Overview
 
-- **Single function**: `ccl_quicktx_build(thread, yaml, utxos_json, protocol_params_json, exec_units_json)` → returns `0` on success.
+- **Single function**: `ccl_quicktx_build(thread, yaml, utxos_json, protocol_params_json, exec_units_json, additional_signers)` → returns `0` on success.
 - **Result**: a YAML document with `tx_cbor` (unsigned transaction), `tx_hash`, and `fee`.
 - **Fully offline**: the caller supplies UTXOs and protocol parameters — the native library makes no
   HTTP calls and never submits. (The native entry point has no provider mode; each wrapper offers a
@@ -25,7 +25,8 @@ int ccl_quicktx_build(
     const char* yaml,                  // TxPlan YAML
     const char* utxos_json,            // JSON array of UTXOs
     const char* protocol_params_json,  // JSON protocol parameters
-    const char* exec_units_json        // JSON [{mem, steps}] per redeemer, or null (Plutus only; null = compute offline with the embedded Scalus evaluator)
+    const char* exec_units_json,       // JSON [{mem, steps}] per redeemer, or null (Plutus only; null = compute offline with the embedded Scalus evaluator)
+    int additional_signers             // vkey witnesses to budget for fee estimation, beyond those the input UTXOs imply (>= 0)
 );
 ```
 
@@ -112,6 +113,8 @@ Each intent has a `type` discriminator. The full set supported by CCL's TxPlan:
 > `exec_units_json`, a JSON array of `[{mem, steps}]`, one per redeemer in transaction order; the
 > bridge then wires CCL's `StaticTransactionEvaluator` to stamp them on without running the script.
 > Explicit units always take precedence over the Scalus default.
+
+> **Witness budgeting is caller-supplied.** `additional_signers` budgets vkey witnesses for fee estimation, **beyond those the input UTXOs imply** (one per sender). You know how many keys will sign: `0` for a plain payment, `1` for a stake or DRep certificate (`payment`+`stake` signing), `2` for both in one tx, the number of `sig` keys for a native-script spend, plus one per plan-level required signer. Undercounting yields a fee the node rejects with `FeeTooSmallUTxO`; overcounting only overpays (~4,400 lovelace per extra witness).
 
 ---
 
@@ -498,9 +501,10 @@ Mint under a Plutus policy (`script_minting`, shown in [example 5](#5-plutus-min
 
 ## Using it from the wrappers
 
-Each wrapper exposes a thin `build(yaml, utxos, protocolParams, execUnits?)` that marshals the chain
-data to JSON, calls `ccl_quicktx_build`, and parses the YAML result — plus a `build_with(yaml,
-provider, sender, evaluator?)` convenience that fetches the chain data from a provider first (see
+Each wrapper exposes a thin `build(yaml, utxos, protocolParams, execUnits?, additionalSigners)` that
+marshals the chain data to JSON, calls `ccl_quicktx_build`, and parses the YAML result — plus a
+`build_with(yaml, provider, sender, additionalSigners, evaluator?)` convenience that fetches the
+chain data from a provider first (see
 each wrapper's providers guide). The result is an object/dict/struct with `tx_cbor`, `tx_hash`, and
 `fee`. Both return an **unsigned** transaction — sign `tx_cbor` with the account sign API, then
 submit it yourself.
@@ -518,7 +522,8 @@ submit it yourself.
 from ccl import CclLib
 
 lib = CclLib()
-result = lib.quicktx.build(txplan_yaml, utxos, protocol_params)  # -> {"tx_cbor","tx_hash","fee"}
+# additional_signers: witnesses beyond the input-implied payment key(s) — here 1 (a stake cert)
+result = lib.quicktx.build(txplan_yaml, utxos, protocol_params, additional_signers=1)
 signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], CclLib.TESTNET, 0, 0)
 ```
 
@@ -528,7 +533,7 @@ signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], CclLib.TESTNET, 0, 0)
 import { CclBridge, TESTNET } from '@bloxbean/cardano-client-lib';
 
 const bridge = new CclBridge();
-const result = bridge.quicktx.build(txplanYaml, utxos, protocolParams);
+const result = bridge.quicktx.build(txplanYaml, utxos, protocolParams, null, 1);
 const signed = bridge.account.signTx(mnemonic, TESTNET, 0, 0, result.tx_cbor);
 ```
 
@@ -538,7 +543,7 @@ const signed = bridge.account.signTx(mnemonic, TESTNET, 0, 0, result.tx_cbor);
 bridge, _ := ccl.New()
 defer bridge.Close()
 
-result, _ := bridge.QuickTx.Build(txplanYaml, utxos, protocolParams)
+result, _ := bridge.QuickTx.Build(txplanYaml, utxos, protocolParams, 1)
 signed, _ := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, result.TxCbor)
 ```
 
@@ -547,7 +552,7 @@ signed, _ := bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, result.TxCbor)
 ```rust
 let bridge = ccl::Bridge::new().unwrap();
 
-let result = bridge.quicktx().build(&txplan_yaml, &utxos, &protocol_params).unwrap();
+let result = bridge.quicktx().build(&txplan_yaml, &utxos, &protocol_params, None, 1).unwrap();
 let signed = bridge.account()
     .sign_tx(&mnemonic, ccl::network::TESTNET, 0, 0, &result.tx_cbor)
     .unwrap();

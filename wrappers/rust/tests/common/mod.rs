@@ -310,9 +310,25 @@ pub fn sign_submit(
     exec_units: Option<&Value>,
     keys: &[&str],
 ) -> String {
+    // The signer count is known here, exactly as it is for a real caller: one witness per key
+    // role beyond the input-implied payment key.
+    sign_submit_n(bridge, yaml, utxos, pp, exec_units, keys, keys.len().saturating_sub(1) as u32)
+}
+
+// sign_submit with an explicit additional-signers budget, for transactions whose inputs imply no
+// payment key (e.g. a script-only-input spend).
+pub fn sign_submit_n(
+    bridge: &Bridge,
+    yaml: &str,
+    utxos: &Value,
+    pp: &Value,
+    exec_units: Option<&Value>,
+    keys: &[&str],
+    additional_signers: u32,
+) -> String {
     let result = bridge
         .quicktx()
-        .build(yaml, utxos, pp, exec_units)
+        .build(yaml, utxos, pp, exec_units, additional_signers)
         .expect("build");
     let signed = bridge
         .account()
@@ -463,9 +479,12 @@ pub fn sign_submit_fee(
     exec_units: Option<&Value>,
     keys: &[&str],
 ) -> u64 {
+    // The signer count is known here, exactly as it is for a real caller: one witness per key
+    // role beyond the input-implied payment key.
+    let additional_signers = keys.len().saturating_sub(1) as u32;
     let result = bridge
         .quicktx()
-        .build(yaml, utxos, pp, exec_units)
+        .build(yaml, utxos, pp, exec_units, additional_signers)
         .expect("build");
     let signed = bridge
         .account()

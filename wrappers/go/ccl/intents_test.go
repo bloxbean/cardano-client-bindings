@@ -57,7 +57,7 @@ func TestQuickTxIntentsE2E(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", f, err)
 			}
-			result, err := bridge.QuickTx.Build(string(yamlBytes), utxos, testProtocolParams())
+			result, err := bridge.QuickTx.Build(string(yamlBytes), utxos, testProtocolParams(), 1)
 			if err != nil {
 				t.Fatalf("build %s: %v", name, err)
 			}

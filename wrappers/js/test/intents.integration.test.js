@@ -104,10 +104,12 @@ describe("Intents Integration (DevKit)", () => {
   }
 
   // signSubmit builds the YAML with the given UTXOs + params, signs with the key roles, and submits.
-  async function signSubmit(yaml, utxos, pp, execUnits, keys) {
-    const result = execUnits != null
-      ? bridge.quicktx.build(yaml, utxos, pp, execUnits)
-      : bridge.quicktx.build(yaml, utxos, pp);
+  // The fee's witness budget defaults to keys.length - 1 (the signer count is known here, exactly as
+  // it is for a real caller); pass additionalSigners explicitly where the inputs imply no payment
+  // key (e.g. a script-only-input spend).
+  async function signSubmit(yaml, utxos, pp, execUnits, keys, additionalSigners = null) {
+    const budget = additionalSigners ?? Math.max(0, keys.length - 1);
+    const result = bridge.quicktx.build(yaml, utxos, pp, execUnits ?? null, budget);
     const signed = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor, keys);
     return submitExpectHash(signed);
   }
@@ -294,7 +296,7 @@ describe("Intents Integration (DevKit)", () => {
     const pp = await devnetPP();
 
     const utxos = await devkit.getUtxos(INTENT_SENDER);
-    const built = bridge.quicktx.build(readFixture("drep_registration.yaml"), utxos, pp);
+    const built = bridge.quicktx.build(readFixture("drep_registration.yaml"), utxos, pp, null, 1);
 
     // Sign with the payment key ONLY, omitting the DRep-key witness.
     const signedPaymentOnly = bridge.account.signTx(INTENT_MNEMONIC, TESTNET, 0, 0, built.tx_cbor);
@@ -504,9 +506,8 @@ describe("Intents Integration (DevKit)", () => {
   // signSubmit, additionally returning the tx fee so callers can assert the sender's exact
   // balance change (the ledger read-back "submit accepted" alone can't give).
   async function signSubmitFee(yaml, utxos, pp, execUnits, keys) {
-    const result = execUnits != null
-      ? bridge.quicktx.build(yaml, utxos, pp, execUnits)
-      : bridge.quicktx.build(yaml, utxos, pp);
+    const result = bridge.quicktx.build(yaml, utxos, pp, execUnits ?? null,
+      Math.max(0, keys.length - 1));
     const signed = bridge.account.signTxWithKeys(INTENT_MNEMONIC, TESTNET, 0, 0, result.tx_cbor, keys);
     await submitExpectHash(signed);
     return Number(result.fee);
@@ -702,7 +703,7 @@ transaction:
           script_hex: ${scriptHex}
 `;
     const feeUtxos = await devkit.getUtxos(INTENT_SENDER);
-    await signSubmit(spendYaml, [...scriptUtxos, ...feeUtxos], pp, null, ["payment"]);
+    await signSubmit(spendYaml, [...scriptUtxos, ...feeUtxos], pp, null, ["payment"], 1);
 
     await assertUtxoConsumed(scriptAddress, lockHash);
   });

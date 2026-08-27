@@ -24,7 +24,7 @@ func TestSignTxWithStakeKey(t *testing.T) {
 		"amount":       []map[string]interface{}{{"unit": "lovelace", "quantity": "2000000000"}},
 	}}
 
-	built, err := bridge.QuickTx.Build(string(yamlBytes), utxos, testProtocolParams())
+	built, err := bridge.QuickTx.Build(string(yamlBytes), utxos, testProtocolParams(), 1)
 	if err != nil {
 		t.Fatalf("build stake registration: %v", err)
 	}

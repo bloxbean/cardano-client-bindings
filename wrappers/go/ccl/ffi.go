@@ -67,7 +67,7 @@ var (
 	cclWalletFromMnemonic func(thread uintptr, mnemonic string, network int32) int32
 	cclWalletGetAddress   func(thread uintptr, mnemonic string, network, index int32) int32
 
-	cclQuicktxBuild func(thread uintptr, yaml, utxos, params, execUnits string) int32
+	cclQuicktxBuild func(thread uintptr, yaml, utxos, params, execUnits string, additionalSigners int32) int32
 )
 
 var (

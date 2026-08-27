@@ -14,7 +14,7 @@ class QuickTx:
     def __init__(self, bridge):
         self._bridge = bridge
 
-    def build(self, txplan_yaml, utxos, protocol_params, exec_units=None):
+    def build(self, txplan_yaml, utxos, protocol_params, exec_units=None, additional_signers=0):
         """Build an unsigned transaction from a TxPlan YAML document.
 
         Args:
@@ -24,6 +24,13 @@ class QuickTx:
             exec_units: optional list of redeemer execution units (``[{"mem","steps"}]``), one per
                 redeemer in transaction order, for Plutus script transactions. Compute these with any
                 evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run the script.
+            additional_signers: number of vkey witnesses the fee must budget beyond those implied by
+                the input UTXOs (one per sender). You know how many keys will sign: ``0`` for a plain
+                payment, ``1`` for a stake or DRep certificate (``["payment", "stake"]`` signing),
+                ``2`` for stake + DRep in one tx, the number of ``sig`` keys for a native-script
+                spend, plus one per plan-level required signer. Undercounting yields a fee the node
+                rejects with ``FeeTooSmallUTxO``; overcounting only overpays (~4,400 lovelace per
+                extra witness).
 
         Returns:
             dict with ``tx_cbor``, ``tx_hash`` and ``fee`` (parsed from the YAML result).
@@ -37,10 +44,11 @@ class QuickTx:
             self._bridge._encode(utxos_json),
             self._bridge._encode(pp_json),
             self._bridge._encode(exec_units_json),
+            int(additional_signers),
         )
         return yaml.safe_load(self._bridge._check(rc))
 
-    def build_with(self, txplan_yaml, provider, sender, evaluator=None):
+    def build_with(self, txplan_yaml, provider, sender, evaluator=None, additional_signers=0):
         """Fetch chain data from ``provider`` (and, optionally, execution units from ``evaluator``),
         then build — in one call.
 
@@ -70,6 +78,8 @@ class QuickTx:
         exec_units = None
         if evaluator is not None:
             # Two-pass: draft (units computed offline by Scalus) → remote evaluate → rebuild.
-            draft = self.build(txplan_yaml, utxos, protocol_params)
+            draft = self.build(txplan_yaml, utxos, protocol_params,
+                               additional_signers=additional_signers)
             exec_units = evaluator.evaluate(draft["tx_cbor"], utxos)
-        return self.build(txplan_yaml, utxos, protocol_params, exec_units)
+        return self.build(txplan_yaml, utxos, protocol_params, exec_units,
+                          additional_signers=additional_signers)

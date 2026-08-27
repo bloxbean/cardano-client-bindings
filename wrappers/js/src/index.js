@@ -280,7 +280,7 @@ export class CclBridge {
       ccl_wallet_get_address: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 
       // QuickTx
-      ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
+      ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
     });
     } catch (e) {
       throw new Error(
@@ -633,9 +633,15 @@ export class QuickTxApi {
    *   execution units (one per redeemer, in transaction order) for Plutus script transactions.
    *   Compute these with any evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run
    *   the script.
+   * @param {number} [additionalSigners=0] - vkey witnesses the fee must budget beyond those implied
+   *   by the input UTXOs (one per sender). You know how many keys will sign: 0 for a plain payment,
+   *   1 for a stake or DRep certificate (["payment", "stake"] signing), 2 for both in one tx, the
+   *   number of sig keys for a native-script spend, plus one per plan-level required signer.
+   *   Undercounting yields a fee the node rejects with FeeTooSmallUTxO; overcounting only overpays
+   *   (~4,400 lovelace per extra witness).
    * @returns {{tx_cbor: string, tx_hash: string, fee: string}}
    */
-  build(txplanYaml, utxos, protocolParams, execUnits = null) {
+  build(txplanYaml, utxos, protocolParams, execUnits = null, additionalSigners = 0) {
     // losslessStringify, not JSON.stringify: a UTxO's lovelace amount or native-token quantity can
     // exceed 2^53, and providers parse those with lossless-json (see providers.js) so they arrive as
     // string-backed LosslessNumber. JSON.stringify would coerce them back through a float64 and
@@ -648,6 +654,7 @@ export class QuickTxApi {
       cstr(losslessStringify(utxos)),
       cstr(losslessStringify(normalizeCostModels(protocolParams))),
       execUnits != null ? cstr(losslessStringify(execUnits)) : null,
+      additionalSigners,
     );
     // The build result is a YAML document.
     return parseYaml(this._b._check(rc));
@@ -667,15 +674,15 @@ export class QuickTxApi {
    * @param {Array<{mem: (number|string), steps: (number|string)}>} [execUnits]
    * @returns {Promise<{tx_cbor: string, tx_hash: string, fee: string}>}
    */
-  async buildWith(txplanYaml, provider, sender, evaluator = null) {
+  async buildWith(txplanYaml, provider, sender, evaluator = null, additionalSigners = 0) {
     const utxos = await provider.utxos(sender);
     const protocolParams = await provider.protocolParams();
     let execUnits = null;
     if (evaluator != null) {
       // Two-pass: draft (units computed offline by Scalus) -> remote evaluate -> rebuild.
-      const draft = this.build(txplanYaml, utxos, protocolParams);
+      const draft = this.build(txplanYaml, utxos, protocolParams, null, additionalSigners);
       execUnits = await evaluator.evaluate(draft.tx_cbor, utxos);
     }
-    return this.build(txplanYaml, utxos, protocolParams, execUnits);
+    return this.build(txplanYaml, utxos, protocolParams, execUnits, additionalSigners);
   }
 }

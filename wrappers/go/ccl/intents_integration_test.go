@@ -64,12 +64,18 @@ func devnetPP(t *testing.T) map[string]interface{} {
 // rejected tx gets a 400 with the ledger error) — that acceptance is the proof.
 func signSubmit(t *testing.T, yaml string, utxos []map[string]interface{}, pp map[string]interface{}, execUnits []map[string]interface{}, keys ...string) string {
 	t.Helper()
+	// The signer count is known here, exactly as it is for a real caller: one witness per key
+	// role beyond the input-implied payment key.
+	additionalSigners := len(keys) - 1
+	if additionalSigners < 0 {
+		additionalSigners = 0
+	}
 	var result *TxResult
 	var err error
 	if execUnits != nil {
-		result, err = bridge.QuickTx.Build(yaml, utxos, pp, execUnits)
+		result, err = bridge.QuickTx.Build(yaml, utxos, pp, additionalSigners, execUnits)
 	} else {
-		result, err = bridge.QuickTx.Build(yaml, utxos, pp)
+		result, err = bridge.QuickTx.Build(yaml, utxos, pp, additionalSigners)
 	}
 	if err != nil {
 		t.Fatalf("build: %v", err)
@@ -153,7 +159,7 @@ func TestIntegrationDRepKeyRequired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get utxos: %v", err)
 	}
-	built, err := bridge.QuickTx.Build(readIntentFixture(t, "drep_registration.yaml"), u, pp)
+	built, err := bridge.QuickTx.Build(readIntentFixture(t, "drep_registration.yaml"), u, pp, 1)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -213,7 +219,7 @@ func TestIntegrationDonation(t *testing.T) {
 		yaml := strings.Replace(baseYaml, "current_treasury_value: 0",
 			"current_treasury_value: "+treasury, 1)
 
-		result, err := bridge.QuickTx.Build(yaml, utxos, pp)
+		result, err := bridge.QuickTx.Build(yaml, utxos, pp, 0)
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -395,7 +401,7 @@ func TestIntegrationVoting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get utxos: %v", err)
 	}
-	proposal, err := bridge.QuickTx.Build(readIntentFixture(t, "governance_proposal.yaml"), u3, pp)
+	proposal, err := bridge.QuickTx.Build(readIntentFixture(t, "governance_proposal.yaml"), u3, pp, 0)
 	if err != nil {
 		t.Fatalf("build proposal: %v", err)
 	}
@@ -637,7 +643,7 @@ func TestIntegrationAikenMintRejects(t *testing.T) {
 		t.Fatalf("get utxos: %v", err)
 	}
 	result, err := bridge.QuickTx.Build(readIntentFixture(t, "plutus/aiken_mint_fail.yaml"),
-		utxos, devnetPP(t), aikenExecUnits())
+		utxos, devnetPP(t), 0, aikenExecUnits())
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -657,12 +663,18 @@ func TestIntegrationAikenMintRejects(t *testing.T) {
 // can assert the sender's exact balance change (the ledger read-back "submit accepted" can't give).
 func signSubmitFee(t *testing.T, yaml string, utxos []map[string]interface{}, pp map[string]interface{}, execUnits []map[string]interface{}, keys ...string) (string, int64) {
 	t.Helper()
+	// The signer count is known here, exactly as it is for a real caller: one witness per key
+	// role beyond the input-implied payment key.
+	additionalSigners := len(keys) - 1
+	if additionalSigners < 0 {
+		additionalSigners = 0
+	}
 	var result *TxResult
 	var err error
 	if execUnits != nil {
-		result, err = bridge.QuickTx.Build(yaml, utxos, pp, execUnits)
+		result, err = bridge.QuickTx.Build(yaml, utxos, pp, additionalSigners, execUnits)
 	} else {
-		result, err = bridge.QuickTx.Build(yaml, utxos, pp)
+		result, err = bridge.QuickTx.Build(yaml, utxos, pp, additionalSigners)
 	}
 	if err != nil {
 		t.Fatalf("build: %v", err)
@@ -1075,7 +1087,7 @@ func TestIntegrationCompose(t *testing.T) {
 	}
 	utxos := append(append([]map[string]interface{}{}, u1...), u2...)
 
-	result, err := bridge.QuickTx.Build(readIntentFixture(t, "compose.yaml"), utxos, pp)
+	result, err := bridge.QuickTx.Build(readIntentFixture(t, "compose.yaml"), utxos, pp, 0)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

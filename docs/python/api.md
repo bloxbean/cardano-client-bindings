@@ -181,8 +181,8 @@ get_address(mnemonic, network, index=0) -> str       # bech32
 ## lib.quicktx
 
 ```python
-build(txplan_yaml, utxos, protocol_params, exec_units=None) -> dict
-build_with(txplan_yaml, provider, sender, evaluator=None) -> dict
+build(txplan_yaml, utxos, protocol_params, exec_units=None, additional_signers=0) -> dict
+build_with(txplan_yaml, provider, sender, evaluator=None, additional_signers=0) -> dict
 ```
 
 Both return `{"tx_cbor": str, "tx_hash": str, "fee": str}`.
@@ -191,10 +191,14 @@ Both return `{"tx_cbor": str, "tx_hash": str, "fee": str}`.
 - `utxos` is a list of CCL `Utxo` dicts: `{"tx_hash", "output_index", "address", "amount": [{"unit", "quantity"}]}`. `unit` is `"lovelace"` or `policyId + assetNameHex`. Pass quantities as **strings** (`"quantity": "100000000"`); Python ints are arbitrary precision, so reading values back (e.g. `int(result["fee"])`) is always exact.
 - `protocol_params` is the CCL `ProtocolParams` dict; unknown fields are ignored.
 - `exec_units` — for Plutus transactions, `[{"mem": ..., "steps": ...}]`, one entry per redeemer in transaction order. When omitted, the native library computes them **offline** with the embedded Scalus evaluator.
+- `additional_signers` budgets vkey witnesses for fee estimation, **beyond those the input UTXOs imply** (one per sender). You know how many keys will sign: `0` for a plain payment, `1` for a stake or DRep certificate (`payment`+`stake` signing), `2` for both in one tx, the number of `sig` keys for a native-script spend, plus one per plan-level required signer. Undercounting yields a fee the node rejects with `FeeTooSmallUTxO`; overcounting only overpays (~4,400 lovelace per extra witness).
 - **`build_with`** fetches UTXOs and protocol parameters from a [provider](providers.md), then builds. With an evaluator it runs two passes: draft build → remote evaluation → rebuild with the returned units.
 
 ```python
-result = lib.quicktx.build(yaml, utxos, params)
+result = lib.quicktx.build(yaml, utxos, params)                      # plain payment: 0 extra signers
+
+stake_result = lib.quicktx.build(yaml, utxos, params,
+                                 additional_signers=1)               # payment+stake signing
 
 plutus_result = lib.quicktx.build(yaml, utxos, params,
                                   exec_units=[{"mem": 2000000, "steps": 500000000}])

@@ -20,13 +20,12 @@ import java.util.function.UnaryOperator;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The fee estimated at build time must cover the transaction after all of its witnesses are
- * attached: the ledger rejects {@code fee < min_fee(signed size)} with {@code FeeTooSmallUTxO}.
- *
- * <p>The witness budget is derived from the plan's certificate intents
- * ({@code QuickTxService#countCertificateWitnesses}); before that, a blanket one-extra-witness
- * budget per tx underestimated the fee of any tx combining certificate roles — the
- * {@link #feeCoversStakeAndDrepCertificatesInOneTx()} case failed by ~4,400 lovelace.
+ * The witness budget is <b>caller-supplied</b> ({@code additional_signers}): the dev signing a
+ * transaction knows how many signers there will be, and passes the count beyond the
+ * input-UTXO-implied witnesses. These tests document the contract per transaction shape: with the
+ * correct count, the built fee covers the fully signed size ({@code fee >= min_fee(signed size)},
+ * the ledger rule behind {@code FeeTooSmallUTxO}); with an undercount, it deliberately does not —
+ * the count is the caller's responsibility, not the bridge's guess.
  */
 class FeeWitnessBudgetTest {
 
@@ -61,64 +60,66 @@ class FeeWitnessBudgetTest {
             """.formatted(FAKE_TX_HASH, sender);
     }
 
-    /** Build the tx offline, apply the given signers, and assert paid fee ≥ min fee of the signed size. */
-    private void assertFeeCoversSignedSize(Tx tx, UnaryOperator<Transaction> signer) throws Exception {
-        assertFeeCoversSignedSize(TxPlan.from(tx).feePayer(sender).toYaml(), utxos(), signer);
-    }
+    private record Built(long fee, Transaction unsigned) {}
 
-    private void assertFeeCoversSignedSize(String yaml, String utxosJson,
-                                           UnaryOperator<Transaction> signer) throws Exception {
+    private Built build(String yaml, String utxosJson, int additionalSigners) throws Exception {
         var result = YamlSerializer.getYamlMapper()
-                .readTree(service.buildTransaction(yaml, utxosJson, protocolParamsJson, null));
-
-        long fee = Long.parseLong(result.get("fee").asText());
-        Transaction unsigned = Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText()));
-        Transaction signed = signer.apply(unsigned);
-
-        long signedSize = signed.serialize().length;
-        long minFee = minFeeA * signedSize + minFeeB;
-        assertTrue(fee >= minFee,
-                "fee " + fee + " must cover min fee " + minFee + " for signed size " + signedSize
-                        + "B (short by " + (minFee - fee) + ")");
+                .readTree(service.buildTransaction(yaml, utxosJson, protocolParamsJson, null, additionalSigners));
+        return new Built(Long.parseLong(result.get("fee").asText()),
+                Transaction.deserialize(HexUtil.decodeHexString(result.get("tx_cbor").asText())));
     }
 
-    /**
-     * Regression: one tx carrying both a stake and a DRep certificate needs three witnesses
-     * (payment + stake + DRep). The old blanket budget covered only two, so the signed tx's min
-     * fee exceeded the paid fee and a node would reject it.
-     */
+    private long minFeeOfSigned(Built built, UnaryOperator<Transaction> signer) throws Exception {
+        long signedSize = signer.apply(built.unsigned()).serialize().length;
+        return minFeeA * signedSize + minFeeB;
+    }
+
+    /** Build with the given count, sign, and assert paid fee ≥ min fee of the signed size. */
+    private void assertFeeCoversSignedSize(Tx tx, int additionalSigners,
+                                           UnaryOperator<Transaction> signer) throws Exception {
+        assertFeeCoversSignedSize(TxPlan.from(tx).feePayer(sender).toYaml(), utxos(), additionalSigners, signer);
+    }
+
+    private void assertFeeCoversSignedSize(String yaml, String utxosJson, int additionalSigners,
+                                           UnaryOperator<Transaction> signer) throws Exception {
+        Built built = build(yaml, utxosJson, additionalSigners);
+        long minFee = minFeeOfSigned(built, signer);
+        assertTrue(built.fee() >= minFee,
+                "fee " + built.fee() + " must cover min fee " + minFee
+                        + " (short by " + (minFee - built.fee()) + ")");
+    }
+
+    /** Payment + one certificate: one signer beyond the fee payer. */
     @Test
-    void feeCoversStakeAndDrepCertificatesInOneTx() throws Exception {
+    void singleCertificate_coveredWithOneAdditionalSigner() throws Exception {
+        Tx tx = new Tx().registerStakeAddress(account.stakeAddress()).from(sender);
+        assertFeeCoversSignedSize(tx, 1, t -> account.signWithStakeKey(account.sign(t)));
+    }
+
+    /** Stake + DRep certificates in one tx: two signers beyond the fee payer. */
+    @Test
+    void combinedCertificates_coveredWithTwoAdditionalSigners() throws Exception {
         Tx tx = new Tx()
                 .registerStakeAddress(account.stakeAddress())
                 .registerDRep(account.drepCredential())
                 .from(sender);
-        assertFeeCoversSignedSize(tx,
+        assertFeeCoversSignedSize(tx, 2,
                 t -> account.signWithDRepKey(account.signWithStakeKey(account.sign(t))));
     }
 
-    /** A single-certificate tx (payment + stake witnesses) must stay covered. */
+    /** Plain payment: no additional signers needed. */
     @Test
-    void feeCoversSingleCertificate() throws Exception {
-        Tx tx = new Tx().registerStakeAddress(account.stakeAddress()).from(sender);
-        assertFeeCoversSignedSize(tx, t -> account.signWithStakeKey(account.sign(t)));
-    }
-
-    /** A plain payment (payment witness only) must stay covered with a zero extra-witness budget. */
-    @Test
-    void feeCoversPlainPayment() throws Exception {
+    void plainPayment_coveredWithZeroAdditionalSigners() throws Exception {
         Tx tx = new Tx().payToAddress(account.enterpriseAddress(), Amount.ada(5)).from(sender);
-        assertFeeCoversSignedSize(tx, account::sign);
+        assertFeeCoversSignedSize(tx, 0, account::sign);
     }
 
     /**
-     * Regression (caught live by the DevKit suite): spending from a native-script address whose
-     * UTXO covers the whole transaction selects no vkey-owned inputs, so CCL's UTXO-derived signer
-     * count is zero — the script's {@code sig} witness must be budgeted from the plan's script, or
-     * the node rejects with {@code FeeTooSmallUTxO} (observed short by exactly one witness).
+     * Spending from a native-script address whose UTXO covers the whole tx: the inputs imply no
+     * vkey signers at all, so the script's {@code sig} key is the one (additional) signer.
      */
     @Test
-    void feeCoversNativeScriptSpendFromScriptOnlyInputs() throws Exception {
+    void nativeScriptSpendFromScriptOnlyInputs_coveredWithOneAdditionalSigner() throws Exception {
         byte[] paymentKeyHash = new com.bloxbean.cardano.client.address.Address(sender)
                 .getPaymentCredentialHash().orElseThrow();
         var script = new com.bloxbean.cardano.client.transaction.spec.script.ScriptPubkey(
@@ -153,21 +154,17 @@ class FeeWitnessBudgetTest {
                     - type: native_script
                       script_hex: %s
             """.formatted(sender, sender, sender, scriptTxHash, sender, scriptHex);
-        // Only the script-address UTXO is supplied, so the built tx has no vkey-owned inputs.
         String scriptOnlyUtxos = """
             [{"tx_hash":"%s","output_index":0,"address":"%s",
               "amount":[{"unit":"lovelace","quantity":"10000000"}]}]
             """.formatted(scriptTxHash, scriptAddress);
 
-        assertFeeCoversSignedSize(yaml, scriptOnlyUtxos, account::sign);
+        assertFeeCoversSignedSize(yaml, scriptOnlyUtxos, 1, account::sign);
     }
 
-    /**
-     * Plan-level {@code required_signers} are stamped into the tx body and each must be witnessed,
-     * but CCL's fee estimation never counts them — the budget has to.
-     */
+    /** Plan-level required_signers count toward the total the caller must supply. */
     @Test
-    void feeCoversRequiredSigners() throws Exception {
+    void requiredSigners_countTowardCallerSuppliedTotal() throws Exception {
         Account cosigner = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 5);
         String cosignerKeyHash = HexUtil.encodeHexString(
                 new com.bloxbean.cardano.client.address.Address(cosigner.baseAddress())
@@ -190,6 +187,25 @@ class FeeWitnessBudgetTest {
                           quantity: "3000000"
             """.formatted(sender, cosignerKeyHash, sender, account.enterpriseAddress());
 
-        assertFeeCoversSignedSize(yaml, utxos(), t -> cosigner.sign(account.sign(t)));
+        assertFeeCoversSignedSize(yaml, utxos(), 1, t -> cosigner.sign(account.sign(t)));
+    }
+
+    /**
+     * Documents the contract's sharp edge: an undercounted budget produces a fee below the signed
+     * transaction's min fee — the node would reject it with {@code FeeTooSmallUTxO}. Supplying the
+     * correct count is the caller's responsibility.
+     */
+    @Test
+    void undercountedSigners_yieldInsufficientFee() throws Exception {
+        Tx tx = new Tx()
+                .registerStakeAddress(account.stakeAddress())
+                .registerDRep(account.drepCredential())
+                .from(sender);
+        Built built = build(TxPlan.from(tx).feePayer(sender).toYaml(), utxos(), 0);
+        long minFee = minFeeOfSigned(built,
+                t -> account.signWithDRepKey(account.signWithStakeKey(account.sign(t))));
+        assertTrue(built.fee() < minFee,
+                "expected an undercounted budget to underpay (fee " + built.fee()
+                        + " vs min fee " + minFee + ")");
     }
 }

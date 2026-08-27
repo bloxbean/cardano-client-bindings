@@ -104,7 +104,7 @@ func TestBuildWithOffline(t *testing.T) {
 
 	provider := NewYaciProvider(srv.URL)
 	yaml := quickTxYaml(sender, intentSender2, "5000000")
-	res, err := bridge.QuickTx.BuildWith(yaml, provider, sender)
+	res, err := bridge.QuickTx.BuildWith(yaml, provider, sender, 0)
 	if err != nil {
 		t.Fatalf("BuildWith: %v", err)
 	}

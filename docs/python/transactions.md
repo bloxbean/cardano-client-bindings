@@ -55,6 +55,8 @@ with CclLib() as lib:
 | `pool_registration` / `pool_update` / `pool_retirement` | `["payment", "stake"]` when the pool is keyed to the account's stake key |
 
 A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+The same table gives the fee's witness budget: pass `additional_signers = len(keys) - 1` to the build (the input UTXOs already cover the payment key). For a native-script spend whose only inputs sit at the script address, pass the number of the script's `sig` keys instead.
+
 
 ## Worked example: register and delegate stake
 
@@ -70,7 +72,7 @@ transaction:
         - type: stake_registration
           stake_address: {account["stake_address"]}
 """
-reg = lib.quicktx.build_with(stake_yaml, provider, sender)
+reg = lib.quicktx.build_with(stake_yaml, provider, sender, additional_signers=1)
 signed_reg = lib.account.sign_tx_with_keys(mnemonic, reg["tx_cbor"], ["payment", "stake"], Network.TESTNET)
 # submit signed_reg; wait for inclusion before the next step
 
@@ -84,7 +86,7 @@ transaction:
           stake_address: {account["stake_address"]}
           pool_id: pool1...
 """
-deleg = lib.quicktx.build_with(deleg_yaml, provider, sender)
+deleg = lib.quicktx.build_with(deleg_yaml, provider, sender, additional_signers=1)
 signed_deleg = lib.account.sign_tx_with_keys(mnemonic, deleg["tx_cbor"], ["payment", "stake"], Network.TESTNET)
 ```
 
@@ -107,7 +109,7 @@ transaction:
           anchor_url: https://example.com/meta.json
           anchor_hash: {anchor_hash}
 """
-reg = lib.quicktx.build_with(drep_yaml, provider, sender)
+reg = lib.quicktx.build_with(drep_yaml, provider, sender, additional_signers=1)
 signed = lib.account.sign_tx_with_keys(mnemonic, reg["tx_cbor"], ["payment", "drep"], Network.TESTNET)
 ```
 

@@ -348,7 +348,7 @@ func TestIntegrationSimpleADATransfer(t *testing.T) {
 	}
 
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "5000000")
-	result, err := bridge.QuickTx.Build(yaml, utxos, pp)
+	result, err := bridge.QuickTx.Build(yaml, utxos, pp, 0)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -412,7 +412,7 @@ transaction:
               quantity: "2000000"
 `, sender.BaseAddress, r1.BaseAddress, r2.BaseAddress)
 
-	result, err := bridge.QuickTx.Build(yaml, utxos, pp)
+	result, err := bridge.QuickTx.Build(yaml, utxos, pp, 0)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestIntegrationInsufficientFunds(t *testing.T) {
 	pp, _ := devkitGetProtocolParams()
 
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "100000000")
-	if _, err := bridge.QuickTx.Build(yaml, utxos, pp); err == nil {
+	if _, err := bridge.QuickTx.Build(yaml, utxos, pp, 0); err == nil {
 		t.Fatal("expected insufficient funds error")
 	}
 }
@@ -467,7 +467,7 @@ func TestIntegrationBuildWith(t *testing.T) {
 
 	provider := NewYaciProvider("") // local DevKit cluster
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "5000000")
-	result, err := bridge.QuickTx.BuildWith(yaml, provider, sender.BaseAddress)
+	result, err := bridge.QuickTx.BuildWith(yaml, provider, sender.BaseAddress, 0)
 	if err != nil {
 		t.Fatalf("BuildWith: %v", err)
 	}

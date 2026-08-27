@@ -5,7 +5,7 @@ pub mod providers;
 
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_int};
 use std::ptr;
 
 use serde_json::Value;
@@ -736,12 +736,20 @@ impl<'a> QuickTxApi<'a> {
     /// array of `{mem, steps}` (one per redeemer, in transaction order). Compute them with any
     /// evaluator (Ogmios, Blockfrost, Aiken, Scalus); the bridge does not run the script. Pass
     /// `None` for non-script transactions.
+    ///
+    /// `additional_signers` budgets vkey witnesses for fee estimation, beyond those the input
+    /// UTXOs imply (one per sender). You know how many keys will sign: `0` for a plain payment,
+    /// `1` for a stake or DRep certificate (payment+stake signing), `2` for both in one tx, the
+    /// number of `sig` keys for a native-script spend, plus one per plan-level required signer.
+    /// Undercounting yields a fee the node rejects with `FeeTooSmallUTxO`; overcounting only
+    /// overpays (~4,400 lovelace per extra witness).
     pub fn build(
         &self,
         yaml: &str,
         utxos: &Value,
         protocol_params: &Value,
         exec_units: Option<&Value>,
+        additional_signers: u32,
     ) -> Result<TxResult> {
         let utxos_json = serde_json::to_string(utxos).map_err(|e| CclError {
             code: error_codes::CCL_ERROR_SERIALIZATION,
@@ -776,6 +784,7 @@ impl<'a> QuickTxApi<'a> {
                 utxos_cs.as_ptr(),
                 pp_cs.as_ptr(),
                 exec_ptr,
+                additional_signers as c_int,
             )
         };
         // The build result is a YAML document.

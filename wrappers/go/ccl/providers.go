@@ -330,7 +330,10 @@ func (e *BlockfrostEvaluator) Evaluate(txCbor string, _ []map[string]interface{}
 // then builds — in one call. With an evaluator it runs a two-pass (draft -> evaluate -> rebuild);
 // without one the native library's offline Scalus default computes any script units. To supply units
 // yourself, call Build directly.
-func (q *QuickTxApi) BuildWith(yaml string, provider ChainDataProvider, sender string, evaluator ...TransactionEvaluator) (*TxResult, error) {
+//
+// additionalSigners budgets fee witnesses beyond those implied by the input UTXOs — see
+// QuickTxApi.Build.
+func (q *QuickTxApi) BuildWith(yaml string, provider ChainDataProvider, sender string, additionalSigners int, evaluator ...TransactionEvaluator) (*TxResult, error) {
 	utxos, err := provider.Utxos(sender)
 	if err != nil {
 		return nil, fmt.Errorf("provider utxos: %w", err)
@@ -341,7 +344,7 @@ func (q *QuickTxApi) BuildWith(yaml string, provider ChainDataProvider, sender s
 	}
 	if len(evaluator) > 0 && evaluator[0] != nil {
 		// Two-pass: draft (units computed offline by Scalus) -> remote evaluate -> rebuild.
-		draft, err := q.Build(yaml, utxos, pp)
+		draft, err := q.Build(yaml, utxos, pp, additionalSigners)
 		if err != nil {
 			return nil, err
 		}
@@ -349,7 +352,7 @@ func (q *QuickTxApi) BuildWith(yaml string, provider ChainDataProvider, sender s
 		if err != nil {
 			return nil, fmt.Errorf("evaluate: %w", err)
 		}
-		return q.Build(yaml, utxos, pp, units)
+		return q.Build(yaml, utxos, pp, additionalSigners, units)
 	}
-	return q.Build(yaml, utxos, pp)
+	return q.Build(yaml, utxos, pp, additionalSigners)
 }

@@ -56,6 +56,8 @@ const txHash = (await resp.text()).trim().replace(/"/g, "");
 | `pool_registration` / `pool_update` / `pool_retirement` | `["payment", "stake"]` when the pool is keyed to the account's stake key |
 
 A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+The same table gives the fee's witness budget: pass `additional_signers = len(keys) - 1` to the build (the input UTXOs already cover the payment key). For a native-script spend whose only inputs sit at the script address, pass the number of the script's `sig` keys instead.
+
 
 ## Worked example: register and delegate stake
 
@@ -71,7 +73,7 @@ transaction:
         - type: stake_registration
           stake_address: ${account.stake_address}
 `;
-const reg = await bridge.quicktx.buildWith(stakeYaml, provider, sender);
+const reg = await bridge.quicktx.buildWith(stakeYaml, provider, sender, null, 1);
 const signedReg = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, reg.tx_cbor, ["payment", "stake"]);
 await submit(signedReg);          // wait for inclusion before the next step
 
@@ -85,7 +87,7 @@ transaction:
           stake_address: ${account.stake_address}
           pool_id: pool1...
 `;
-const deleg = await bridge.quicktx.buildWith(delegYaml, provider, sender);
+const deleg = await bridge.quicktx.buildWith(delegYaml, provider, sender, null, 1);
 const signedDeleg = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, deleg.tx_cbor, ["payment", "stake"]);
 await submit(signedDeleg);
 ```
@@ -109,7 +111,7 @@ transaction:
           anchor_url: https://example.com/meta.json
           anchor_hash: ${anchorHash}
 `;
-const reg = await bridge.quicktx.buildWith(drepYaml, provider, sender);
+const reg = await bridge.quicktx.buildWith(drepYaml, provider, sender, null, 1);
 const signedReg = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, reg.tx_cbor, ["payment", "drep"]);
 await submit(signedReg);
 ```
@@ -131,7 +133,7 @@ transaction:
           anchor_url: https://example.com/meta.json
           anchor_hash: ${anchorHash}
 `;
-const vote = await bridge.quicktx.buildWith(voteYaml, provider, sender);
+const vote = await bridge.quicktx.buildWith(voteYaml, provider, sender, null, 1);
 const signedVote = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, vote.tx_cbor, ["payment", "drep"]);
 ```
 
