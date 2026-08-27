@@ -1,7 +1,6 @@
 package com.bloxbean.cardano.bridge.api.account;
 
 import com.bloxbean.cardano.bridge.util.NetworkMapper;
-import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.common.model.Network;
 
 import java.util.LinkedHashMap;
@@ -33,24 +32,10 @@ public final class ManagedAccountService {
         }
     }
 
-    static final class ManagedAccount {
-        final Account account;
-        final int networkId;
-        final int accountIndex;
-        final int addressIndex;
-
-        ManagedAccount(Account account, int networkId, int accountIndex, int addressIndex) {
-            this.account = account;
-            this.networkId = networkId;
-            this.accountIndex = accountIndex;
-            this.addressIndex = addressIndex;
-        }
-    }
-
     // Handles start at 1: 0 is never valid, so a zero-initialized out-parameter can't alias a
     // real account.
     private static final AtomicLong nextHandle = new AtomicLong(1);
-    private static final ConcurrentHashMap<Long, ManagedAccount> accounts = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Long, Account> accounts = new ConcurrentHashMap<>();
 
     private ManagedAccountService() {}
 
@@ -70,9 +55,10 @@ public final class ManagedAccountService {
         if (accountIndex < 0 || addressIndex < 0) {
             throw new IllegalArgumentException("Account and address indices must be >= 0");
         }
-        Account account = Account.createFromMnemonic(network, mnemonic, accountIndex, addressIndex);
+        var cclAccount = com.bloxbean.cardano.client.account.Account
+                .createFromMnemonic(network, mnemonic, accountIndex, addressIndex);
         long handle = nextHandle.getAndIncrement();
-        accounts.put(handle, new ManagedAccount(account, networkId, accountIndex, addressIndex));
+        accounts.put(handle, new Account(cclAccount, networkId, accountIndex, addressIndex));
         return handle;
     }
 
@@ -81,15 +67,15 @@ public final class ManagedAccountService {
      * private key material.
      */
     public static Map<String, Object> info(long handle) {
-        ManagedAccount managed = lookup(handle);
+        Account managed = lookup(handle);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("base_address", managed.account.baseAddress());
-        result.put("enterprise_address", managed.account.enterpriseAddress());
-        result.put("stake_address", managed.account.stakeAddress());
+        result.put("base_address", managed.cclAccount.baseAddress());
+        result.put("enterprise_address", managed.cclAccount.enterpriseAddress());
+        result.put("stake_address", managed.cclAccount.stakeAddress());
         result.put("network", managed.networkId);
         result.put("account_index", managed.accountIndex);
         result.put("address_index", managed.addressIndex);
-        result.put("drep_id", managed.account.drepId());
+        result.put("drep_id", managed.cclAccount.drepId());
         return result;
     }
 
@@ -122,25 +108,25 @@ public final class ManagedAccountService {
         if ((roleMask & ~ALL_ROLES) != 0) {
             throw new IllegalArgumentException("Unknown bits in role mask: " + roleMask);
         }
-        ManagedAccount managed = lookup(handle);
+        Account managed = lookup(handle);
         try {
             com.bloxbean.cardano.client.transaction.spec.Transaction tx =
                     com.bloxbean.cardano.client.transaction.spec.Transaction.deserialize(
                             com.bloxbean.cardano.client.util.HexUtil.decodeHexString(txCborHex.trim()));
             if ((roleMask & ROLE_PAYMENT) != 0) {
-                tx = managed.account.sign(tx);
+                tx = managed.cclAccount.sign(tx);
             }
             if ((roleMask & ROLE_STAKE) != 0) {
-                tx = managed.account.signWithStakeKey(tx);
+                tx = managed.cclAccount.signWithStakeKey(tx);
             }
             if ((roleMask & ROLE_DREP) != 0) {
-                tx = managed.account.signWithDRepKey(tx);
+                tx = managed.cclAccount.signWithDRepKey(tx);
             }
             if ((roleMask & ROLE_COMMITTEE_COLD) != 0) {
-                tx = managed.account.signWithCommitteeColdKey(tx);
+                tx = managed.cclAccount.signWithCommitteeColdKey(tx);
             }
             if ((roleMask & ROLE_COMMITTEE_HOT) != 0) {
-                tx = managed.account.signWithCommitteeHotKey(tx);
+                tx = managed.cclAccount.signWithCommitteeHotKey(tx);
             }
             return tx.serializeToHex();
         } catch (RuntimeException e) {
@@ -160,8 +146,8 @@ public final class ManagedAccountService {
         return accounts.size();
     }
 
-    static ManagedAccount lookup(long handle) {
-        ManagedAccount managed = accounts.get(handle);
+    static Account lookup(long handle) {
+        Account managed = accounts.get(handle);
         if (managed == null) {
             throw new UnknownHandleException(handle);
         }
