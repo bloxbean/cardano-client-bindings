@@ -125,7 +125,7 @@ with CclLib() as lib:                                # context manager; or lib.c
                   quantity: "5000000"
     """
     result = lib.quicktx.build_with(yaml, provider, account["base_address"])
-    # or fully offline: lib.quicktx.build(yaml, utxos, protocol_params, exec_units=None)
+    # or fully offline: lib.quicktx.build(yaml, utxos, protocol_params, exec_units=None, additional_signers=0)
     # result = {"tx_cbor": str, "tx_hash": str, "fee": str}
 
     signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
@@ -133,8 +133,8 @@ with CclLib() as lib:                                # context manager; or lib.c
 ```
 
 Go: `bridge.QuickTx.Build(yaml, utxos, params)` / `bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, txCbor)`.
-JS: `bridge.quicktx.build(yaml, utxos, params)` / `bridge.account.signTx(mnemonic, TESTNET, 0, 0, txCbor)`.
-Rust: `bridge.quicktx().build(&yaml, &utxos, &params)?` / `bridge.account().sign_tx(&mnemonic, TESTNET, 0, 0, &tx_cbor)?`.
+JS: `bridge.quicktx.build(yaml, utxos, params, null, additionalSigners)` / `bridge.account.signTx(mnemonic, TESTNET, 0, 0, txCbor)`.
+Rust: `bridge.quicktx().build(&yaml, &utxos, &params, None, additional_signers)?` / Go: `bridge.QuickTx.Build(yaml, utxos, pp, additionalSigners)` — the count is **positional** in Go/Rust.
 
 **Argument-order gotcha:** Python's `sign_tx(mnemonic, tx_cbor, network, ...)` puts the transaction *before* the network; Go/JS/Rust use `(mnemonic, network, account_index, address_index, tx_cbor)`.
 
@@ -271,6 +271,8 @@ Multiple `- tx:` entries compose into one transaction (set `context.fee_payer`; 
 
 Missing witness ⇒ node rejects with `MissingVKeyWitnessesUTXOW`. Available roles: `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`.
 
+**The same table gives the fee's witness budget (`additional_signers`) — ALWAYS pass it on cert/script builds:** `additional_signers = len(keys) − 1` (the input UTXOs already cover the payment key). So: `0` payment-only, `1` one certificate role, `2` stake+DRep in one tx. Two exceptions: a native-script spend whose only inputs sit at the script address needs the script's `sig`-key count (payment key isn't input-implied there), and each plan-level `required_signer` adds one. Undercounting → node rejects with `FeeTooSmallUTxO`; overcounting only overpays ~4,400 lovelace per witness.
+
 ## 8. API groups (complete surface)
 
 - **account**: `create(network)`, `from_mnemonic(mnemonic, network, account_index=0, address_index=0)` → `{mnemonic, base_address, enterprise_address, stake_address}`; `get_private_key` (128-hex extended key — first 64 hex chars are the raw Ed25519 key for `crypto.sign`), `get_public_key`, `get_drep_id`, `sign_tx`, `sign_tx_with_keys`.
@@ -281,7 +283,7 @@ Missing witness ⇒ node rejects with `MissingVKeyWitnessesUTXOW`. Available rol
 - **script**: `native_from_json(json)` → `{policy_id, script_hash, cbor_hex}`; `hash(cbor_hex, script_type)` (0=native, 1..3=PlutusV1..V3).
 - **gov**: `drep_key_from_mnemonic` → `{drep_id, verification_key, verification_key_hash}`; `committee_cold_key_from_mnemonic`, `committee_hot_key_from_mnemonic`.
 - **wallet**: `create(network)`, `from_mnemonic`, `get_address(mnemonic, network, index)` — HD wallet, sequential addresses.
-- **quicktx**: `build(yaml, utxos, protocol_params, exec_units=None)`, `build_with(yaml, provider, sender, evaluator=None)` → `{tx_cbor, tx_hash, fee}` (unsigned).
+- **quicktx**: `build(yaml, utxos, protocol_params, exec_units=None, additional_signers=0)`, `build_with(yaml, provider, sender, evaluator=None, additional_signers=0)` → `{tx_cbor, tx_hash, fee}` (unsigned). Go/Rust take the count positionally.
 
 ## 9. Errors
 
