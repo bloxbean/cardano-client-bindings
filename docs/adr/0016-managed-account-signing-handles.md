@@ -1,6 +1,6 @@
 # ADR-0016: Encapsulate signing secrets in managed Account handles
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-26
 - **Deciders:** bloxbean maintainers
 

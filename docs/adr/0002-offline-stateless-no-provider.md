@@ -1,8 +1,14 @@
 # ADR-0002: Offline, stateless bridge — caller-supplied chain data, no HTTP provider in libccl
 
-- **Status:** Accepted
+- **Status:** Accepted — statelessness narrowed by [ADR-0016](0016-managed-account-signing-handles.md)
 - **Date:** 2026-02-11
 - **Deciders:** bloxbean maintainers
+
+> **Update (2026-08-28, ADR-0016):** "stateless" below is narrowed, not repealed. Managed Account
+> handles ([ADR-0016](0016-managed-account-signing-handles.md)) are a deliberate, caller-created
+> exception: `libccl` may hold in-memory signing capabilities (account-level keys) behind opaque
+> handles, scoped to one isolate and released by an explicit `close`. Everything else stands —
+> no network calls, no providers, no configuration, caller-supplied chain data, no submission.
 
 ## Context
 
