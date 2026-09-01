@@ -69,8 +69,8 @@ Predicate methods (`validate`, `validate_mnemonic`, `verify`) return `bool` and 
 
 ## bridge.accounts() — managed accounts
 
-Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
-signing path — the mnemonic-per-call `bridge.account()` API remains for compatibility.
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic — the only
+account API.
 
 ```rust
 use ccl::accounts::SigningRole;

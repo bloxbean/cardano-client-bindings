@@ -25,8 +25,6 @@ bridge.Crypto   // *CryptoApi
 bridge.Tx       // *TxApi
 bridge.Plutus   // *PlutusApi
 bridge.Script   // *ScriptApi
-bridge.Gov      // *GovApi
-bridge.Wallet   // *WalletApi
 bridge.QuickTx  // *QuickTxApi
 ```
 
@@ -82,8 +80,8 @@ Predicate methods (`Address.Validate`, `Crypto.ValidateMnemonic`, `Crypto.Verify
 
 ## bridge.Accounts — managed accounts
 
-Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
-signing path — the mnemonic-per-call `bridge.Account` API remains for compatibility.
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic — the only
+account API.
 
 ```go
 acct, err := bridge.Accounts.FromMnemonic(mnemonic, ccl.Testnet, 0, 0)  // or bridge.Accounts.Create(...)

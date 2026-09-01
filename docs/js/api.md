@@ -71,8 +71,8 @@ Validation-style methods (`address.validate`, `crypto.validateMnemonic`, `crypto
 
 ## bridge.accounts — managed accounts
 
-Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
-signing path — the mnemonic-per-call `bridge.account` API remains for compatibility.
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic — the only
+account API.
 
 ```javascript
 import { SigningRole } from '@bloxbean/cardano-client-lib';

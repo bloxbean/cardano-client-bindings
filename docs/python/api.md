@@ -63,8 +63,8 @@ Predicate methods (`address.validate`, `crypto.validate_mnemonic`, `crypto.verif
 
 ## lib.accounts — managed accounts
 
-Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
-signing path — the mnemonic-per-call `lib.account` API remains for compatibility.
+Handle-based accounts (ADR-0016): open once, then operate without the mnemonic — the only
+account API.
 
 ```python
 from ccl import SigningRole, CclInvalidHandleError

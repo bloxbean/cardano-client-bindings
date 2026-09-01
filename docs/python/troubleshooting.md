@@ -48,7 +48,7 @@ The `network` argument is required and validated — there is no default (a sile
 
 ### `tx.from_json` / `plutus.data_to_json` / `plutus.data_from_json` fail
 
-Known limitation of the current native library (GraalVM reflection configuration gaps). Use the working alternatives: `account.sign_tx` for signing, `plutus.data_hash` for datum hashing.
+Known limitation of the current native library (GraalVM reflection configuration gaps). Use the working alternatives: a managed account's `sign_tx` for signing, `plutus.data_hash` for datum hashing.
 
 ## Building the native library from source
 

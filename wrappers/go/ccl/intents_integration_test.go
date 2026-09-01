@@ -200,7 +200,7 @@ func TestIntegrationDRepKeyRequired(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	// Sign with the payment key ONLY (ccl_account_sign_tx), omitting the DRep-key witness.
+	// Sign with the payment key ONLY (RolePayment), omitting the DRep-key witness.
 	signedPaymentOnly := intentSign(t, built.TxCbor, "payment")
 	if _, err := devkitSubmitTx(signedPaymentOnly); err == nil {
 		t.Fatal("the node accepted a DRep registration signed with the payment key only; " +

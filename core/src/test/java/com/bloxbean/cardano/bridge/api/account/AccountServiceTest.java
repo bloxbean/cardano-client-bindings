@@ -132,8 +132,8 @@ class AccountServiceTest {
         return result.get("tx_cbor").asText();
     }
 
-    /** Sign via the mnemonic-per-call mechanism (what ccl_account_sign_tx_multi does). */
-    private String signLegacy(String txCborHex, boolean stake, boolean drep) throws Exception {
+    /** Reference signature straight from a mnemonic-backed CCL Account (the parity oracle). */
+    private String signReference(String txCborHex, boolean stake, boolean drep) throws Exception {
         Account account = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
         var tx = com.bloxbean.cardano.client.transaction.spec.Transaction.deserialize(
                 com.bloxbean.cardano.client.util.HexUtil.decodeHexString(txCborHex));
@@ -148,13 +148,13 @@ class AccountServiceTest {
         long handle = open(0, 0);
         String unsigned = unsignedTx();
 
-        assertEquals(signLegacy(unsigned, false, false),
+        assertEquals(signReference(unsigned, false, false),
                 AccountService.signTx(handle, unsigned,
                         AccountService.ROLE_PAYMENT));
-        assertEquals(signLegacy(unsigned, true, false),
+        assertEquals(signReference(unsigned, true, false),
                 AccountService.signTx(handle, unsigned,
                         AccountService.ROLE_PAYMENT | AccountService.ROLE_STAKE));
-        assertEquals(signLegacy(unsigned, true, true),
+        assertEquals(signReference(unsigned, true, true),
                 AccountService.signTx(handle, unsigned,
                         AccountService.ROLE_PAYMENT | AccountService.ROLE_STAKE
                                 | AccountService.ROLE_DREP));

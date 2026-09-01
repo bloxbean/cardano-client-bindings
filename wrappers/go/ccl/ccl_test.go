@@ -81,7 +81,7 @@ func TestAccountGetKeys(t *testing.T) {
 	}
 }
 
-func TestAccountGetDRepID(t *testing.T) {
+func TestAccountDRepID(t *testing.T) {
 	created := createTestAccount(t, Mainnet)
 
 	if !strings.HasPrefix(created.DRepID, "drep1") {

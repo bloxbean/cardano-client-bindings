@@ -311,7 +311,7 @@ describe("Intents Integration (DevKit)", () => {
   });
 
   // Mirrors Go TestIntegrationDRepKeyRequired (negative). A DRep-registration certificate must be
-  // witnessed by the DRep key, so signing with the payment key alone (ccl_account_sign_tx, no drep
+  // witnessed by the DRep key, so signing with the payment key alone (SigningRole.PAYMENT only, no drep
   // witness) must be rejected by the node (MissingVKeyWitnessesUTXOW). This proves the extra witness
   // the stake role adds is genuinely required — not cosmetic — complementing the positive
   // registration test above.
