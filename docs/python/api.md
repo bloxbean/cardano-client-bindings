@@ -27,8 +27,6 @@ Constructing loads the native library (see [resolution order](troubleshooting.md
 class Network(IntEnum):
     MAINNET = 0
     TESTNET = 1
-    PREPROD = 2
-    PREVIEW = 3
 ```
 
 Every method that derives keys (`account`, `wallet`, `gov`, signing) requires a `network` argument. Omitting it raises `TypeError`; an out-of-range value raises `ValueError` before any native call. Being an `IntEnum`, plain ints 0–3 are accepted too, but prefer the enum.

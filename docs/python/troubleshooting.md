@@ -36,7 +36,7 @@ Something called the instance after `close()` (or after its `with` block ended).
 
 ### `TypeError` / `ValueError` about `network`
 
-The `network` argument is required and validated — there is no default (a silent mainnet default was removed deliberately). Pass `Network.MAINNET/TESTNET/PREPROD/PREVIEW`.
+The `network` argument is required and validated — there is no default (a silent mainnet default was removed deliberately). Pass `Network.MAINNET` or `Network.TESTNET`.
 
 ### `CCL Error -10: ...` from `quicktx.build`
 

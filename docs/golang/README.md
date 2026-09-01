@@ -104,8 +104,6 @@ A `*Bridge` is safe to share across goroutines: all native calls are funneled to
 ```go
 ccl.Mainnet // 0
 ccl.Testnet // 1
-ccl.Preprod // 2
-ccl.Preview // 3
 ```
 
 Every key-derivation method takes a typed `ccl.Network` — passing a bare `int` is a compile error. Note the values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Mainnet = 0`, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api.md#networks).

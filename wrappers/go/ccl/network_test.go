@@ -60,8 +60,6 @@ func TestNetworkString(t *testing.T) {
 	}{
 		{Mainnet, "mainnet"},
 		{Testnet, "testnet"},
-		{Preprod, "preprod"},
-		{Preview, "preview"},
 		{Network(42), "Network(42)"},
 		{Network(-1), "Network(-1)"},
 	}
@@ -73,12 +71,12 @@ func TestNetworkString(t *testing.T) {
 }
 
 func TestNetworkValid(t *testing.T) {
-	for _, n := range []Network{Mainnet, Testnet, Preprod, Preview} {
+	for _, n := range []Network{Mainnet, Testnet} {
 		if !n.Valid() {
 			t.Errorf("%s should be Valid()", n)
 		}
 	}
-	for _, n := range []Network{Network(-1), Network(4), Network(99)} {
+	for _, n := range []Network{Network(-1), Network(2), Network(3), Network(99)} {
 		if n.Valid() {
 			t.Errorf("Network(%d) should not be Valid()", int(n))
 		}

@@ -81,7 +81,7 @@ A `*Bridge` exposes these namespaces (all offline operations):
 `bridge.Account`, `bridge.Address`, `bridge.Crypto`, `bridge.Tx`, `bridge.Plutus`,
 `bridge.Script`, `bridge.Gov`, `bridge.Wallet`, `bridge.QuickTx`.
 
-Networks are the `ccl.Network` type: `ccl.Mainnet`, `ccl.Testnet`, `ccl.Preprod`, `ccl.Preview`.
+Networks are the `ccl.Network` type: `ccl.Mainnet` or `ccl.Testnet`.
 
 > **These are CCL's enum ordinals, not Cardano's on-chain network id.** `Mainnet` is 0 and
 > `Testnet` is 1, which is the *inverse* of the on-chain encoding (0 = testnet, 1 = mainnet).

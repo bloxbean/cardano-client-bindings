@@ -35,9 +35,9 @@ impl Bridge {
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Network { Mainnet, Testnet, Preprod, Preview }
+pub enum Network { Mainnet, Testnet }
 
-impl Network { pub fn as_i32(self) -> i32 }  // Mainnet=0, Testnet=1, Preprod=2, Preview=3
+impl Network { pub fn as_i32(self) -> i32 }  // Mainnet=0, Testnet=1
 ```
 
 > **Gotcha:** the ordinals are CCL enum values, **not** Cardano's on-chain network id — the two are inverted for mainnet/testnet (`Mainnet` = 0, but a mainnet address's on-chain `network_id` is `1`). The `network_id` field returned by `address().info()` is the genuine on-chain value; never map it back to a `Network`.

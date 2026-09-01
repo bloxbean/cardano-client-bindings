@@ -40,8 +40,6 @@ class CclLib:
     # id (MAINNET is 0 here, but a mainnet address's on-chain network_id is 1); see ccl/network.py.
     MAINNET = Network.MAINNET
     TESTNET = Network.TESTNET
-    PREPROD = Network.PREPROD
-    PREVIEW = Network.PREVIEW
 
     @staticmethod
     def _lib_filename():

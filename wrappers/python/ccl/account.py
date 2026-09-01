@@ -6,7 +6,7 @@ from ccl.network import Network
 class Account:
     """Account namespace for CCL operations.
 
-    Every call takes a ``network`` — a :class:`ccl.Network` (or a plain int 0-3). It is CCL's enum
+    Every call takes a ``network`` — a :class:`ccl.Network` (or a plain int 0 or 1). It is CCL's enum
     ordinal, **not** Cardano's on-chain network id: ``Network.MAINNET`` is ``0``, yet the address it
     derives reports ``network_id == 1``. It is required on purpose — a library that derives keys and
     signs transactions must not guess, least of all guess mainnet.

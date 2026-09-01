@@ -33,7 +33,7 @@ public final class AccountApi {
      * public data with {@code ccl_account_get_info}).
      *
      * @param thread       the current isolate thread
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
      * @param accountIndex HD account index (typically 0)
      * @param addressIndex HD address index (typically 0)
@@ -79,7 +79,7 @@ public final class AccountApi {
      * deliberately, via {@code ccl_account_export_recovery_phrase}.
      *
      * @param thread    the current isolate thread
-     * @param networkId 0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId 0=mainnet, 1=testnet
      * @param outHandle receives the opaque account handle (must be non-null)
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT} / {@link ErrorCodes#CCL_ERROR_GENERAL}

@@ -106,7 +106,7 @@ The native library is **offline and stateless** — it derives, builds, signs, h
 ## Networks
 
 ```rust
-pub enum Network { Mainnet, Testnet, Preprod, Preview }
+pub enum Network { Mainnet, Testnet }
 ```
 
 Every key-derivation method takes a typed `Network` — there is no integer API. Note the underlying values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Mainnet` → ordinal 0, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api.md#networks).

@@ -17,7 +17,7 @@ import java.util.Map;
  * HD wallet entry points: create/restore a wallet and derive its addresses.
  *
  * <p>Unlike {@link AccountApi} (a single account), a {@code Wallet} exposes a sequence of addresses.
- * {@code networkId} uses {@code 0}=mainnet, {@code 1}=testnet, {@code 2}=preprod, {@code 3}=preview.
+ * {@code networkId} uses {@code 0}=mainnet, {@code 1}=testnet.
  * See {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention. Every entry point
  * here is a static GraalVM {@code @CEntryPoint}.
  */
@@ -34,7 +34,7 @@ public final class WalletApi {
      * <pre>{@code {"mnemonic","stake_address","addresses":[ ...first 5 base addresses... ]}}</pre>
      *
      * @param thread    the current isolate thread
-     * @param networkId 0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId 0=mainnet, 1=testnet
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}
      */
@@ -65,7 +65,7 @@ public final class WalletApi {
      *
      * @param thread      the current isolate thread
      * @param mnemonicPtr the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId   0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId   0=mainnet, 1=testnet
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}
      */
@@ -102,7 +102,7 @@ public final class WalletApi {
      *
      * @param thread      the current isolate thread
      * @param mnemonicPtr the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId   0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId   0=mainnet, 1=testnet
      * @param index       the address index to derive
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}

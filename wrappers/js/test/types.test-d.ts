@@ -24,8 +24,6 @@ import {
     platformSuffix,
     MAINNET,
     TESTNET,
-    PREPROD,
-    PREVIEW,
     CCL_SUCCESS,
     CCL_ERROR_TX_BUILD,
     type Network,
@@ -50,12 +48,10 @@ declare function assignable<T>(): <U extends T>(value: U) => void;
 
 expectType<0>(MAINNET);
 expectType<1>(TESTNET);
-expectType<2>(PREPROD);
-expectType<3>(PREVIEW);
 expectType<0>(CCL_SUCCESS);
 expectType<-10>(CCL_ERROR_TX_BUILD);
 assignable<Network>()(MAINNET);
-assignable<Network>()(PREVIEW);
+assignable<Network>()(TESTNET);
 
 // --- Lifecycle -----------------------------------------------------------------------------------
 
@@ -76,7 +72,7 @@ expectType<string>(account.stake_address);
 expectType<string>(account.change_address);
 
 expectType<AccountInfo>(bridge.account.fromMnemonic(account.mnemonic, MAINNET));
-expectType<AccountInfo>(bridge.account.fromMnemonic(account.mnemonic, PREPROD, 0, 0));
+expectType<AccountInfo>(bridge.account.fromMnemonic(account.mnemonic, TESTNET, 0, 0));
 expectType<string>(bridge.account.getPrivateKey(account.mnemonic, TESTNET));
 expectType<string>(bridge.account.getPublicKey(account.mnemonic, TESTNET, 0, 1));
 expectType<string>(bridge.account.getDrepId(account.mnemonic, TESTNET));

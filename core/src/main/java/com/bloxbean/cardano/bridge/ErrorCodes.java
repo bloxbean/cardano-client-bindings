@@ -20,7 +20,7 @@ public final class ErrorCodes {
     public static final int CCL_ERROR_SERIALIZATION = -3;
     /** A cryptographic operation failed (hashing, signing, verification, key derivation). */
     public static final int CCL_ERROR_CRYPTO = -4;
-    /** The supplied network id is not one of mainnet/testnet/preprod/preview. */
+    /** The supplied network id is not one of mainnet/testnet. */
     public static final int CCL_ERROR_INVALID_NETWORK = -5;
     /** The supplied mnemonic phrase is invalid. */
     public static final int CCL_ERROR_INVALID_MNEMONIC = -6;

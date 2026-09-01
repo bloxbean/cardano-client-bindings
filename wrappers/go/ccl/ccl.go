@@ -25,38 +25,31 @@ type Network int
 const (
 	Mainnet Network = 0
 	Testnet Network = 1
-	Preprod Network = 2
-	Preview Network = 3
 )
 
-// String returns the network's name ("mainnet", "testnet", "preprod", "preview"), so a Network
-// reads as itself in logs and errors instead of as a bare, easily-misread ordinal. An unknown
-// value prints as Network(n).
+// String returns the network's name ("mainnet", "testnet"), so a Network reads as itself in logs
+// and errors instead of as a bare, easily-misread ordinal. An unknown value prints as Network(n).
 func (n Network) String() string {
 	switch n {
 	case Mainnet:
 		return "mainnet"
 	case Testnet:
 		return "testnet"
-	case Preprod:
-		return "preprod"
-	case Preview:
-		return "preview"
 	default:
 		return fmt.Sprintf("Network(%d)", int(n))
 	}
 }
 
-// Valid reports whether n is one of the four known networks.
+// Valid reports whether n is one of the two known networks.
 func (n Network) Valid() bool {
-	return n >= Mainnet && n <= Preview
+	return n == Mainnet || n == Testnet
 }
 
 // validate turns an out-of-range Network into a clear Go error at the call boundary, rather than
 // letting it reach the native library and come back as an opaque enum-ordinal failure.
 func (n Network) validate() error {
 	if !n.Valid() {
-		return fmt.Errorf("ccl: invalid network %s: use one of Mainnet(0), Testnet(1), Preprod(2), Preview(3) "+
+		return fmt.Errorf("ccl: invalid network %s: use Mainnet(0) or Testnet(1) "+
 			"(these are CCL enum ordinals, not Cardano's on-chain network id)", n)
 	}
 	return nil

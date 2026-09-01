@@ -136,8 +136,6 @@ fn test_network_ordinals_are_ccl_not_onchain() {
     // The CCL ordinals the native library expects. Do not renumber to match on-chain ids.
     assert_eq!(ccl::Network::Mainnet as i32, 0);
     assert_eq!(ccl::Network::Testnet as i32, 1);
-    assert_eq!(ccl::Network::Preprod as i32, 2);
-    assert_eq!(ccl::Network::Preview as i32, 3);
     assert_eq!(ccl::Network::Mainnet.as_i32(), 0);
     assert_eq!(i32::from(ccl::Network::Testnet), 1);
 

@@ -5,7 +5,7 @@ All functionality hangs off a `CclBridge` instance. Import what you need from th
 ```js
 import {
   CclBridge, CclError, CclClosedError,
-  MAINNET, TESTNET, PREPROD, PREVIEW,
+  MAINNET, TESTNET,
   YaciProvider, BlockfrostProvider, BlockfrostEvaluator,
 } from "@bloxbean/cardano-client-lib";
 ```
@@ -34,8 +34,8 @@ using bridge = new CclBridge();   // closed automatically at end of scope
 ## Networks
 
 ```ts
-type Network = 0 | 1 | 2 | 3
-MAINNET = 0, TESTNET = 1, PREPROD = 2, PREVIEW = 3
+type Network = 0 | 1
+MAINNET = 0, TESTNET = 1
 ```
 
 Every method that derives keys (`account.*`, `wallet.*`, `gov.*`) requires a `network` argument. Passing `undefined`/`null` throws `TypeError`; an out-of-range value throws `RangeError`.

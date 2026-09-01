@@ -99,7 +99,7 @@ The native library is **offline and stateless** — it derives, builds, signs, h
 ## Networks
 
 ```js
-import { MAINNET, TESTNET, PREPROD, PREVIEW } from "@bloxbean/cardano-client-lib";
+import { MAINNET, TESTNET } from "@bloxbean/cardano-client-lib";
 ```
 
 Every key-derivation method requires an explicit network argument — there is no default. Always pass one of these constants, never a bare number: they are CCL enum ordinals (`MAINNET = 0`, `TESTNET = 1`), which are the **inverse** of Cardano's on-chain network id (on-chain mainnet = 1). See [API reference → Networks](api.md#networks).

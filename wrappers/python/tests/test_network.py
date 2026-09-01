@@ -18,7 +18,7 @@ from ccl import Network
 
 
 def test_members_are_ccl_ordinals():
-    assert (Network.MAINNET, Network.TESTNET, Network.PREPROD, Network.PREVIEW) == (0, 1, 2, 3)
+    assert (Network.MAINNET, Network.TESTNET) == (0, 1)
 
 
 def test_mainnet_derives_an_address_whose_onchain_network_id_is_one(ccl):
@@ -39,22 +39,15 @@ def test_testnet_derives_an_address_whose_onchain_network_id_is_zero(ccl):
     assert ccl.address.info(account["base_address"])["network_id"] == 0
 
 
-@pytest.mark.parametrize("network", [Network.PREPROD, Network.PREVIEW])
-def test_preprod_and_preview_are_testnets_on_chain(ccl, network):
-    account = ccl.account.create(network)
-
-    assert ccl.address.info(account["base_address"])["network_id"] == 0
-
-
 def test_plain_ints_still_work(ccl):
-    """IntEnum keeps the native call wire-compatible: an int in 0-3 is still accepted."""
+    """IntEnum keeps the native call wire-compatible: an int of 0 or 1 is still accepted."""
     from_enum = ccl.account.create(Network.TESTNET)
     from_int = ccl.account.from_mnemonic(from_enum["mnemonic"], 1)
 
     assert from_int["base_address"] == from_enum["base_address"]
 
 
-@pytest.mark.parametrize("bad", [4, -1, 99])
+@pytest.mark.parametrize("bad", [2, 3, 4, -1, 99])
 def test_out_of_range_network_raises_valueerror(ccl, bad):
     """Caught at the boundary, not deep inside the native library."""
     with pytest.raises(ValueError, match="Network"):

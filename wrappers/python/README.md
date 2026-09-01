@@ -106,8 +106,8 @@ A `CclLib` instance exposes these namespaces (all offline operations):
 
 ### Networks
 
-Every key-derivation and signing call takes a **required** `network` — `Network.MAINNET`,
-`Network.TESTNET`, `Network.PREPROD` or `Network.PREVIEW`. There is no default: a library that
+Every key-derivation and signing call takes a **required** `network` — `Network.MAINNET` or
+`Network.TESTNET`. There is no default: a library that
 derives keys must not guess, least of all guess mainnet.
 
 > **`Network` is CCL's enum ordinal, not Cardano's on-chain network id.** The two differ, and for
@@ -117,14 +117,12 @@ derives keys must not guess, least of all guess mainnet.
 > |---|---|---|
 > | `Network.MAINNET` | 0 | **1** |
 > | `Network.TESTNET` | 1 | **0** |
-> | `Network.PREPROD` | 2 | 0 |
-> | `Network.PREVIEW` | 3 | 0 |
 >
 > So do **not** pass a `network_id` you read off an address back into these APIs — you would flip
 > mainnet and testnet. `lib.address.info(addr)["network_id"]` is the real on-chain id and is a
 > different thing from the `Network` you passed in.
 
-`Network` is an `IntEnum`, so a plain int 0-3 still works, and an out-of-range value raises
+`Network` is an `IntEnum`, so a plain int 0 or 1 still works, and an out-of-range value raises
 `ValueError` at the call rather than failing obscurely inside the native library.
 
 Errors raise `ccl.CclError`.

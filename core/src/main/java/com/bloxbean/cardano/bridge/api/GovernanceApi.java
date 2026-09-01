@@ -19,7 +19,7 @@ import java.util.Map;
  * Governance key-derivation entry points (Conway era): DRep and constitutional-committee keys.
  *
  * <p>All keys are derived from a mnemonic via CIP-1852/CIP-105 paths. {@code networkId} uses
- * {@code 0}=mainnet, {@code 1}=testnet, {@code 2}=preprod, {@code 3}=preview; address index is 0.
+ * {@code 0}=mainnet, {@code 1}=testnet; address index is 0.
  * See {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention. Every entry point
  * here is a static GraalVM {@code @CEntryPoint}.
  */
@@ -36,7 +36,7 @@ public final class GovernanceApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}
@@ -85,7 +85,7 @@ public final class GovernanceApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}
@@ -133,7 +133,7 @@ public final class GovernanceApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}

@@ -17,7 +17,7 @@ import java.util.Map;
  * Account entry points: deterministic (HD) account creation, key derivation, and signing.
  *
  * <p>An "account" is a CIP-1852 HD account derived from a BIP-39 mnemonic. Methods that take a
- * {@code networkId} use {@code 0}=mainnet, {@code 1}=testnet, {@code 2}=preprod, {@code 3}=preview.
+ * {@code networkId} use {@code 0}=mainnet, {@code 1}=testnet.
  * The {@code accountIndex}/{@code addressIndex} select the HD derivation path
  * ({@code m/1852'/1815'/account'/role/address}).
  *
@@ -36,7 +36,7 @@ public final class AccountApi {
      * <pre>{@code {"mnemonic","base_address","enterprise_address","stake_address","change_address"}}</pre>
      *
      * @param thread    the current isolate thread
-     * @param networkId 0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId 0=mainnet, 1=testnet
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}
      */
@@ -66,7 +66,7 @@ public final class AccountApi {
      * object as {@code ccl_account_create}.
      *
      * @param thread       the current isolate thread
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
      * @param accountIndex HD account index (typically 0)
      * @param addressIndex HD address index (typically 0)
@@ -114,7 +114,7 @@ public final class AccountApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @param addressIndex HD address index
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
@@ -154,7 +154,7 @@ public final class AccountApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @param addressIndex HD address index
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
@@ -196,7 +196,7 @@ public final class AccountApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @param addressIndex HD address index
      * @param txCborHexPtr the unsigned (or partially signed) transaction as CBOR hex
@@ -250,7 +250,7 @@ public final class AccountApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @param addressIndex HD address index
      * @param txCborHexPtr the unsigned (or partially signed) transaction as CBOR hex
@@ -313,7 +313,7 @@ public final class AccountApi {
      *
      * @param thread       the current isolate thread
      * @param mnemonicPtr  the BIP-39 mnemonic phrase (UTF-8 C string)
-     * @param networkId    0=mainnet, 1=testnet, 2=preprod, 3=preview
+     * @param networkId    0=mainnet, 1=testnet
      * @param accountIndex HD account index
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_NETWORK} /
      *         {@link ErrorCodes#CCL_ERROR_GENERAL}

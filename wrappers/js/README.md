@@ -100,8 +100,6 @@ Every `network` parameter takes one of the exported constants:
 |---|---|
 | `MAINNET` | `0` |
 | `TESTNET` | `1` |
-| `PREPROD` | `2` |
-| `PREVIEW` | `3` |
 
 > **⚠️ These are CCL's `Network` enum ordinals, NOT Cardano's on-chain network id — and they are
 > inverted with respect to it.** On-chain, `0 = testnet` and `1 = mainnet`; here `MAINNET = 0` and

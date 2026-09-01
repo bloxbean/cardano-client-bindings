@@ -19,8 +19,7 @@ package com.bloxbean.cardano.bridge.api.account;
  *
  * @param cclAccount   the wrapped CCL account, positioned at this handle's leaf; owns the key
  *                     derivation and signing (never exposed across the ABI)
- * @param networkId    the bridge network enum ordinal (0=mainnet, 1=testnet, 2=preprod,
- *                     3=preview) — note this is <em>not</em> the on-chain network id, which is
+ * @param networkId    the bridge network enum ordinal (0=mainnet, 1=testnet) — note this is <em>not</em> the on-chain network id, which is
  *                     inverted for mainnet/testnet
  * @param accountIndex the hardened CIP-1852 account index ({@code accountIndex'}); one handle can
  *                     never derive a sibling account, by design

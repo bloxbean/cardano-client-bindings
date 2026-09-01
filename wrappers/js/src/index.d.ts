@@ -7,8 +7,7 @@
 // --- Network -------------------------------------------------------------------------------------
 
 /**
- * A network selector: one of {@link MAINNET} (0), {@link TESTNET} (1), {@link PREPROD} (2),
- * {@link PREVIEW} (3).
+ * A network selector: {@link MAINNET} (0) or {@link TESTNET} (1).
  *
  * ⚠️ These are CCL's `Network` **enum ordinals**, *not* Cardano's on-chain network id — and they are
  * inverted with respect to it. On-chain, `0 = testnet` and `1 = mainnet`; here `MAINNET = 0` and
@@ -19,16 +18,12 @@
  * account created with `MAINNET` (ordinal 0) has `network_id === 1`; one created with `TESTNET`
  * (ordinal 1) has `network_id === 0`.
  */
-export type Network = 0 | 1 | 2 | 3;
+export type Network = 0 | 1;
 
 /** CCL enum ordinal for mainnet. NOT the on-chain network id (which is 1 for mainnet). */
 export declare const MAINNET: 0;
 /** CCL enum ordinal for testnet. NOT the on-chain network id (which is 0 for testnet). */
 export declare const TESTNET: 1;
-/** CCL enum ordinal for preprod. */
-export declare const PREPROD: 2;
-/** CCL enum ordinal for preview. */
-export declare const PREVIEW: 3;
 
 // --- Data shapes ---------------------------------------------------------------------------------
 

@@ -95,8 +95,6 @@ from ccl import Network
 
 Network.MAINNET  # 0
 Network.TESTNET  # 1
-Network.PREPROD  # 2
-Network.PREVIEW  # 3
 ```
 
 Every key-derivation method requires an explicit `network` argument — there is no default; omitting it raises `TypeError`. `Network` is an `IntEnum`, and out-of-range ints raise `ValueError` at the wrapper boundary. Note the values are CCL enum ordinals, which are the **inverse** of Cardano's on-chain network id for mainnet/testnet (`Network.MAINNET == 0`, but a mainnet address's on-chain `network_id` is `1`). See [API reference → Networks](api.md#networks).

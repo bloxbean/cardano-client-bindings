@@ -42,8 +42,6 @@ type Network int
 const (
 	Mainnet Network = 0
 	Testnet Network = 1
-	Preprod Network = 2
-	Preview Network = 3
 )
 
 func (n Network) String() string  // "mainnet", "testnet", ...

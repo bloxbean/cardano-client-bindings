@@ -10,8 +10,6 @@
    =============== ============================= ==================================
    ``MAINNET``     0                             **1**
    ``TESTNET``     1                             **0**
-   ``PREPROD``     2                             0 (a testnet)
-   ``PREVIEW``     3                             0 (a testnet)
    =============== ============================= ==================================
 
    So ``Network.MAINNET`` is ``0`` here, but the address it derives carries an on-chain
@@ -26,7 +24,7 @@
        lib.address.info(acct["base_address"])["network_id"] # -> 1  (the on-chain id)
 
 ``Network`` is an :class:`enum.IntEnum`, so it is wire-compatible with the native call and a
-plain ``int`` in 0-3 is still accepted anywhere a ``Network`` is.
+plain ``int`` of 0 or 1 is still accepted anywhere a ``Network`` is.
 """
 
 from enum import IntEnum
@@ -39,5 +37,3 @@ class Network(IntEnum):
 
     MAINNET = 0
     TESTNET = 1
-    PREPROD = 2
-    PREVIEW = 3

@@ -34,10 +34,10 @@ pub mod error_codes {
 ///
 /// # These are *not* Cardano's on-chain network ids
 ///
-/// The discriminants below are **CCL's own enum ordinals** (`Mainnet = 0`, `Testnet = 1`,
-/// `Preprod = 2`, `Preview = 3`) — they are what the native library expects. Cardano's *on-chain*
-/// network id, the one encoded in an address, is the opposite way round: **0 = testnet, 1 =
-/// mainnet**. So the two disagree exactly where it hurts most:
+/// The discriminants below are **CCL's own enum ordinals** (`Mainnet = 0`, `Testnet = 1`) —
+/// they are what the native library expects. Cardano's *on-chain* network id, the one encoded
+/// in an address, is the opposite way round: **0 = testnet, 1 = mainnet**. So the two disagree
+/// exactly where it hurts most:
 ///
 /// | | CCL ordinal (this enum) | on-chain network id |
 /// |---|---|---|
@@ -59,8 +59,6 @@ pub mod error_codes {
 pub enum Network {
     Mainnet,
     Testnet,
-    Preprod,
-    Preview,
 }
 
 impl Network {

@@ -88,12 +88,11 @@ Transactions are defined as a [TxPlan](https://github.com/bloxbean/cardano-clien
 let result = bridge.quicktx().build(&yaml, &utxos, &protocol_params)?; // -> TxResult { tx_cbor, tx_hash, fee }
 ```
 
-Methods that need a network take the `Network` enum — `Network::Mainnet`, `Network::Testnet`,
-`Network::Preprod`, `Network::Preview` — so a transposed argument is a compile error rather than a
+Methods that need a network take the `Network` enum — `Network::Mainnet` or `Network::Testnet` — so a transposed argument is a compile error rather than a
 key silently derived on the wrong network. Errors are `ccl::CclError`.
 
 > **`Network` is not Cardano's on-chain network id.** Its discriminants are CCL's own enum ordinals
-> (`Mainnet = 0`, `Testnet = 1`, `Preprod = 2`, `Preview = 3`). Cardano's on-chain network id is the
+> (`Mainnet = 0`, `Testnet = 1`). Cardano's on-chain network id is the
 > other way round — **mainnet = 1, testnet = 0** — so an account created with `Network::Mainnet` has
 > an address whose `network_id` is `1`. The `network_id` field returned by `bridge.address().info()`
 > is that genuine on-chain value, not an ordinal from this enum.

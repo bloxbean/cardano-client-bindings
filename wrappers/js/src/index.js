@@ -46,10 +46,8 @@ export const SigningRole = Object.freeze({
 
 export const MAINNET = 0;
 export const TESTNET = 1;
-export const PREPROD = 2;
-export const PREVIEW = 3;
 
-const NETWORKS = new Set([MAINNET, TESTNET, PREPROD, PREVIEW]);
+const NETWORKS = new Set([MAINNET, TESTNET]);
 
 // Validate a `network` argument at the wrapper boundary. Without this an out-of-range value reaches
 // the native library, which fails with an opaque error (or, for a valid-looking ordinal, silently
@@ -57,14 +55,14 @@ const NETWORKS = new Set([MAINNET, TESTNET, PREPROD, PREVIEW]);
 function checkNetwork(network) {
   if (network === undefined || network === null) {
     throw new TypeError(
-      'network is required: pass MAINNET, TESTNET, PREPROD or PREVIEW. ' +
+      'network is required: pass MAINNET or TESTNET. ' +
       'These are CCL enum ordinals (MAINNET === 0), not Cardano\'s on-chain network id.'
     );
   }
   if (!NETWORKS.has(network)) {
     throw new RangeError(
-      `invalid network ${JSON.stringify(network)}: expected MAINNET (0), TESTNET (1), PREPROD (2) ` +
-      'or PREVIEW (3). These are CCL enum ordinals, not Cardano\'s on-chain network id ' +
+      `invalid network ${JSON.stringify(network)}: expected MAINNET (0) or TESTNET (1). ` +
+      'These are CCL enum ordinals, not Cardano\'s on-chain network id ' +
       '(on-chain: 0 = testnet, 1 = mainnet — the inverse).'
     );
   }
@@ -419,7 +417,7 @@ class AccountApi {
   /**
    * Create a new account (random 24-word mnemonic) on `network`.
    *
-   * @param {0|1|2|3} network - MAINNET (0), TESTNET (1), PREPROD (2) or PREVIEW (3). Required, and a
+   * @param {0|1} network - MAINNET (0) or TESTNET (1). Required, and a
    *   CCL enum ordinal — **not** Cardano's on-chain network id, which is inverted (on-chain: 0 =
    *   testnet, 1 = mainnet). An account created with MAINNET (the ordinal 0) has an
    *   `address.info().network_id` of 1; one created with TESTNET (the ordinal 1) has 0.
