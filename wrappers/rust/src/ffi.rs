@@ -29,51 +29,6 @@ extern "C" {
     pub fn ccl_free_string(thread: *mut graal_isolatethread_t, ptr: *mut c_char);
 
     // Account API
-    pub fn ccl_account_create(thread: *mut graal_isolatethread_t, network_id: c_int) -> c_int;
-    pub fn ccl_account_from_mnemonic(
-        thread: *mut graal_isolatethread_t,
-        network_id: c_int,
-        mnemonic: *const c_char,
-        account_index: c_int,
-        address_index: c_int,
-    ) -> c_int;
-    pub fn ccl_account_get_private_key(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-        address_index: c_int,
-    ) -> c_int;
-    pub fn ccl_account_get_public_key(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-        address_index: c_int,
-    ) -> c_int;
-    pub fn ccl_account_sign_tx(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-        address_index: c_int,
-        tx_cbor_hex: *const c_char,
-    ) -> c_int;
-    pub fn ccl_account_sign_tx_multi(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-        address_index: c_int,
-        tx_cbor_hex: *const c_char,
-        keys: *const c_char,
-    ) -> c_int;
-    pub fn ccl_account_get_drep_id(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-    ) -> c_int;
 
     // Address API
     pub fn ccl_address_info(thread: *mut graal_isolatethread_t, bech32: *const c_char) -> c_int;
@@ -115,6 +70,13 @@ extern "C" {
         message_hex: *const c_char,
         pk_hex: *const c_char,
     ) -> c_int;
+    pub fn ccl_crypto_derive_key(
+        thread: *mut graal_isolatethread_t,
+        mnemonic: *const c_char,
+        account_index: c_int,
+        address_index: c_int,
+        role: *const c_char,
+    ) -> c_int;
 
     // Transaction API
     pub fn ccl_tx_sign_with_secret_key(
@@ -146,38 +108,8 @@ extern "C" {
     ) -> c_int;
 
     // Governance API
-    pub fn ccl_gov_drep_key_from_mnemonic(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-    ) -> c_int;
-    pub fn ccl_gov_committee_cold_key_from_mnemonic(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-    ) -> c_int;
-    pub fn ccl_gov_committee_hot_key_from_mnemonic(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        account_index: c_int,
-    ) -> c_int;
 
     // Wallet API
-    pub fn ccl_wallet_create(thread: *mut graal_isolatethread_t, network_id: c_int) -> c_int;
-    pub fn ccl_wallet_from_mnemonic(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-    ) -> c_int;
-    pub fn ccl_wallet_get_address(
-        thread: *mut graal_isolatethread_t,
-        mnemonic: *const c_char,
-        network_id: c_int,
-        index: c_int,
-    ) -> c_int;
 
     // Script API
     pub fn ccl_script_native_from_json(

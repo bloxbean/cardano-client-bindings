@@ -8,7 +8,7 @@ Requires Python ≥ 3.8. The only runtime dependency is `pyyaml`.
 
 | Document | Contents |
 |---|---|
-| [API reference](api.md) | Every class and method: `CclLib`, account, address, crypto, tx, plutus, script, gov, wallet, quicktx |
+| [API reference](api.md) | Every class and method: `CclLib`, accounts, address, crypto, tx, plutus, script, gov, wallet, quicktx |
 | [Building transactions](transactions.md) | The full workflow with worked examples: payments, staking, governance, minting, Plutus |
 | [Providers & evaluators](providers.md) | Fetching UTXOs/protocol params from Yaci DevKit or Blockfrost; remote script-cost evaluation |
 | [Troubleshooting](troubleshooting.md) | Native library resolution, platform support, common errors |
@@ -35,13 +35,16 @@ export CCL_LIB_PATH=/path/to/cardano-client-bindings/core/build/native/nativeCom
 from ccl import CclLib, Network
 
 with CclLib() as lib:
-    # Create a new account (24-word mnemonic, testnet addresses).
-    account = lib.account.create(Network.TESTNET)
-    print(account["base_address"])   # addr_test1...
-    print(account["stake_address"])  # stake_test1...
+    # Create a new managed account (testnet). Its info never contains the phrase;
+    # export the recovery phrase once, deliberately.
+    with lib.accounts.create(Network.TESTNET) as account:
+        print(account.info["base_address"])   # addr_test1...
+        print(account.info["stake_address"])  # stake_test1...
+        mnemonic = account.export_recovery_phrase()
 
-    # Restore it later from the mnemonic.
-    restored = lib.account.from_mnemonic(account["mnemonic"], Network.TESTNET)
+    # Restore it later from the phrase.
+    with lib.accounts.from_mnemonic(mnemonic, Network.TESTNET) as restored:
+        assert restored.info["base_address"] == account.info["base_address"]
 ```
 
 The context manager tears down the native isolate on exit; equivalently, call `lib.close()` in a `finally` block.
@@ -55,7 +58,7 @@ yaml = f"""
 version: 1.0
 transaction:
   - tx:
-      from: {account["base_address"]}
+      from: {sender.info["base_address"]}
       intents:
         - type: payment
           address: {receiver}
@@ -67,7 +70,7 @@ transaction:
 result = lib.quicktx.build(yaml, utxos, protocol_params)
 # result = {"tx_cbor": ..., "tx_hash": ..., "fee": ...}
 
-signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
+signed = sender.sign_tx(result["tx_cbor"])   # sender = lib.accounts.from_mnemonic(...)
 # submit `signed` with any HTTP client — the library never talks to the network
 ```
 

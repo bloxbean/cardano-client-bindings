@@ -81,9 +81,9 @@ from ccl import CclLib, Network
 
 lib = CclLib()                      # loads libccl, starts a GraalVM isolate
 try:
-    account = lib.account.create(Network.TESTNET)
-    print(account["base_address"])  # addr_test1...
-    print(account["mnemonic"])      # 24-word phrase
+    with lib.accounts.create(Network.TESTNET) as account:  # managed handle (ADR-0016)
+        print(account.info["base_address"])       # addr_test1...
+        print(account.export_recovery_phrase())   # 24-word phrase — one-shot, deliberate
 finally:
     lib.close()                     # tears down the isolate
 ```
@@ -94,14 +94,12 @@ A `CclLib` instance exposes these namespaces (all offline operations):
 
 | Namespace | Examples |
 |-----------|----------|
-| `lib.account` | `create`, `from_mnemonic`, `get_private_key`, `get_public_key`, `get_drep_id`, `sign_tx` |
+| `lib.accounts` | managed accounts: `create`, `from_mnemonic` → `Account` (`info`, `sign_tx`, `export_recovery_phrase`, `close`) |
 | `lib.address` | `info`, `validate`, `to_bytes`, `from_bytes` |
-| `lib.crypto` | `blake2b_256`, `blake2b_224`, `generate_mnemonic`, `validate_mnemonic`, `sign`, `verify` |
+| `lib.crypto` | `blake2b_256`, `blake2b_224`, `generate_mnemonic`, `validate_mnemonic`, `sign`, `verify`, `derive_key` |
 | `lib.tx` | `hash`, `sign_with_secret_key`, `to_json`, `from_json`, `deserialize` |
 | `lib.plutus` | `data_hash`, `data_to_json`, `data_from_json` |
 | `lib.script` | `native_from_json`, `hash` |
-| `lib.gov` | `drep_key_from_mnemonic`, `committee_cold_key_from_mnemonic`, `committee_hot_key_from_mnemonic` |
-| `lib.wallet` | `create`, `from_mnemonic`, `get_address` |
 | `lib.quicktx` | `build(yaml, utxos, protocol_params)` — build an unsigned tx from a TxPlan YAML document |
 
 ### Networks

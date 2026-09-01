@@ -87,10 +87,7 @@ func signSubmitN(t *testing.T, yaml string, utxos []map[string]interface{}, pp m
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, keys...)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
+	signed := intentSign(t, result.TxCbor, keys...)
 	txHash, err := devkitSubmitTx(signed)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
@@ -182,7 +179,7 @@ func TestIntegrationDRepRegistration(t *testing.T) {
 
 // Negative test: a DRep registration certificate must be witnessed by the DRep key, so signing with
 // the payment key alone must be rejected by the node (MissingVKeyWitnessesUTXOW). This proves the
-// extra witness sign_tx_with_keys adds is genuinely required — not cosmetic — and complements the
+// extra witness the stake role adds is genuinely required — not cosmetic — and complements the
 // positive TestIntegrationDRepRegistration (payment+drep) above.
 func TestIntegrationDRepKeyRequired(t *testing.T) {
 	skipIfNoDevKit(t)
@@ -204,10 +201,7 @@ func TestIntegrationDRepKeyRequired(t *testing.T) {
 	}
 
 	// Sign with the payment key ONLY (ccl_account_sign_tx), omitting the DRep-key witness.
-	signedPaymentOnly, err := bridge.Account.SignTx(intentMnemonic, Testnet, 0, 0, built.TxCbor)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
+	signedPaymentOnly := intentSign(t, built.TxCbor, "payment")
 	if _, err := devkitSubmitTx(signedPaymentOnly); err == nil {
 		t.Fatal("the node accepted a DRep registration signed with the payment key only; " +
 			"expected rejection (MissingVKeyWitnessesUTXOW)")
@@ -262,10 +256,7 @@ func TestIntegrationDonation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
-		signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, "payment")
-		if err != nil {
-			t.Fatalf("sign: %v", err)
-		}
+		signed := intentSign(t, result.TxCbor, "payment")
 		txHash, err := devkitSubmitTx(signed)
 		if err == nil {
 			if len(txHash) == 0 {
@@ -445,10 +436,7 @@ func TestIntegrationVoting(t *testing.T) {
 		t.Fatalf("build proposal: %v", err)
 	}
 	actionTxHash := proposal.TxHash
-	signedProposal, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, proposal.TxCbor, "payment")
-	if err != nil {
-		t.Fatalf("sign proposal: %v", err)
-	}
+	signedProposal := intentSign(t, proposal.TxCbor, "payment")
 	if _, err := devkitSubmitTx(signedProposal); err != nil {
 		t.Fatalf("submit proposal: %v", err)
 	}
@@ -686,10 +674,7 @@ func TestIntegrationAikenMintRejects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, "payment")
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
+	signed := intentSign(t, result.TxCbor, "payment")
 	if _, err := devkitSubmitTx(signed); err == nil {
 		t.Fatal("the node accepted a mint whose validator must reject (redeemer 0); " +
 			"expected a phase-2 script validation failure")
@@ -718,10 +703,7 @@ func signSubmitFee(t *testing.T, yaml string, utxos []map[string]interface{}, pp
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	signed, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, result.TxCbor, keys...)
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
+	signed := intentSign(t, result.TxCbor, keys...)
 	txHash, err := devkitSubmitTx(signed)
 	if err != nil {
 		t.Fatalf("submit: %v", err)
@@ -1132,14 +1114,8 @@ func TestIntegrationCompose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	once, err := bridge.Account.SignTx(intentMnemonic, Testnet, 0, 0, result.TxCbor)
-	if err != nil {
-		t.Fatalf("sign (0,0): %v", err)
-	}
-	twice, err := bridge.Account.SignTx(intentMnemonic, Testnet, 0, 1, once)
-	if err != nil {
-		t.Fatalf("sign (0,1): %v", err)
-	}
+	once := intentSign(t, result.TxCbor, "payment")
+	twice := intentSignAt(t, 1, once, "payment")
 	if _, err := devkitSubmitTx(twice); err != nil {
 		t.Fatalf("submit: %v", err)
 	}

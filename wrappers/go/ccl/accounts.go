@@ -39,6 +39,12 @@ type AccountPublicInfo struct {
 	AccountIndex      int    `json:"account_index"`
 	AddressIndex      int    `json:"address_index"`
 	DRepID            string `json:"drep_id"`
+	// Committee identifiers: bech32 id and hex credential (blake2b-224 verification-key hash,
+	// as used in committee certificates). Public data like everything else here.
+	CommitteeColdID         string `json:"committee_cold_id"`
+	CommitteeColdCredential string `json:"committee_cold_credential"`
+	CommitteeHotID          string `json:"committee_hot_id"`
+	CommitteeHotCredential  string `json:"committee_hot_credential"`
 }
 
 // Account is a managed account bound to one CIP-1852 payment leaf

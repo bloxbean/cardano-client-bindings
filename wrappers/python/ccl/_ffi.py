@@ -109,26 +109,20 @@ class CclLib:
         self._check_version()
 
         # Namespace APIs
-        from ccl.account import Account
         from ccl.address import Address
         from ccl.crypto import Crypto
         from ccl.transaction import Transaction
         from ccl.plutus import Plutus
         from ccl.script import Script
-        from ccl.governance import Governance
-        from ccl.wallet import Wallet
         from ccl.quicktx import QuickTx
         from ccl.accounts import Accounts
 
-        self.account = Account(self)
         self.accounts = Accounts(self)
         self.address = Address(self)
         self.crypto = Crypto(self)
         self.tx = Transaction(self)
         self.plutus = Plutus(self)
         self.script = Script(self)
-        self.gov = Governance(self)
-        self.wallet = Wallet(self)
         self.quicktx = QuickTx(self)
 
     def _setup_functions(self):
@@ -160,27 +154,6 @@ class CclLib:
 
         lib.ccl_free_string.argtypes = [c_void_p, c_void_p]
         lib.ccl_free_string.restype = None
-
-        # Account API
-        lib.ccl_account_create.argtypes = [c_void_p, c_int]
-        lib.ccl_account_create.restype = c_int
-
-        lib.ccl_account_from_mnemonic.argtypes = [c_void_p, c_int, c_char_p, c_int, c_int]
-        lib.ccl_account_from_mnemonic.restype = c_int
-
-        lib.ccl_account_get_private_key.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int]
-        lib.ccl_account_get_private_key.restype = c_int
-
-        lib.ccl_account_get_public_key.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int]
-        lib.ccl_account_get_public_key.restype = c_int
-
-        lib.ccl_account_sign_tx.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int, c_char_p]
-        lib.ccl_account_sign_tx.restype = c_int
-        lib.ccl_account_sign_tx_multi.argtypes = [c_void_p, c_char_p, c_int, c_int, c_int, c_char_p, c_char_p]
-        lib.ccl_account_sign_tx_multi.restype = c_int
-
-        lib.ccl_account_get_drep_id.argtypes = [c_void_p, c_char_p, c_int, c_int]
-        lib.ccl_account_get_drep_id.restype = c_int
 
         # Address API
         lib.ccl_address_info.argtypes = [c_void_p, c_char_p]
@@ -214,6 +187,9 @@ class CclLib:
         lib.ccl_crypto_verify.argtypes = [c_void_p, c_char_p, c_char_p, c_char_p]
         lib.ccl_crypto_verify.restype = c_int
 
+        lib.ccl_crypto_derive_key.argtypes = [c_void_p, c_char_p, c_int, c_int, c_char_p]
+        lib.ccl_crypto_derive_key.restype = c_int
+
         # Transaction API
         lib.ccl_tx_sign_with_secret_key.argtypes = [c_void_p, c_char_p, c_char_p]
         lib.ccl_tx_sign_with_secret_key.restype = c_int
@@ -239,26 +215,6 @@ class CclLib:
 
         lib.ccl_plutus_data_from_json.argtypes = [c_void_p, c_char_p]
         lib.ccl_plutus_data_from_json.restype = c_int
-
-        # Governance API
-        lib.ccl_gov_drep_key_from_mnemonic.argtypes = [c_void_p, c_char_p, c_int, c_int]
-        lib.ccl_gov_drep_key_from_mnemonic.restype = c_int
-
-        lib.ccl_gov_committee_cold_key_from_mnemonic.argtypes = [c_void_p, c_char_p, c_int, c_int]
-        lib.ccl_gov_committee_cold_key_from_mnemonic.restype = c_int
-
-        lib.ccl_gov_committee_hot_key_from_mnemonic.argtypes = [c_void_p, c_char_p, c_int, c_int]
-        lib.ccl_gov_committee_hot_key_from_mnemonic.restype = c_int
-
-        # Wallet API
-        lib.ccl_wallet_create.argtypes = [c_void_p, c_int]
-        lib.ccl_wallet_create.restype = c_int
-
-        lib.ccl_wallet_from_mnemonic.argtypes = [c_void_p, c_char_p, c_int]
-        lib.ccl_wallet_from_mnemonic.restype = c_int
-
-        lib.ccl_wallet_get_address.argtypes = [c_void_p, c_char_p, c_int, c_int]
-        lib.ccl_wallet_get_address.restype = c_int
 
         # Script API
         lib.ccl_script_native_from_json.argtypes = [c_void_p, c_char_p]

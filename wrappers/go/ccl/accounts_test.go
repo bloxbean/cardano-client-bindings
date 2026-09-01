@@ -40,7 +40,7 @@ func handleErrCode(t *testing.T, err error) int {
 	return cclErr.Code
 }
 
-func TestManagedAccountInfoMatchesLegacy(t *testing.T) {
+func TestManagedAccountInfoMatchesPinnedDerivation(t *testing.T) {
 	acct, err := bridge.Accounts.FromMnemonic(intentMnemonic, Testnet, 0, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -51,19 +51,20 @@ func TestManagedAccountInfoMatchesLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("info: %v", err)
 	}
-	legacy, err := bridge.Account.FromMnemonic(intentMnemonic, Testnet, 0, 0)
-	if err != nil {
-		t.Fatalf("legacy: %v", err)
-	}
-	if info.BaseAddress != legacy.BaseAddress || info.StakeAddress != legacy.StakeAddress {
-		t.Fatalf("managed info diverges from legacy derivation")
+	// Pinned CIP-1852 derivation for the standard CCL test mnemonic at testnet 0/0; the
+	// mnemonic-path equivalence proof lives in the core's AccountKeyDerivationParityTest.
+	const pinnedBase = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer" +
+		"3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp"
+	const pinnedStake = "stake_test1uqevw2xnsc0pvn9t9r9c7qryfqfeerchgrlm3ea2nefr9hqp8n5xl"
+	if info.BaseAddress != pinnedBase || info.StakeAddress != pinnedStake {
+		t.Fatalf("managed info diverges from pinned derivation: %+v", info)
 	}
 	if info.Network != int(Testnet) || info.AccountIndex != 0 || info.AddressIndex != 0 {
 		t.Fatalf("unexpected derivation metadata: %+v", info)
 	}
 }
 
-func TestManagedAccountSignParity(t *testing.T) {
+func TestManagedAccountSignDeterminismAndRoles(t *testing.T) {
 	acct, err := bridge.Accounts.FromMnemonic(intentMnemonic, Testnet, 0, 0)
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -76,24 +77,21 @@ func TestManagedAccountSignParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	legacy, err := bridge.Account.SignTx(intentMnemonic, Testnet, 0, 0, unsigned)
+	// Deterministic: signing twice yields byte-identical output.
+	managedAgain, err := acct.SignTx(unsigned, RolePayment)
 	if err != nil {
-		t.Fatalf("legacy sign: %v", err)
+		t.Fatalf("sign again: %v", err)
 	}
-	if managed != legacy {
-		t.Fatal("payment signature diverges from mnemonic-per-call path")
+	if managed != managedAgain {
+		t.Fatal("signing is not deterministic")
 	}
 
 	managed2, err := acct.SignTx(unsigned, RolePayment|RoleStake)
 	if err != nil {
 		t.Fatalf("sign 2: %v", err)
 	}
-	legacy2, err := bridge.Account.SignTxWithKeys(intentMnemonic, Testnet, 0, 0, unsigned, "payment", "stake")
-	if err != nil {
-		t.Fatalf("legacy sign 2: %v", err)
-	}
-	if managed2 != legacy2 {
-		t.Fatal("payment+stake signature diverges from mnemonic-per-call path")
+	if len(managed2) <= len(managed) {
+		t.Fatal("the stake role should add a second witness")
 	}
 
 	// Mask order is irrelevant — canonical application order fixes the output.

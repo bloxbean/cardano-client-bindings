@@ -15,7 +15,7 @@ lib.close() -> None            # idempotent
 # context manager: with CclLib() as lib: ...
 ```
 
-Constructing loads the native library (see [resolution order](troubleshooting.md#how-the-native-library-is-found)), creates a GraalVM isolate, and verifies the library version matches the wrapper. The API groups are attributes: `lib.account`, `lib.address`, `lib.crypto`, `lib.tx`, `lib.plutus`, `lib.script`, `lib.gov`, `lib.wallet`, `lib.quicktx`.
+Constructing loads the native library (see [resolution order](troubleshooting.md#how-the-native-library-is-found)), creates a GraalVM isolate, and verifies the library version matches the wrapper. The API groups are attributes: `lib.accounts`, `lib.address`, `lib.crypto`, `lib.tx`, `lib.plutus`, `lib.script`, `lib.quicktx`.
 
 **Lifecycle.** `close()` detaches all attached threads and tears down the isolate; it is idempotent and also runs on `__exit__`/`__del__`. Any call after `close()` raises `CclClosedError` — this is deliberate: passing a stale isolate handle to the native side would abort the whole process uncatchably, so the wrapper converts it into a catchable exception.
 
@@ -29,7 +29,7 @@ class Network(IntEnum):
     TESTNET = 1
 ```
 
-Every method that derives keys (`account`, `wallet`, `gov`, signing) requires a `network` argument. Omitting it raises `TypeError`; an out-of-range value raises `ValueError` before any native call. Being an `IntEnum`, plain ints 0–3 are accepted too, but prefer the enum.
+Every method that derives keys or signs requires a `network` argument. Omitting it raises `TypeError`; an out-of-range value raises `ValueError` before any native call. Being an `IntEnum`, plain ints 0 or 1 are accepted too, but prefer the enum.
 
 > **Gotcha:** these values are CCL enum ordinals, **not** Cardano's on-chain network id — the two are inverted for mainnet/testnet (`Network.MAINNET == 0`, but a mainnet address's on-chain `network_id` is `1`). `address.info()["network_id"]` is the genuine on-chain value; never feed it back into an API that takes a `network`.
 
@@ -61,31 +61,6 @@ Error codes on `CclError.code` (also available as `CclLib.CCL_ERROR_*` constants
 
 Predicate methods (`address.validate`, `crypto.validate_mnemonic`, `crypto.verify`) return `False` instead of raising.
 
-## lib.account
-
-```python
-create(network) -> dict
-from_mnemonic(mnemonic, network, account_index=0, address_index=0) -> dict
-get_private_key(mnemonic, network, account_index=0, address_index=0) -> str   # extended key, 128 hex chars
-get_public_key(mnemonic, network, account_index=0, address_index=0) -> str    # 64 hex chars
-get_drep_id(mnemonic, network, account_index=0) -> str                        # "drep1..."
-sign_tx(mnemonic, tx_cbor_hex, network, account_index=0, address_index=0) -> str
-sign_tx_with_keys(mnemonic, tx_cbor_hex, keys, network, account_index=0, address_index=0) -> str
-```
-
-`create`/`from_mnemonic` return `{"mnemonic", "base_address", "enterprise_address", "stake_address"}`.
-
-- `create` generates a fresh 24-word mnemonic; treat `result["mnemonic"]` as a secret.
-- `get_private_key` returns the 64-byte **extended** key as 128 hex chars. For raw Ed25519 signing (`crypto.sign`) use the first 64 hex chars (`key[:64]`).
-- `sign_tx` witnesses with the payment key only. When a transaction carries certificates that need other witnesses, use `sign_tx_with_keys` — `keys` is a list (or comma-separated string) of roles applied in order: `"payment"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`:
-
-```python
-# A stake registration needs the payment key (fee) and the stake key (certificate):
-signed = lib.account.sign_tx_with_keys(mnemonic, result["tx_cbor"], ["payment", "stake"], Network.TESTNET)
-```
-
-> Note the argument order: unlike the other wrappers, `sign_tx`/`sign_tx_with_keys` take the transaction (and keys) **before** the network.
-
 ## lib.accounts — managed accounts
 
 Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
@@ -107,8 +82,12 @@ with lib.accounts.from_mnemonic(mnemonic, Network.TESTNET) as acct:   # or lib.a
   export on a mnemonic-opened account.
 - `sign_tx(tx_cbor_hex, roles=SigningRole.PAYMENT)` — typed roles (`PAYMENT`, `STAKE`, `DREP`,
   `COMMITTEE_COLD`, `COMMITTEE_HOT`), combined with `|`; witnesses apply in canonical order, so the
-  output is byte-identical to `lib.account.sign_tx_with_keys`. An empty mask is rejected.
+  witnesses apply in canonical order. An empty mask is rejected.
 - `close()` is idempotent; the context manager calls it. `repr(account)` shows only the handle.
+- `info` returns public data only: the base/enterprise/stake addresses, network and derivation
+  indices, `drep_id`, and the committee identifiers (`committee_cold_id`/`committee_hot_id`,
+  bech32, plus `committee_cold_credential`/`committee_hot_credential` — the hex blake2b-224
+  verification-key hashes used in committee certificates).
 
 An account is bound to **one CIP-1852 payment leaf** (`m/1852'/1815'/account'/0/address_index`): one handle, one payment address — open further accounts for further address indices. The stake/DRep/committee keys sit at their standard role indices *independent of* `address_index`, so accounts at different address indices of one account index **share a single stake/DRep identity**.
 
@@ -132,11 +111,17 @@ generate_mnemonic(word_count=24) -> str
 validate_mnemonic(mnemonic) -> bool
 sign(message_hex, sk_hex) -> str   # Ed25519; 32-byte key (64 hex chars)
 verify(signature_hex, message_hex, pk_hex) -> bool
+derive_key(mnemonic, account_index=0, address_index=0, role="payment") -> dict
 ```
+
+`derive_key` is the stateless CIP-1852 "raw key material" utility — `role` is one of `"payment"`,
+`"change"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`; it returns `{"path",
+"private_key", "public_key", "public_key_hash"}`. Key derivation is network-independent. Prefer
+managed accounts for signing — handles never expose key bytes.
 
 ```python
 digest = lib.crypto.blake2b_256("48656c6c6f")            # "Hello"
-sk = lib.account.get_private_key(mnemonic, Network.TESTNET)[:64]
+sk = lib.crypto.derive_key(mnemonic)["private_key"][:64]
 sig = lib.crypto.sign("68656c6c6f", sk)
 ```
 
@@ -183,25 +168,13 @@ script = json.loads(lib.script.native_from_json(json.dumps({"type": "sig", "keyH
 # script["policy_id"], script["script_hash"], script["cbor_hex"]
 ```
 
-## lib.gov
+## Governance identity and HD-wallet flows
 
-```python
-drep_key_from_mnemonic(mnemonic, network, account_index=0) -> dict
-committee_cold_key_from_mnemonic(mnemonic, network, account_index=0) -> dict
-committee_hot_key_from_mnemonic(mnemonic, network, account_index=0) -> dict
-```
-
-The DRep method returns `{"drep_id": "drep1...", "verification_key", "verification_key_hash"}`; committee methods return `{"id": "cc_cold1..." / "cc_hot1...", ...}`.
-
-## lib.wallet
-
-HD wallet: one mnemonic, many sequential addresses.
-
-```python
-create(network) -> dict                              # {"mnemonic", "stake_address", "addresses"}
-from_mnemonic(mnemonic, network) -> dict
-get_address(mnemonic, network, index=0) -> str       # bech32
-```
+There is no separate gov/wallet API. Governance *identity* (DRep id, committee ids and
+credentials) is public data on `account.info`; governance *signing* uses `sign_tx` with the
+`DREP`/`COMMITTEE_*` roles; raw governance key material comes from `lib.crypto.derive_key`.
+An HD wallet is one recovery phrase with one managed handle per CIP-1852 payment leaf — pass
+`address_index` to `lib.accounts.from_mnemonic` to enumerate addresses.
 
 ## lib.quicktx
 

@@ -20,8 +20,8 @@
    It is a different value from the ``Network`` member you passed in, and must not be fed
    back into these APIs::
 
-       acct = lib.account.create(Network.MAINNET)          # Network.MAINNET == 0
-       lib.address.info(acct["base_address"])["network_id"] # -> 1  (the on-chain id)
+       acct = lib.accounts.create(Network.MAINNET)              # Network.MAINNET == 0
+       lib.address.info(acct.info["base_address"])["network_id"] # -> 1  (the on-chain id)
 
 ``Network`` is an :class:`enum.IntEnum`, so it is wire-compatible with the native call and a
 plain ``int`` of 0 or 1 is still accepted anywhere a ``Network`` is.

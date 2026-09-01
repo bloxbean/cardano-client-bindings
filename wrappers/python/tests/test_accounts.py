@@ -32,27 +32,33 @@ transaction:
     return ccl.quicktx.build(yaml, utxos, PROTOCOL_PARAMS, additional_signers=1)["tx_cbor"]
 
 
-def test_open_info_matches_legacy_derivation(ccl):
-    legacy = ccl.account.from_mnemonic(TEST_MNEMONIC, Network.TESTNET)
+def test_open_info_matches_pinned_derivation(ccl):
+    # Pinned CIP-1852 derivation for the standard CCL test mnemonic at testnet 0/0. The
+    # mnemonic-path equivalence proof lives in the core's AccountKeyDerivationParityTest;
+    # these literals guard the wrapper against derivation regressions.
     with ccl.accounts.from_mnemonic(TEST_MNEMONIC, Network.TESTNET) as acct:
         info = acct.info
-        assert info["base_address"] == legacy["base_address"]
-        assert info["enterprise_address"] == legacy["enterprise_address"]
-        assert info["stake_address"] == legacy["stake_address"]
+        assert info["base_address"] == (
+            "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer"
+            "3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp")
+        assert info["enterprise_address"] == (
+            "addr_test1vz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzerspjrlsz")
+        assert info["stake_address"] == (
+            "stake_test1uqevw2xnsc0pvn9t9r9c7qryfqfeerchgrlm3ea2nefr9hqp8n5xl")
         assert info["network"] == int(Network.TESTNET)
         assert info["account_index"] == 0 and info["address_index"] == 0
         assert "mnemonic" not in info
 
 
-def test_sign_parity_with_mnemonic_per_call_path(ccl):
+def test_sign_is_deterministic_and_mask_order_free(ccl):
     with ccl.accounts.from_mnemonic(TEST_MNEMONIC, Network.TESTNET) as acct:
         unsigned = _unsigned_stake_reg(ccl, acct.info)
 
-        assert acct.sign_tx(unsigned) == ccl.account.sign_tx(
-            TEST_MNEMONIC, unsigned, Network.TESTNET)
-        assert acct.sign_tx(unsigned, SigningRole.PAYMENT | SigningRole.STAKE) == \
-            ccl.account.sign_tx_with_keys(
-                TEST_MNEMONIC, unsigned, ["payment", "stake"], Network.TESTNET)
+        # Deterministic: signing twice yields byte-identical output.
+        assert acct.sign_tx(unsigned) == acct.sign_tx(unsigned)
+        # A stake registration gains a second witness with the stake role.
+        assert len(acct.sign_tx(unsigned, SigningRole.PAYMENT | SigningRole.STAKE)) > \
+            len(acct.sign_tx(unsigned))
         # Mask order is irrelevant — canonical application order fixes the output.
         assert acct.sign_tx(unsigned, SigningRole.STAKE | SigningRole.PAYMENT) == \
             acct.sign_tx(unsigned, SigningRole.PAYMENT | SigningRole.STAKE)

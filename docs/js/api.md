@@ -21,7 +21,7 @@ close(): void
 [Symbol.dispose](): void
 ```
 
-Constructing a bridge loads the native library (see [resolution order](troubleshooting.md#how-the-native-library-is-found)), creates a GraalVM isolate, and verifies the library version matches the wrapper. The API groups are properties: `bridge.account`, `bridge.address`, `bridge.crypto`, `bridge.tx`, `bridge.plutus`, `bridge.script`, `bridge.gov`, `bridge.wallet`, `bridge.quicktx`.
+Constructing a bridge loads the native library (see [resolution order](troubleshooting.md#how-the-native-library-is-found)), creates a GraalVM isolate, and verifies the library version matches the wrapper. The API groups are properties: `bridge.accounts`, `bridge.address`, `bridge.crypto`, `bridge.tx`, `bridge.plutus`, `bridge.script`, `bridge.quicktx`.
 
 **Lifecycle.** `close()` tears down the isolate and is idempotent. Any call after `close()` throws `CclClosedError` — this is deliberate: passing a stale isolate handle to the native side would abort the whole process uncatchably, so the wrapper converts it into a catchable error. Use `try/finally` or the `using` declaration:
 
@@ -69,34 +69,6 @@ Error codes on `CclError.code`:
 
 Validation-style methods (`address.validate`, `crypto.validateMnemonic`, `crypto.verify`) return `false` instead of throwing.
 
-## bridge.account
-
-```ts
-create(network: Network): AccountInfo
-fromMnemonic(mnemonic: string, network: Network, accountIndex = 0, addressIndex = 0): AccountInfo
-getPrivateKey(mnemonic: string, network: Network, accountIndex = 0, addressIndex = 0): string
-getPublicKey(mnemonic: string, network: Network, accountIndex = 0, addressIndex = 0): string
-getDrepId(mnemonic: string, network: Network, accountIndex = 0): string
-signTx(mnemonic: string, network: Network, accountIndex: number, addressIndex: number, txCborHex: string): string
-signTxWithKeys(mnemonic: string, network: Network, accountIndex: number, addressIndex: number,
-               txCborHex: string, keys: SigningKeyRole[] | SigningKeyRole): string
-```
-
-`AccountInfo` = `{ mnemonic, base_address, enterprise_address, stake_address, change_address }`.
-
-- `create` generates a fresh 24-word mnemonic; treat the returned `mnemonic` as a secret.
-- `getPrivateKey` returns the 64-byte **extended** key as 128 hex chars. For raw Ed25519 signing (`crypto.sign`) use the first 64 hex chars.
-- `signTx` witnesses with the payment key only. When a transaction carries certificates that need other witnesses, use `signTxWithKeys` with the roles in order:
-
-```ts
-type SigningKeyRole = "payment" | "stake" | "drep" | "committee_cold" | "committee_hot"
-```
-
-```js
-// A DRep registration needs the payment key (fee) and the DRep key (certificate):
-const signed = bridge.account.signTxWithKeys(mnemonic, TESTNET, 0, 0, result.tx_cbor, ["payment", "drep"]);
-```
-
 ## bridge.accounts — managed accounts
 
 Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
@@ -121,9 +93,13 @@ try {
   deliberately, with `acct.exportRecoveryPhrase()` — a second call fails, as does export on a
   mnemonic-opened account.
 - `signTx(txCborHex, roles = SigningRole.PAYMENT)` — typed roles combined with `|`; witnesses apply
-  in canonical order, byte-identical to `account.signTxWithKeys`. An empty mask is rejected.
+  in canonical order. An empty mask is rejected.
 - `close()` is idempotent; `Symbol.dispose` supports `using`-declarations. `String(acct)` shows only
   the handle.
+- `info` returns public data only: the base/enterprise/stake addresses, network and derivation
+  indices, `drep_id`, and the committee identifiers (`committee_cold_id`/`committee_hot_id`, bech32,
+  plus `committee_cold_credential`/`committee_hot_credential` — hex blake2b-224 verification-key
+  hashes, as used in committee certificates).
 
 An account is bound to **one CIP-1852 payment leaf** (`m/1852'/1815'/account'/0/address_index`): one handle, one payment address — open further accounts for further address indices. The stake/DRep/committee keys sit at their standard role indices *independent of* `address_index`, so accounts at different address indices of one account index **share a single stake/DRep identity**.
 
@@ -147,11 +123,17 @@ generateMnemonic(wordCount = 24): string
 validateMnemonic(mnemonic: string): boolean
 sign(messageHex: string, skHex: string): string      // Ed25519; 32-byte key (64 hex chars)
 verify(signatureHex: string, messageHex: string, pkHex: string): boolean
+deriveKey(mnemonic: string, accountIndex = 0, addressIndex = 0, role: DeriveKeyRole = 'payment'): DerivedKey
 ```
+
+`deriveKey` is the stateless CIP-1852 "raw key material" utility — `role` is one of `'payment'`,
+`'change'`, `'stake'`, `'drep'`, `'committee_cold'`, `'committee_hot'`; it returns `{ path,
+private_key, public_key, public_key_hash }`. Key derivation is network-independent. Prefer managed
+accounts for signing — handles never expose key bytes.
 
 ```js
 const digest = bridge.crypto.blake2b256("48656c6c6f");          // "Hello"
-const sk = bridge.account.getPrivateKey(mnemonic, TESTNET).slice(0, 64);
+const sk = bridge.crypto.deriveKey(mnemonic).private_key.slice(0, 64);
 const sig = bridge.crypto.sign("68656c6c6f", sk);
 ```
 
@@ -193,27 +175,13 @@ const script = JSON.parse(bridge.script.nativeFromJson(JSON.stringify({ type: "s
 // script.policy_id, script.script_hash, script.cbor_hex
 ```
 
-## bridge.gov
+## Governance identity and HD-wallet flows
 
-```ts
-drepKeyFromMnemonic(mnemonic: string, network: Network, accountIndex = 0): DrepKeyInfo
-committeeColdKeyFromMnemonic(mnemonic: string, network: Network, accountIndex = 0): CommitteeKeyInfo
-committeeHotKeyFromMnemonic(mnemonic: string, network: Network, accountIndex = 0): CommitteeKeyInfo
-```
-
-`DrepKeyInfo` = `{ drep_id /* drep1... */, verification_key, verification_key_hash, bech32_verification_key, bech32_verification_key_hash }`. Committee results carry `id` (`cc_cold1...` / `cc_hot1...`) instead of `drep_id`.
-
-## bridge.wallet
-
-HD wallet: one mnemonic, many sequential addresses.
-
-```ts
-create(network: Network): WalletInfo
-fromMnemonic(mnemonic: string, network: Network): WalletInfo
-getAddress(mnemonic: string, network: Network, index = 0): string
-```
-
-`WalletInfo` = `{ mnemonic, stake_address, addresses: string[] }`.
+There is no separate gov/wallet API. Governance *identity* (DRep id, committee ids and credentials)
+is public data on `acct.info`; governance *signing* uses `signTx` with the `DREP`/`COMMITTEE_*`
+roles; raw governance key material comes from `bridge.crypto.deriveKey`. An HD wallet is one
+recovery phrase with one managed handle per CIP-1852 payment leaf — pass `addressIndex` to
+`bridge.accounts.fromMnemonic` to enumerate addresses.
 
 ## bridge.quicktx
 

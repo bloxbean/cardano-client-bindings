@@ -36,10 +36,7 @@ func TestVersion(t *testing.T) {
 }
 
 func TestAccountCreate(t *testing.T) {
-	info, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	info := createTestAccount(t, Mainnet)
 
 	if !strings.HasPrefix(info.BaseAddress, "addr1") {
 		t.Errorf("expected mainnet address prefix, got %s", info.BaseAddress)
@@ -52,68 +49,57 @@ func TestAccountCreate(t *testing.T) {
 }
 
 func TestAccountFromMnemonic(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
+	created := createTestAccount(t, Mainnet)
+
+	restored, err := bridge.Accounts.FromMnemonic(created.Mnemonic, Mainnet, 0, 0)
 	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
+		t.Fatalf("Accounts.FromMnemonic() failed: %v", err)
+	}
+	defer restored.Close()
+	rinfo, err := restored.Info()
+	if err != nil {
+		t.Fatalf("Info() failed: %v", err)
 	}
 
-	restored, err := bridge.Account.FromMnemonic(created.Mnemonic, Mainnet, 0, 0)
-	if err != nil {
-		t.Fatalf("Account.FromMnemonic() failed: %v", err)
-	}
-
-	if restored.BaseAddress != created.BaseAddress {
-		t.Errorf("addresses don't match: %s != %s", restored.BaseAddress, created.BaseAddress)
+	if rinfo.BaseAddress != created.BaseAddress {
+		t.Errorf("addresses don't match: %s != %s", rinfo.BaseAddress, created.BaseAddress)
 	}
 }
 
 func TestAccountGetKeys(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
-	privKey, err := bridge.Account.GetPrivateKey(created.Mnemonic, Mainnet, 0, 0)
+	key, err := bridge.Crypto.DeriveKey(created.Mnemonic, 0, 0, "payment")
 	if err != nil {
-		t.Fatalf("Account.GetPrivateKey() failed: %v", err)
+		t.Fatalf("Crypto.DeriveKey() failed: %v", err)
 	}
-	if len(privKey) != 128 {
-		t.Errorf("expected 128 hex chars (64 bytes extended), got %d", len(privKey))
+	if len(key.PrivateKey) != 128 {
+		t.Errorf("expected 128 hex chars (64 bytes extended), got %d", len(key.PrivateKey))
 	}
-
-	pubKey, err := bridge.Account.GetPublicKey(created.Mnemonic, Mainnet, 0, 0)
-	if err != nil {
-		t.Fatalf("Account.GetPublicKey() failed: %v", err)
-	}
-	if len(pubKey) != 64 {
-		t.Errorf("expected 64 hex chars public key, got %d", len(pubKey))
+	if len(key.PublicKey) != 64 {
+		t.Errorf("expected 64 hex chars public key, got %d", len(key.PublicKey))
 	}
 }
 
 func TestAccountGetDRepID(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
-	drepID, err := bridge.Account.GetDRepID(created.Mnemonic, Mainnet, 0)
-	if err != nil {
-		t.Fatalf("Account.GetDRepID() failed: %v", err)
-	}
-	if !strings.HasPrefix(drepID, "drep1") {
-		t.Errorf("expected drep1 prefix, got %s", drepID)
+	if !strings.HasPrefix(created.DRepID, "drep1") {
+		t.Errorf("expected drep1 prefix, got %s", created.DRepID)
 	}
 }
 
 func TestAccountSignTx(t *testing.T) {
-	created, err := bridge.Account.Create(Testnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Testnet)
 
-	signed, err := bridge.Account.SignTx(created.Mnemonic, Testnet, 0, 0, sampleTxCbor)
+	acct, err := bridge.Accounts.FromMnemonic(created.Mnemonic, Testnet, 0, 0)
 	if err != nil {
-		t.Fatalf("Account.SignTx() failed: %v", err)
+		t.Fatalf("Accounts.FromMnemonic() failed: %v", err)
+	}
+	defer acct.Close()
+	signed, err := acct.SignTx(sampleTxCbor, RolePayment)
+	if err != nil {
+		t.Fatalf("SignTx() failed: %v", err)
 	}
 	if len(signed) <= len(sampleTxCbor) {
 		t.Error("signed tx should be larger than unsigned")
@@ -121,10 +107,7 @@ func TestAccountSignTx(t *testing.T) {
 }
 
 func TestAddressToFromBytes(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
 	hexBytes, err := bridge.Address.ToBytes(created.BaseAddress)
 	if err != nil {
@@ -144,10 +127,7 @@ func TestAddressToFromBytes(t *testing.T) {
 }
 
 func TestAddressValidate(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
 	if !bridge.Address.Validate(created.BaseAddress) {
 		t.Error("valid address should pass validation")
@@ -159,10 +139,7 @@ func TestAddressValidate(t *testing.T) {
 }
 
 func TestAddressInfo(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
 	info, err := bridge.Address.Info(created.BaseAddress)
 	if err != nil {
@@ -217,18 +194,15 @@ func TestCryptoMnemonic(t *testing.T) {
 }
 
 func TestCryptoSign(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
-	privKey, err := bridge.Account.GetPrivateKey(created.Mnemonic, Mainnet, 0, 0)
+	key, err := bridge.Crypto.DeriveKey(created.Mnemonic, 0, 0, "payment")
 	if err != nil {
-		t.Fatalf("Account.GetPrivateKey() failed: %v", err)
+		t.Fatalf("Crypto.DeriveKey() failed: %v", err)
 	}
 
 	// Use first 32 bytes (64 hex chars) for standard Ed25519 sign
-	privKey32 := privKey[:64]
+	privKey32 := key.PrivateKey[:64]
 
 	messageHex := "68656c6c6f"
 	sig, err := bridge.Crypto.Sign(messageHex, privKey32)
@@ -297,10 +271,7 @@ func TestPlutusDataHash(t *testing.T) {
 }
 
 func TestScriptNativeFromJson(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
 	addrInfo, err := bridge.Address.Info(created.BaseAddress)
 	if err != nil {
@@ -329,10 +300,7 @@ func TestScriptNativeFromJson(t *testing.T) {
 }
 
 func TestScriptHash(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
 	addrInfo, err := bridge.Address.Info(created.BaseAddress)
 	if err != nil {
@@ -359,64 +327,52 @@ func TestScriptHash(t *testing.T) {
 }
 
 func TestGovDrepKey(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
-	info, err := bridge.Gov.DrepKeyFromMnemonic(created.Mnemonic, Mainnet, 0)
+	key, err := bridge.Crypto.DeriveKey(created.Mnemonic, 0, 0, "drep")
 	if err != nil {
-		t.Fatalf("Gov.DrepKeyFromMnemonic() failed: %v", err)
+		t.Fatalf("Crypto.DeriveKey(drep) failed: %v", err)
 	}
-	if len(info.VerificationKey) == 0 {
+	if len(key.PublicKey) == 0 {
 		t.Error("verification key should not be empty")
 	}
-	if !strings.HasPrefix(info.DrepID, "drep1") {
-		t.Errorf("expected drep1 prefix, got %s", info.DrepID)
+	if !strings.HasPrefix(created.DRepID, "drep1") {
+		t.Errorf("expected drep1 prefix, got %s", created.DRepID)
 	}
 }
 
 func TestGovCommitteeColdKey(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
-	info, err := bridge.Gov.CommitteeColdKeyFromMnemonic(created.Mnemonic, Mainnet, 0)
+	key, err := bridge.Crypto.DeriveKey(created.Mnemonic, 0, 0, "committee_cold")
 	if err != nil {
-		t.Fatalf("Gov.CommitteeColdKeyFromMnemonic() failed: %v", err)
+		t.Fatalf("Crypto.DeriveKey(committee_cold) failed: %v", err)
 	}
-	if len(info.VerificationKey) == 0 {
+	if len(key.PublicKey) == 0 {
 		t.Error("verification key should not be empty")
 	}
-	if !strings.HasPrefix(info.ID, "cc_cold1") {
-		t.Errorf("expected cc_cold1 prefix, got %s", info.ID)
+	if !strings.HasPrefix(created.CommitteeColdID, "cc_cold1") {
+		t.Errorf("expected cc_cold1 prefix, got %s", created.CommitteeColdID)
 	}
 }
 
 func TestGovCommitteeHotKey(t *testing.T) {
-	created, err := bridge.Account.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Account.Create() failed: %v", err)
-	}
+	created := createTestAccount(t, Mainnet)
 
-	info, err := bridge.Gov.CommitteeHotKeyFromMnemonic(created.Mnemonic, Mainnet, 0)
+	key, err := bridge.Crypto.DeriveKey(created.Mnemonic, 0, 0, "committee_hot")
 	if err != nil {
-		t.Fatalf("Gov.CommitteeHotKeyFromMnemonic() failed: %v", err)
+		t.Fatalf("Crypto.DeriveKey(committee_hot) failed: %v", err)
 	}
-	if len(info.VerificationKey) == 0 {
+	if len(key.PublicKey) == 0 {
 		t.Error("verification key should not be empty")
 	}
-	if !strings.HasPrefix(info.ID, "cc_hot1") {
-		t.Errorf("expected cc_hot1 prefix, got %s", info.ID)
+	if !strings.HasPrefix(created.CommitteeHotID, "cc_hot1") {
+		t.Errorf("expected cc_hot1 prefix, got %s", created.CommitteeHotID)
 	}
 }
 
 func TestWalletCreate(t *testing.T) {
-	wallet, err := bridge.Wallet.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Wallet.Create() failed: %v", err)
-	}
+	wallet := createTestAccount(t, Mainnet)
 
 	words := strings.Fields(wallet.Mnemonic)
 	if len(words) != 24 {
@@ -425,40 +381,46 @@ func TestWalletCreate(t *testing.T) {
 }
 
 func TestWalletFromMnemonic(t *testing.T) {
-	wallet, err := bridge.Wallet.Create(Mainnet)
+	wallet := createTestAccount(t, Mainnet)
+
+	restored, err := bridge.Accounts.FromMnemonic(wallet.Mnemonic, Mainnet, 0, 0)
 	if err != nil {
-		t.Fatalf("Wallet.Create() failed: %v", err)
+		t.Fatalf("Accounts.FromMnemonic() failed: %v", err)
+	}
+	defer restored.Close()
+	rinfo, err := restored.Info()
+	if err != nil {
+		t.Fatalf("Info() failed: %v", err)
 	}
 
-	restored, err := bridge.Wallet.FromMnemonic(wallet.Mnemonic, Mainnet)
-	if err != nil {
-		t.Fatalf("Wallet.FromMnemonic() failed: %v", err)
-	}
-
-	if restored.StakeAddress != wallet.StakeAddress {
-		t.Errorf("stake addresses don't match: %s != %s", restored.StakeAddress, wallet.StakeAddress)
+	if rinfo.StakeAddress != wallet.StakeAddress {
+		t.Errorf("stake addresses don't match: %s != %s", rinfo.StakeAddress, wallet.StakeAddress)
 	}
 }
 
 func TestWalletGetAddress(t *testing.T) {
-	wallet, err := bridge.Wallet.Create(Mainnet)
-	if err != nil {
-		t.Fatalf("Wallet.Create() failed: %v", err)
+	wallet := createTestAccount(t, Mainnet)
+
+	// Address enumeration is one managed handle per CIP-1852 payment leaf.
+	addrAt := func(index int) string {
+		acct, err := bridge.Accounts.FromMnemonic(wallet.Mnemonic, Mainnet, 0, index)
+		if err != nil {
+			t.Fatalf("Accounts.FromMnemonic(index %d) failed: %v", index, err)
+		}
+		defer acct.Close()
+		info, err := acct.Info()
+		if err != nil {
+			t.Fatalf("Info() failed: %v", err)
+		}
+		return info.BaseAddress
 	}
 
-	addr0, err := bridge.Wallet.GetAddress(wallet.Mnemonic, Mainnet, 0)
-	if err != nil {
-		t.Fatalf("Wallet.GetAddress(0) failed: %v", err)
-	}
+	addr0 := addrAt(0)
 	if !strings.HasPrefix(addr0, "addr1") {
 		t.Errorf("expected addr1 prefix, got %s", addr0)
 	}
 
-	addr1, err := bridge.Wallet.GetAddress(wallet.Mnemonic, Mainnet, 1)
-	if err != nil {
-		t.Fatalf("Wallet.GetAddress(1) failed: %v", err)
-	}
-	if addr0 == addr1 {
+	if addr1 := addrAt(1); addr0 == addr1 {
 		t.Error("addresses at different indices should differ")
 	}
 }
@@ -563,8 +525,8 @@ transaction:
 }
 
 func TestQuickTxSimplePayment(t *testing.T) {
-	sender, _ := bridge.Account.Create(Testnet)
-	receiver, _ := bridge.Account.Create(Testnet)
+	sender := createTestAccount(t, Testnet)
+	receiver := createTestAccount(t, Testnet)
 
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "5000000")
 	result, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 100_000_000), testProtocolParams(), 0)
@@ -575,9 +537,9 @@ func TestQuickTxSimplePayment(t *testing.T) {
 }
 
 func TestQuickTxMultiplePayments(t *testing.T) {
-	sender, _ := bridge.Account.Create(Testnet)
-	r1, _ := bridge.Account.Create(Testnet)
-	r2, _ := bridge.Account.Create(Testnet)
+	sender := createTestAccount(t, Testnet)
+	r1 := createTestAccount(t, Testnet)
+	r2 := createTestAccount(t, Testnet)
 
 	yaml := fmt.Sprintf(`
 version: 1.0
@@ -605,8 +567,8 @@ transaction:
 }
 
 func TestQuickTxVariableSubstitution(t *testing.T) {
-	sender, _ := bridge.Account.Create(Testnet)
-	receiver, _ := bridge.Account.Create(Testnet)
+	sender := createTestAccount(t, Testnet)
+	receiver := createTestAccount(t, Testnet)
 
 	yaml := fmt.Sprintf(`
 version: 1.0
@@ -632,12 +594,44 @@ transaction:
 }
 
 func TestQuickTxInsufficientFunds(t *testing.T) {
-	sender, _ := bridge.Account.Create(Testnet)
-	receiver, _ := bridge.Account.Create(Testnet)
+	sender := createTestAccount(t, Testnet)
+	receiver := createTestAccount(t, Testnet)
 
 	yaml := quickTxYaml(sender.BaseAddress, receiver.BaseAddress, "200000000")
 	_, err := bridge.QuickTx.Build(yaml, makeUtxos(sender.BaseAddress, 1_000_000), testProtocolParams(), 0)
 	if err == nil {
 		t.Fatal("expected insufficient funds error")
 	}
+}
+
+// testAccount mirrors what the tests need from a freshly created account: its public
+// addresses plus the one-shot recovery phrase, all obtained through the managed API.
+type testAccount struct {
+	Mnemonic          string
+	BaseAddress       string
+	EnterpriseAddress string
+	StakeAddress      string
+	DRepID            string
+	CommitteeColdID   string
+	CommitteeHotID    string
+}
+
+func createTestAccount(t *testing.T, network Network) testAccount {
+	t.Helper()
+	acct, err := bridge.Accounts.Create(network)
+	if err != nil {
+		t.Fatalf("Accounts.Create() failed: %v", err)
+	}
+	defer acct.Close()
+	info, err := acct.Info()
+	if err != nil {
+		t.Fatalf("Info() failed: %v", err)
+	}
+	phrase, err := acct.ExportRecoveryPhrase()
+	if err != nil {
+		t.Fatalf("ExportRecoveryPhrase() failed: %v", err)
+	}
+	return testAccount{Mnemonic: phrase, BaseAddress: info.BaseAddress,
+		EnterpriseAddress: info.EnterpriseAddress, StakeAddress: info.StakeAddress,
+		DRepID: info.DRepID, CommitteeColdID: info.CommitteeColdID, CommitteeHotID: info.CommitteeHotID}
 }

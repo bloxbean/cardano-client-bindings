@@ -62,11 +62,10 @@ use ccl::{Bridge, Network};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bridge = Bridge::new()?; // loads libccl, starts a GraalVM isolate
 
-    // API methods return JSON strings; parse with serde_json.
-    let account = bridge.account().create(Network::Testnet)?;
-    let json: serde_json::Value = serde_json::from_str(&account)?;
-    println!("{}", json["base_address"]); // addr_test1...
-    println!("{}", json["mnemonic"]);     // 24-word phrase
+    // Managed account handle (ADR-0016): info is public data only.
+    let account = bridge.accounts().create(Network::Testnet)?;
+    println!("{}", account.info()?["base_address"]); // addr_test1...
+    println!("{}", account.export_recovery_phrase()?); // 24-word phrase — one-shot
     Ok(())
 } // Bridge's Drop tears down the isolate
 ```
@@ -74,8 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## API surface
 
 A `Bridge` exposes namespaced accessors (all offline operations):
-`bridge.account()`, `.address()`, `.crypto()`, `.tx()`, `.plutus()`, `.script()`,
-`.gov()`, `.wallet()`, `.quicktx()`.
+`bridge.accounts()`, `.address()`, `.crypto()`, `.tx()`, `.plutus()`, `.script()`,
+`.quicktx()`.
 
 Most methods return `Result<String>` where the `String` is JSON — parse it with
 `serde_json`.

@@ -242,13 +242,6 @@ export class CclBridge {
       ccl_free_string: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.void },
 
       // Account
-      ccl_account_create: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
-      ccl_account_from_mnemonic: { args: [FFIType.ptr, FFIType.i32, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-      ccl_account_get_private_key: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-      ccl_account_get_public_key: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-      ccl_account_get_drep_id: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-      ccl_account_sign_tx: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.cstring], returns: FFIType.i32 },
-      ccl_account_sign_tx_multi: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
 
       // Address
       ccl_address_info: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
@@ -263,6 +256,7 @@ export class CclBridge {
       ccl_crypto_validate_mnemonic: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
       ccl_crypto_sign: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
       ccl_crypto_verify: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
+      ccl_crypto_derive_key: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.cstring], returns: FFIType.i32 },
 
       // Transaction
       ccl_tx_sign_with_secret_key: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring], returns: FFIType.i32 },
@@ -281,14 +275,8 @@ export class CclBridge {
       ccl_script_hash: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
 
       // Governance
-      ccl_gov_drep_key_from_mnemonic: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-      ccl_gov_committee_cold_key_from_mnemonic: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-      ccl_gov_committee_hot_key_from_mnemonic: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 
       // Wallet
-      ccl_wallet_create: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
-      ccl_wallet_from_mnemonic: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
-      ccl_wallet_get_address: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
 
       // QuickTx
       ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
@@ -321,14 +309,11 @@ export class CclBridge {
     this._checkVersion();
 
     // Namespace APIs
-    this.account = new AccountApi(this);
     this.address = new AddressApi(this);
     this.crypto = new CryptoApi(this);
     this.tx = new TxApi(this);
     this.plutus = new PlutusApi(this);
     this.script = new ScriptApi(this);
-    this.gov = new GovApi(this);
-    this.wallet = new WalletApi(this);
     this.quicktx = new QuickTxApi(this);
     this.accounts = new AccountsApi(this);
   }
@@ -411,71 +396,6 @@ export class CclBridge {
 
 // --- Namespace API classes ---
 
-class AccountApi {
-  constructor(bridge) { this._b = bridge; }
-
-  /**
-   * Create a new account (random 24-word mnemonic) on `network`.
-   *
-   * @param {0|1} network - MAINNET (0) or TESTNET (1). Required, and a
-   *   CCL enum ordinal — **not** Cardano's on-chain network id, which is inverted (on-chain: 0 =
-   *   testnet, 1 = mainnet). An account created with MAINNET (the ordinal 0) has an
-   *   `address.info().network_id` of 1; one created with TESTNET (the ordinal 1) has 0.
-   * @returns {{mnemonic: string, base_address: string, enterprise_address: string, stake_address: string, change_address: string}}
-   */
-  create(network) {
-    checkNetwork(network);
-    return JSON.parse(this._b._check(this._b._lib.ccl_account_create(this._b._thread, network)));
-  }
-
-  /** Restore an account from a mnemonic. `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
-  fromMnemonic(mnemonic, network, accountIndex = 0, addressIndex = 0) {
-    checkNetwork(network);
-    return JSON.parse(this._b._check(
-      this._b._lib.ccl_account_from_mnemonic(this._b._thread, network, cstr(mnemonic), accountIndex, addressIndex)));
-  }
-
-  /** Extended private key (hex). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
-  getPrivateKey(mnemonic, network, accountIndex = 0, addressIndex = 0) {
-    checkNetwork(network);
-    return this._b._check(
-      this._b._lib.ccl_account_get_private_key(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex));
-  }
-
-  /** Public key (hex). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
-  getPublicKey(mnemonic, network, accountIndex = 0, addressIndex = 0) {
-    checkNetwork(network);
-    return this._b._check(
-      this._b._lib.ccl_account_get_public_key(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex));
-  }
-
-  /** DRep ID (bech32). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
-  getDrepId(mnemonic, network, accountIndex = 0) {
-    checkNetwork(network);
-    return this._b._check(
-      this._b._lib.ccl_account_get_drep_id(this._b._thread, cstr(mnemonic), network, accountIndex));
-  }
-
-  /** Sign a transaction with the account's payment key. `network` is a CCL ordinal (MAINNET === 0). */
-  signTx(mnemonic, network, accountIndex, addressIndex, txCborHex) {
-    checkNetwork(network);
-    return this._b._check(
-      this._b._lib.ccl_account_sign_tx(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex, cstr(txCborHex)));
-  }
-
-  // Sign with one or more of the account's keys, selected by role (any of: payment, stake, drep,
-  // committee_cold, committee_hot, applied in order). Use for transactions whose certificates also
-  // need the stake or DRep key — stake registration/delegation/withdrawal and DRep/vote operations.
-  //
-  // `network` is a CCL enum ordinal (MAINNET === 0), not the on-chain network id.
-  signTxWithKeys(mnemonic, network, accountIndex, addressIndex, txCborHex, keys) {
-    checkNetwork(network);
-    const keysStr = Array.isArray(keys) ? keys.join(",") : keys;
-    return this._b._check(
-      this._b._lib.ccl_account_sign_tx_multi(this._b._thread, cstr(mnemonic), network, accountIndex, addressIndex, cstr(txCborHex), cstr(keysStr)));
-  }
-}
-
 class AddressApi {
   constructor(bridge) { this._b = bridge; }
 
@@ -532,6 +452,19 @@ class CryptoApi {
   verify(signatureHex, messageHex, pkHex) {
     return this._b._lib.ccl_crypto_verify(this._b._thread, cstr(signatureHex), cstr(messageHex), cstr(pkHex)) === CCL_SUCCESS;
   }
+
+  /**
+   * Stateless CIP-1852 key derivation — the explicit "raw key material" utility.
+   *
+   * `role` is one of "payment", "change", "stake", "drep", "committee_cold", "committee_hot".
+   * Returns `{path, private_key, public_key, public_key_hash}`; the extended private key's first
+   * 64 hex chars are the raw Ed25519 key accepted by {@link CryptoApi#sign}. Key derivation is
+   * network-independent. Prefer managed accounts for signing — handles never expose key bytes.
+   */
+  deriveKey(mnemonic, accountIndex = 0, addressIndex = 0, role = "payment") {
+    return JSON.parse(this._b._check(this._b._lib.ccl_crypto_derive_key(
+      this._b._thread, cstr(mnemonic), accountIndex, addressIndex, cstr(role))));
+  }
 }
 
 class TxApi {
@@ -583,57 +516,6 @@ class ScriptApi {
 
   hash(scriptCborHex, scriptType = 0) {
     return this._b._check(this._b._lib.ccl_script_hash(this._b._thread, cstr(scriptCborHex), scriptType));
-  }
-}
-
-// Every `network` below is a CCL enum ordinal (MAINNET === 0, TESTNET === 1, …), *not* Cardano's
-// on-chain network id — those are inverted (on-chain: 0 = testnet, 1 = mainnet).
-class GovApi {
-  constructor(bridge) { this._b = bridge; }
-
-  /** DRep key + id. `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
-  drepKeyFromMnemonic(mnemonic, network, accountIndex = 0) {
-    checkNetwork(network);
-    return JSON.parse(this._b._check(
-      this._b._lib.ccl_gov_drep_key_from_mnemonic(this._b._thread, cstr(mnemonic), network, accountIndex)));
-  }
-
-  /** Constitutional-committee cold key. `network` is a CCL ordinal (MAINNET === 0). */
-  committeeColdKeyFromMnemonic(mnemonic, network, accountIndex = 0) {
-    checkNetwork(network);
-    return JSON.parse(this._b._check(
-      this._b._lib.ccl_gov_committee_cold_key_from_mnemonic(this._b._thread, cstr(mnemonic), network, accountIndex)));
-  }
-
-  /** Constitutional-committee hot key. `network` is a CCL ordinal (MAINNET === 0). */
-  committeeHotKeyFromMnemonic(mnemonic, network, accountIndex = 0) {
-    checkNetwork(network);
-    return JSON.parse(this._b._check(
-      this._b._lib.ccl_gov_committee_hot_key_from_mnemonic(this._b._thread, cstr(mnemonic), network, accountIndex)));
-  }
-}
-
-class WalletApi {
-  constructor(bridge) { this._b = bridge; }
-
-  /** Create a wallet (random mnemonic). `network` is a CCL ordinal (MAINNET === 0), not the on-chain id. */
-  create(network) {
-    checkNetwork(network);
-    return JSON.parse(this._b._check(this._b._lib.ccl_wallet_create(this._b._thread, network)));
-  }
-
-  /** Restore a wallet from a mnemonic. `network` is a CCL ordinal (MAINNET === 0). */
-  fromMnemonic(mnemonic, network) {
-    checkNetwork(network);
-    return JSON.parse(this._b._check(
-      this._b._lib.ccl_wallet_from_mnemonic(this._b._thread, cstr(mnemonic), network)));
-  }
-
-  /** The wallet's address at `index`. `network` is a CCL ordinal (MAINNET === 0). */
-  getAddress(mnemonic, network, index = 0) {
-    checkNetwork(network);
-    return this._b._check(
-      this._b._lib.ccl_wallet_get_address(this._b._thread, cstr(mnemonic), network, index));
   }
 }
 
@@ -726,10 +608,11 @@ export class Account {
 
   /**
    * Public account data: `{ base_address, enterprise_address, stake_address, network,
-   * account_index, address_index, drep_id }`. Never contains secrets.
+   * account_index, address_index, drep_id, committee_cold_id, committee_cold_credential,
+   * committee_hot_id, committee_hot_credential }`. Never contains secrets.
    */
   get info() {
-    const rc = this._b._lib.ccl_account_get_info(this._b._threadPtr, this._handle);
+    const rc = this._b._lib.ccl_account_get_info(this._b._thread, this._handle);
     return JSON.parse(this._b._check(rc));
   }
 
@@ -742,7 +625,7 @@ export class Account {
    */
   signTx(txCborHex, roles = SigningRole.PAYMENT) {
     const rc = this._b._lib.ccl_account_sign_tx_handle(
-      this._b._threadPtr, this._handle, cstr(txCborHex), roles);
+      this._b._thread, this._handle, cstr(txCborHex), roles);
     return this._b._check(rc);
   }
 
@@ -754,7 +637,7 @@ export class Account {
    * phrase). Persist the returned value securely; nothing else ever returns it.
    */
   exportRecoveryPhrase() {
-    const rc = this._b._lib.ccl_account_export_recovery_phrase(this._b._threadPtr, this._handle);
+    const rc = this._b._lib.ccl_account_export_recovery_phrase(this._b._thread, this._handle);
     return this._b._check(rc);
   }
 
@@ -763,7 +646,7 @@ export class Account {
     const handle = this._handle;
     this._handle = 0n; // 0 is never a valid handle
     if (handle && this._b._threadPtr !== null) {
-      const rc = this._b._lib.ccl_account_close(this._b._threadPtr, handle);
+      const rc = this._b._lib.ccl_account_close(this._b._thread, handle);
       this._b._check(rc);
     }
   }
@@ -791,7 +674,7 @@ export class AccountsApi {
     checkNetwork(network);
     const out = new BigInt64Array(1);
     const rc = this._b._lib.ccl_account_open_mnemonic(
-      this._b._threadPtr, network, cstr(mnemonic), accountIndex, addressIndex, ptr(out));
+      this._b._thread, network, cstr(mnemonic), accountIndex, addressIndex, ptr(out));
     this._b._check(rc);
     return new Account(this._b, out[0]);
   }
@@ -804,7 +687,7 @@ export class AccountsApi {
   create(network) {
     checkNetwork(network);
     const out = new BigInt64Array(1);
-    const rc = this._b._lib.ccl_account_create_handle(this._b._threadPtr, network, ptr(out));
+    const rc = this._b._lib.ccl_account_create_handle(this._b._thread, network, ptr(out));
     this._b._check(rc);
     return new Account(this._b, out[0]);
   }

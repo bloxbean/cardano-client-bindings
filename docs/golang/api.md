@@ -80,39 +80,6 @@ Native failures surface as `*CclError` — match with `errors.As`. Error codes:
 
 Predicate methods (`Address.Validate`, `Crypto.ValidateMnemonic`, `Crypto.Verify`) return `bool` and never error.
 
-## bridge.Account
-
-```go
-func (a *AccountApi) Create(network Network) (*AccountInfo, error)
-func (a *AccountApi) FromMnemonic(mnemonic string, network Network, accountIndex, addressIndex int) (*AccountInfo, error)
-func (a *AccountApi) GetPublicKey(mnemonic string, network Network, accountIndex, addressIndex int) (string, error)
-func (a *AccountApi) GetPrivateKey(mnemonic string, network Network, accountIndex, addressIndex int) (string, error)
-func (a *AccountApi) GetDRepID(mnemonic string, network Network, accountIndex int) (string, error)
-func (a *AccountApi) SignTx(mnemonic string, network Network, accountIndex, addressIndex int, txCborHex string) (string, error)
-func (a *AccountApi) SignTxWithKeys(mnemonic string, network Network, accountIndex, addressIndex int, txCborHex string, keys ...string) (string, error)
-```
-
-```go
-type AccountInfo struct {
-	Mnemonic          string `json:"mnemonic"`
-	BaseAddress       string `json:"base_address"`
-	EnterpriseAddress string `json:"enterprise_address"`
-	StakeAddress      string `json:"stake_address"`
-	ChangeAddress     string `json:"change_address"`
-}
-```
-
-- `Create` generates a fresh 24-word mnemonic; treat `AccountInfo.Mnemonic` as a secret.
-- `GetPrivateKey` returns the 64-byte **extended** key as 128 hex chars. For raw Ed25519 signing (`Crypto.Sign`) use the first 64 hex chars.
-- `SignTx` witnesses with the payment key only. When a transaction carries certificates that need other witnesses, use `SignTxWithKeys` with roles in order — valid roles: `"payment"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`:
-
-```go
-// A stake registration needs the payment key (fee) and the stake key (certificate):
-signed, err := bridge.Account.SignTxWithKeys(mnemonic, ccl.Testnet, 0, 0, result.TxCbor, "payment", "stake")
-```
-
-Without the extra witness the node rejects the transaction with `MissingVKeyWitnessesUTXOW`.
-
 ## bridge.Accounts — managed accounts
 
 Handle-based accounts (ADR-0016): open once, then operate without the mnemonic. The recommended
@@ -133,11 +100,15 @@ signed, err := acct.SignTx(txCbor, ccl.RolePayment|ccl.RoleStake)
   deliberately, with `acct.ExportRecoveryPhrase()` — a second call fails, as does export on a
   mnemonic-opened account.
 - `SignTx(txCborHex, roles)` — typed `SigningRole` bit mask (`RolePayment`, `RoleStake`, `RoleDRep`,
-  `RoleCommitteeCold`, `RoleCommitteeHot`); witnesses apply in canonical order, byte-identical to
-  `Account.SignTxWithKeys`. An empty mask is rejected.
+  `RoleCommitteeCold`, `RoleCommitteeHot`);
+  witnesses apply in canonical order. An empty mask is rejected.
 - `Close()` is explicit and idempotent — close Accounts like files; there is no finalizer. All
   Account calls ride the Bridge's dedicated isolate thread, so concurrent goroutine use is safe
   (and serialized). `String()` shows only the handle.
+- `Info()` returns public data only: the base/enterprise/stake addresses, network and derivation
+  indices, `DRepID`, and the committee identifiers (`CommitteeColdID`/`CommitteeHotID`, bech32,
+  plus `CommitteeColdCredential`/`CommitteeHotCredential` — hex blake2b-224 verification-key
+  hashes, as used in committee certificates).
 
 An account is bound to **one CIP-1852 payment leaf** (`m/1852'/1815'/account'/0/address_index`): one handle, one payment address — open further accounts for further address indices. The stake/DRep/committee keys sit at their standard role indices *independent of* `address_index`, so accounts at different address indices of one account index **share a single stake/DRep identity**.
 
@@ -170,14 +141,20 @@ func (c *CryptoApi) GenerateMnemonic(wordCount int) (string, error)   // 12 or 2
 func (c *CryptoApi) ValidateMnemonic(mnemonic string) bool
 func (c *CryptoApi) Sign(messageHex, skHex string) (string, error)    // Ed25519; 32-byte key (64 hex chars)
 func (c *CryptoApi) Verify(signatureHex, messageHex, pkHex string) bool
+func (c *CryptoApi) DeriveKey(mnemonic string, accountIndex, addressIndex int, role string) (*DerivedKey, error)
 ```
+
+`DeriveKey` is the stateless CIP-1852 "raw key material" utility — `role` is one of `"payment"`,
+`"change"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`; it returns
+`{Path, PrivateKey, PublicKey, PublicKeyHash}`. Key derivation is network-independent. Prefer
+managed accounts for signing — handles never expose key bytes.
 
 Hash inputs are hex in → hex out:
 
 ```go
 digest, _ := bridge.Crypto.Blake2b256("48656c6c6f") // "Hello"
-priv, _ := bridge.Account.GetPrivateKey(mnemonic, ccl.Testnet, 0, 0)
-sig, _ := bridge.Crypto.Sign(msgHex, priv[:64])     // first 32 bytes of the extended key
+key, _ := bridge.Crypto.DeriveKey(mnemonic, 0, 0, "payment")
+sig, _ := bridge.Crypto.Sign(msgHex, key.PrivateKey[:64]) // first 32 bytes of the extended key
 ```
 
 ## bridge.Tx
@@ -219,42 +196,13 @@ result, _ := bridge.Script.NativeFromJson(scriptJSON)
 // unmarshal result → policy_id, script_hash, cbor_hex
 ```
 
-## bridge.Gov
+## Governance identity and HD-wallet flows
 
-```go
-func (g *GovApi) DrepKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error)
-func (g *GovApi) CommitteeColdKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error)
-func (g *GovApi) CommitteeHotKeyFromMnemonic(mnemonic string, network Network, accountIndex int) (*GovKeyInfo, error)
-```
-
-```go
-type GovKeyInfo struct {
-	DrepID                    string `json:"drep_id,omitempty"` // drep1... (DRep keys)
-	ID                        string `json:"id,omitempty"`      // cc_cold1... / cc_hot1... (committee keys)
-	VerificationKey           string `json:"verification_key"`
-	VerificationKeyHash       string `json:"verification_key_hash"`
-	Bech32VerificationKey     string `json:"bech32_verification_key"`
-	Bech32VerificationKeyHash string `json:"bech32_verification_key_hash"`
-}
-```
-
-## bridge.Wallet
-
-HD wallet: one mnemonic, many sequential addresses.
-
-```go
-func (w *WalletApi) Create(network Network) (*WalletInfo, error)
-func (w *WalletApi) FromMnemonic(mnemonic string, network Network) (*WalletInfo, error)
-func (w *WalletApi) GetAddress(mnemonic string, network Network, index int) (string, error)
-```
-
-```go
-type WalletInfo struct {
-	Mnemonic     string   `json:"mnemonic"`
-	StakeAddress string   `json:"stake_address"`
-	Addresses    []string `json:"addresses"`
-}
-```
+There is no separate Gov/Wallet API. Governance *identity* (DRep id, committee ids and
+credentials) is public data on `acct.Info()`; governance *signing* uses `SignTx` with the
+`RoleDRep`/`RoleCommittee*` roles; raw governance key material comes from `Crypto.DeriveKey`.
+An HD wallet is one recovery phrase with one managed handle per CIP-1852 payment leaf — pass
+`addressIndex` to `Accounts.FromMnemonic` to enumerate addresses.
 
 ## bridge.QuickTx
 

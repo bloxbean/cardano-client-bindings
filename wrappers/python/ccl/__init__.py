@@ -6,8 +6,6 @@ from ccl.crypto import Crypto
 from ccl.transaction import Transaction
 from ccl.plutus import Plutus
 from ccl.script import Script
-from ccl.governance import Governance
-from ccl.wallet import Wallet
 from ccl.quicktx import QuickTx
 from ccl.providers import (
     ChainDataProvider, YaciProvider, BlockfrostProvider,
@@ -16,6 +14,6 @@ from ccl.providers import (
 
 __all__ = ['CclLib', 'CclError', 'CclClosedError', 'CclInvalidHandleError', 'Network',
            'Account', 'Accounts', 'SigningRole', 'Address', 'Crypto', 'Transaction',
-           'Plutus', 'Script', 'Governance', 'Wallet', 'QuickTx',
+           'Plutus', 'Script', 'QuickTx',
            'ChainDataProvider', 'YaciProvider', 'BlockfrostProvider',
            'TransactionEvaluator', 'BlockfrostEvaluator']

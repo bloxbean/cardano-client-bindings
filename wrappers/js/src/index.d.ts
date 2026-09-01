@@ -1,7 +1,7 @@
 // TypeScript declarations for @bloxbean/cardano-client-lib.
 //
 // These mirror the runtime surface of `src/index.js` exactly: a `CclBridge` with *namespaced* APIs
-// (`bridge.account.create(...)`, `bridge.quicktx.build(...)`, …). `test/types.test-d.ts` compiles
+// (`bridge.accounts.create(...)`, `bridge.quicktx.build(...)`, …). `test/types.test-d.ts` compiles
 // against this file (`bun run typecheck`) so the two cannot drift apart.
 
 // --- Network -------------------------------------------------------------------------------------
@@ -27,14 +27,6 @@ export declare const TESTNET: 1;
 
 // --- Data shapes ---------------------------------------------------------------------------------
 
-export interface AccountInfo {
-    mnemonic: string;
-    base_address: string;
-    enterprise_address: string;
-    stake_address: string;
-    change_address: string;
-}
-
 export interface AddressInfo {
     /** 'Base' | 'Enterprise' | 'Pointer' | 'Reward' (as reported by CCL). */
     type: string;
@@ -48,30 +40,6 @@ export interface AddressInfo {
     delegation_credential_hash?: string;
     is_pubkey_payment: boolean;
     is_script_payment: boolean;
-}
-
-export interface WalletInfo {
-    mnemonic: string;
-    stake_address: string;
-    addresses: string[];
-}
-
-/** A DRep key, as returned by `bridge.gov.drepKeyFromMnemonic()`. */
-export interface DrepKeyInfo {
-    drep_id: string;
-    verification_key: string;
-    verification_key_hash: string;
-    bech32_verification_key: string;
-    bech32_verification_key_hash: string;
-}
-
-/** A constitutional-committee (cold or hot) key, as returned by the `bridge.gov.committee*` methods. */
-export interface CommitteeKeyInfo {
-    id: string;
-    verification_key: string;
-    verification_key_hash: string;
-    bech32_verification_key: string;
-    bech32_verification_key_hash: string;
 }
 
 /** A single asset quantity inside a {@link Utxo}. `unit` is 'lovelace' or a policy-id + asset-name hex. */
@@ -131,9 +99,6 @@ export type QuickTxResult = TxResult;
 /** A deserialized transaction (`bridge.tx.deserialize()`); shape follows CCL's transaction JSON. */
 export type TransactionJson = Record<string, unknown>;
 
-/** Key roles `bridge.account.signTxWithKeys()` can sign with, applied in the order given. */
-export type SigningKeyRole = 'payment' | 'stake' | 'drep' | 'committee_cold' | 'committee_hot';
-
 // --- Errors --------------------------------------------------------------------------------------
 
 /** Thrown when the native library returns a non-zero status. */
@@ -153,32 +118,6 @@ export declare class CclClosedError extends Error {
 // constructible from outside, so they are declared as interfaces (no runtime export) — except
 // QuickTxApi, which the module does export.
 
-export interface AccountApi {
-    /**
-     * Create a new account with a random 24-word mnemonic.
-     *
-     * @param network a CCL enum ordinal — MAINNET is **0**, not the on-chain mainnet id (1). Required.
-     */
-    create(network: Network): AccountInfo;
-    fromMnemonic(mnemonic: string, network: Network, accountIndex?: number, addressIndex?: number): AccountInfo;
-    getPrivateKey(mnemonic: string, network: Network, accountIndex?: number, addressIndex?: number): string;
-    getPublicKey(mnemonic: string, network: Network, accountIndex?: number, addressIndex?: number): string;
-    getDrepId(mnemonic: string, network: Network, accountIndex?: number): string;
-    signTx(mnemonic: string, network: Network, accountIndex: number, addressIndex: number, txCborHex: string): string;
-    /**
-     * Sign with one or more of the account's keys, selected by role (applied in order). Use for
-     * transactions whose certificates also need the stake or DRep key.
-     */
-    signTxWithKeys(
-        mnemonic: string,
-        network: Network,
-        accountIndex: number,
-        addressIndex: number,
-        txCborHex: string,
-        keys: SigningKeyRole[] | SigningKeyRole | string,
-    ): string;
-}
-
 export interface AddressApi {
     /** Decode a bech32 address. Its `network_id` is the genuine **on-chain** id (0 = testnet, 1 = mainnet). */
     info(bech32: string): AddressInfo;
@@ -194,6 +133,73 @@ export interface CryptoApi {
     validateMnemonic(mnemonic: string): boolean;
     sign(messageHex: string, skHex: string): string;
     verify(signatureHex: string, messageHex: string, pkHex: string): boolean;
+    /**
+     * Stateless CIP-1852 key derivation — the explicit "raw key material" utility. Key derivation
+     * is network-independent. Prefer managed accounts for signing; handles never expose key bytes.
+     */
+    deriveKey(mnemonic: string, accountIndex?: number, addressIndex?: number, role?: DeriveKeyRole): DerivedKey;
+}
+
+// --- Managed accounts (ADR-0016) -----------------------------------------------------------------
+
+/** Typed signing-role bit mask values. Combine with `|`; witnesses apply in canonical order. */
+export declare const SigningRole: Readonly<{
+    PAYMENT: 1;
+    STAKE: 2;
+    DREP: 4;
+    COMMITTEE_COLD: 8;
+    COMMITTEE_HOT: 16;
+}>;
+
+/** Public data of a managed account. Never contains the mnemonic or any private key. */
+export interface AccountPublicInfo {
+    base_address: string;
+    enterprise_address: string;
+    stake_address: string;
+    /** The CCL enum ordinal the account was opened with — NOT the on-chain network id. */
+    network: number;
+    account_index: number;
+    address_index: number;
+    drep_id: string;
+    /** bech32 committee ids and hex credentials (blake2b-224 verification-key hashes). */
+    committee_cold_id: string;
+    committee_cold_credential: string;
+    committee_hot_id: string;
+    committee_hot_credential: string;
+}
+
+/**
+ * A managed account (ADR-0016) bound to one CIP-1852 payment leaf. Close explicitly, or use
+ * `using` / `Symbol.dispose`; any use after close throws with code -11.
+ */
+export declare class Account {
+    readonly info: AccountPublicInfo;
+    signTx(txCborHex: string, roles?: number): string;
+    /** One-shot: only for accounts from {@link AccountsApi.create}, and only once. */
+    exportRecoveryPhrase(): string;
+    close(): void;
+    [Symbol.dispose](): void;
+}
+
+/** Managed-accounts namespace (`bridge.accounts`). */
+export declare class AccountsApi {
+    constructor(bridge: CclBridge);
+    /** The mnemonic crosses the FFI boundary once, here; no later operation needs it. */
+    fromMnemonic(mnemonic: string, network: Network, accountIndex?: number, addressIndex?: number): Account;
+    /** Fresh 24-word account; no secret in the result — export the phrase once, deliberately. */
+    create(network: Network): Account;
+}
+
+/** Roles accepted by {@link CryptoApi.deriveKey}. */
+export type DeriveKeyRole =
+    | 'payment' | 'change' | 'stake' | 'drep' | 'committee_cold' | 'committee_hot';
+
+/** Result of {@link CryptoApi.deriveKey}. The extended private key's first 64 hex chars are the raw Ed25519 key. */
+export interface DerivedKey {
+    path: string;
+    private_key: string;
+    public_key: string;
+    public_key_hash: string;
 }
 
 export interface TxApi {
@@ -214,19 +220,6 @@ export interface ScriptApi {
     nativeFromJson(json: string): string;
     /** @param scriptType 0 = native, 1 = PlutusV1, 2 = PlutusV2, 3 = PlutusV3 (defaults to 0). */
     hash(scriptCborHex: string, scriptType?: number): string;
-}
-
-export interface GovApi {
-    drepKeyFromMnemonic(mnemonic: string, network: Network, accountIndex?: number): DrepKeyInfo;
-    committeeColdKeyFromMnemonic(mnemonic: string, network: Network, accountIndex?: number): CommitteeKeyInfo;
-    committeeHotKeyFromMnemonic(mnemonic: string, network: Network, accountIndex?: number): CommitteeKeyInfo;
-}
-
-export interface WalletApi {
-    /** @param network a CCL enum ordinal — MAINNET is **0**, not the on-chain mainnet id (1). Required. */
-    create(network: Network): WalletInfo;
-    fromMnemonic(mnemonic: string, network: Network): WalletInfo;
-    getAddress(mnemonic: string, network: Network, index?: number): string;
 }
 
 export declare class QuickTxApi {
@@ -268,14 +261,12 @@ export declare class CclBridge {
     /** @param libPath directory containing libccl.{dylib,so,dll}; falls back to CCL_LIB_PATH, the bundled copy, then the platform package. */
     constructor(libPath?: string);
 
-    readonly account: AccountApi;
+    readonly accounts: AccountsApi;
     readonly address: AddressApi;
     readonly crypto: CryptoApi;
     readonly tx: TxApi;
     readonly plutus: PlutusApi;
     readonly script: ScriptApi;
-    readonly gov: GovApi;
-    readonly wallet: WalletApi;
     readonly quicktx: QuickTxApi;
 
     /** The native library's version string. */

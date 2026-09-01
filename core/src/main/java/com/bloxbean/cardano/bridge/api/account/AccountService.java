@@ -116,6 +116,16 @@ public final class AccountService {
         result.put("account_index", managed.accountIndex());
         result.put("address_index", managed.addressIndex());
         result.put("drep_id", managed.cclAccount().drepId());
+        // Committee identifiers — bech32 id and hex credential (blake2b-224 verification-key
+        // hash, as used in committee certificates). Public data like everything else here.
+        var coldKey = managed.cclAccount().committeeColdKey();
+        var hotKey = managed.cclAccount().committeeHotKey();
+        result.put("committee_cold_id", coldKey.id());
+        result.put("committee_cold_credential",
+                com.bloxbean.cardano.client.util.HexUtil.encodeHexString(coldKey.verificationKeyHash()));
+        result.put("committee_hot_id", hotKey.id());
+        result.put("committee_hot_credential",
+                com.bloxbean.cardano.client.util.HexUtil.encodeHexString(hotKey.verificationKeyHash()));
         return result;
     }
 

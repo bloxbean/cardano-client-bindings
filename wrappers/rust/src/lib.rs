@@ -266,11 +266,6 @@ impl Bridge {
         self.check(rc)
     }
 
-    /// Get the account namespace API.
-    pub fn account(&self) -> AccountApi<'_> {
-        AccountApi { bridge: self }
-    }
-
     /// Get the address namespace API.
     pub fn address(&self) -> AddressApi<'_> {
         AddressApi { bridge: self }
@@ -296,16 +291,6 @@ impl Bridge {
         ScriptApi { bridge: self }
     }
 
-    /// Get the governance namespace API.
-    pub fn gov(&self) -> GovApi<'_> {
-        GovApi { bridge: self }
-    }
-
-    /// Get the wallet namespace API.
-    pub fn wallet(&self) -> WalletApi<'_> {
-        WalletApi { bridge: self }
-    }
-
     /// Get the quicktx namespace API.
     /// Managed accounts (ADR-0016): open once, hold an owned Account, sign with typed roles.
     pub fn accounts(&self) -> accounts::AccountsApi<'_> {
@@ -327,145 +312,6 @@ impl Drop for Bridge {
                 ffi::graal_tear_down_isolate(self.thread);
             }
         }
-    }
-}
-
-// --- AccountApi ---
-
-pub struct AccountApi<'a> {
-    bridge: &'a Bridge,
-}
-
-impl<'a> AccountApi<'a> {
-    pub fn create(&self, network: Network) -> Result<String> {
-        let rc = unsafe { ffi::ccl_account_create(self.bridge.thread, network.as_i32()) };
-        self.bridge.check(rc)
-    }
-
-    pub fn from_mnemonic(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-        address_index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe {
-            ffi::ccl_account_from_mnemonic(
-                self.bridge.thread,
-                network.as_i32(),
-                cs.as_ptr(),
-                account_index,
-                address_index,
-            )
-        };
-        self.bridge.check(rc)
-    }
-
-    pub fn get_public_key(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-        address_index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe {
-            ffi::ccl_account_get_public_key(
-                self.bridge.thread,
-                cs.as_ptr(),
-                network.as_i32(),
-                account_index,
-                address_index,
-            )
-        };
-        self.bridge.check(rc)
-    }
-
-    pub fn get_private_key(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-        address_index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe {
-            ffi::ccl_account_get_private_key(
-                self.bridge.thread,
-                cs.as_ptr(),
-                network.as_i32(),
-                account_index,
-                address_index,
-            )
-        };
-        self.bridge.check(rc)
-    }
-
-    pub fn sign_tx(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-        address_index: i32,
-        tx_cbor_hex: &str,
-    ) -> Result<String> {
-        let cs_mnemonic = to_cstring(mnemonic)?;
-        let cs_tx = to_cstring(tx_cbor_hex)?;
-        let rc = unsafe {
-            ffi::ccl_account_sign_tx(
-                self.bridge.thread,
-                cs_mnemonic.as_ptr(),
-                network.as_i32(),
-                account_index,
-                address_index,
-                cs_tx.as_ptr(),
-            )
-        };
-        self.bridge.check(rc)
-    }
-
-    /// Sign a transaction with one or more of the account's keys, selected by role (any of
-    /// `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`, applied in order). Use this
-    /// for transactions whose certificates also need the stake or DRep key — stake
-    /// registration/delegation/withdrawal and DRep/vote operations.
-    pub fn sign_tx_with_keys(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-        address_index: i32,
-        tx_cbor_hex: &str,
-        keys: &[&str],
-    ) -> Result<String> {
-        let cs_mnemonic = to_cstring(mnemonic)?;
-        let cs_tx = to_cstring(tx_cbor_hex)?;
-        let cs_keys = to_cstring(&keys.join(","))?;
-        let rc = unsafe {
-            ffi::ccl_account_sign_tx_multi(
-                self.bridge.thread,
-                cs_mnemonic.as_ptr(),
-                network.as_i32(),
-                account_index,
-                address_index,
-                cs_tx.as_ptr(),
-                cs_keys.as_ptr(),
-            )
-        };
-        self.bridge.check(rc)
-    }
-
-    pub fn get_drep_id(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe {
-            ffi::ccl_account_get_drep_id(self.bridge.thread, cs.as_ptr(), network.as_i32(), account_index)
-        };
-        self.bridge.check(rc)
     }
 }
 
@@ -562,6 +408,34 @@ impl<'a> CryptoApi<'a> {
         };
         rc == error_codes::CCL_SUCCESS
     }
+
+    /// Stateless CIP-1852 key derivation — the explicit "raw key material" utility.
+    ///
+    /// `role` is one of `"payment"`, `"change"`, `"stake"`, `"drep"`, `"committee_cold"`,
+    /// `"committee_hot"`. Returns the JSON `{"path","private_key","public_key","public_key_hash"}`
+    /// (the extended private key's first 64 hex chars are the raw Ed25519 key accepted by
+    /// [`CryptoApi::sign`]). Key derivation is network-independent. Prefer the managed accounts
+    /// API for signing — handles never expose key bytes.
+    pub fn derive_key(
+        &self,
+        mnemonic: &str,
+        account_index: i32,
+        address_index: i32,
+        role: &str,
+    ) -> Result<String> {
+        let cs_mnemonic = to_cstring(mnemonic)?;
+        let cs_role = to_cstring(role)?;
+        let rc = unsafe {
+            ffi::ccl_crypto_derive_key(
+                self.bridge.thread,
+                cs_mnemonic.as_ptr(),
+                account_index,
+                address_index,
+                cs_role.as_ptr(),
+            )
+        };
+        self.bridge.check(rc)
+    }
 }
 
 // --- TxApi ---
@@ -647,94 +521,6 @@ impl<'a> ScriptApi<'a> {
     pub fn hash(&self, script_cbor_hex: &str, script_type: i32) -> Result<String> {
         let cs = to_cstring(script_cbor_hex)?;
         let rc = unsafe { ffi::ccl_script_hash(self.bridge.thread, cs.as_ptr(), script_type) };
-        self.bridge.check(rc)
-    }
-}
-
-// --- GovApi ---
-
-pub struct GovApi<'a> {
-    bridge: &'a Bridge,
-}
-
-impl<'a> GovApi<'a> {
-    pub fn drep_key_from_mnemonic(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe {
-            ffi::ccl_gov_drep_key_from_mnemonic(self.bridge.thread, cs.as_ptr(), network.as_i32(), account_index)
-        };
-        self.bridge.check(rc)
-    }
-
-    pub fn committee_cold_key_from_mnemonic(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe {
-            ffi::ccl_gov_committee_cold_key_from_mnemonic(
-                self.bridge.thread,
-                cs.as_ptr(),
-                network.as_i32(),
-                account_index,
-            )
-        };
-        self.bridge.check(rc)
-    }
-
-    pub fn committee_hot_key_from_mnemonic(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        account_index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe {
-            ffi::ccl_gov_committee_hot_key_from_mnemonic(
-                self.bridge.thread,
-                cs.as_ptr(),
-                network.as_i32(),
-                account_index,
-            )
-        };
-        self.bridge.check(rc)
-    }
-}
-
-// --- WalletApi ---
-
-pub struct WalletApi<'a> {
-    bridge: &'a Bridge,
-}
-
-impl<'a> WalletApi<'a> {
-    pub fn create(&self, network: Network) -> Result<String> {
-        let rc = unsafe { ffi::ccl_wallet_create(self.bridge.thread, network.as_i32()) };
-        self.bridge.check(rc)
-    }
-
-    pub fn from_mnemonic(&self, mnemonic: &str, network: Network) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc = unsafe { ffi::ccl_wallet_from_mnemonic(self.bridge.thread, cs.as_ptr(), network.as_i32()) };
-        self.bridge.check(rc)
-    }
-
-    pub fn get_address(
-        &self,
-        mnemonic: &str,
-        network: Network,
-        index: i32,
-    ) -> Result<String> {
-        let cs = to_cstring(mnemonic)?;
-        let rc =
-            unsafe { ffi::ccl_wallet_get_address(self.bridge.thread, cs.as_ptr(), network.as_i32(), index) };
         self.bridge.check(rc)
     }
 }

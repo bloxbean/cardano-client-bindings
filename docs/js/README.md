@@ -39,13 +39,15 @@ import { CclBridge, TESTNET } from "@bloxbean/cardano-client-lib";
 
 const bridge = new CclBridge();
 try {
-  // Create a new account (24-word mnemonic, testnet addresses).
-  const account = bridge.account.create(TESTNET);
-  console.log(account.base_address);   // addr_test1...
-  console.log(account.stake_address);  // stake_test1...
+  // Create a new managed account (testnet). Its info never contains the phrase;
+  // export the recovery phrase once, deliberately.
+  using account = bridge.accounts.create(TESTNET);
+  console.log(account.info.base_address);   // addr_test1...
+  console.log(account.info.stake_address);  // stake_test1...
+  const mnemonic = account.exportRecoveryPhrase();
 
-  // Restore it later from the mnemonic.
-  const restored = bridge.account.fromMnemonic(account.mnemonic, TESTNET, 0, 0);
+  // Restore it later from the phrase.
+  using restored = bridge.accounts.fromMnemonic(mnemonic, TESTNET, 0, 0);
 } finally {
   bridge.close();
 }
@@ -55,7 +57,7 @@ Or let `using` handle the lifecycle:
 
 ```js
 using bridge = new CclBridge();
-const account = bridge.account.create(TESTNET);
+using account = bridge.accounts.create(TESTNET);
 ```
 
 ### Build, sign, and inspect a transaction — fully offline
@@ -79,7 +81,7 @@ transaction:
 const result = bridge.quicktx.build(yaml, utxos, protocolParams);
 // result = { tx_cbor, tx_hash, fee }
 
-const signed = bridge.account.signTx(account.mnemonic, TESTNET, 0, 0, result.tx_cbor);
+const signed = sender.signTx(result.tx_cbor);   // sender = bridge.accounts.fromMnemonic(...)
 // submit `signed` with any HTTP client — the library never talks to the network
 ```
 

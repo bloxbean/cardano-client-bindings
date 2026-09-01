@@ -38,3 +38,21 @@ class Crypto:
             self._b._encode(message_hex), self._b._encode(pk_hex))
         from ccl._ffi import CclLib
         return rc == CclLib.CCL_SUCCESS
+
+    def derive_key(self, mnemonic, account_index=0, address_index=0, role="payment"):
+        """Stateless CIP-1852 key derivation — the explicit "raw key material" utility.
+
+        ``role`` is one of ``"payment"``, ``"change"``, ``"stake"``, ``"drep"``,
+        ``"committee_cold"``, ``"committee_hot"``. Returns a dict with ``path``,
+        ``private_key`` (hex 64-byte extended key; its first 64 hex chars are the raw
+        Ed25519 key accepted by :meth:`sign`), ``public_key``, and ``public_key_hash``
+        (for the committee roles this is the certificate credential). Key derivation is
+        network-independent, so no network argument. Prefer managed accounts
+        (``lib.accounts``) for signing — this exists for interop that genuinely needs
+        key bytes.
+        """
+        import json
+        rc = self._b._lib.ccl_crypto_derive_key(
+            self._b._thread, self._b._encode(mnemonic),
+            account_index, address_index, self._b._encode(role))
+        return json.loads(self._b._check(rc))

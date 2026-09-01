@@ -76,7 +76,7 @@ fn test_integration_drep_registration() {
 
 // Negative test: a DRep registration certificate must be witnessed by the DRep key, so signing with
 // the payment key alone must be rejected by the node (MissingVKeyWitnessesUTXOW). This proves the
-// extra witness sign_tx_with_keys adds is genuinely required — not cosmetic — and complements the
+// extra witness the stake role adds is genuinely required — not cosmetic — and complements the
 // positive drep_registration test above. Mirrors TestIntegrationDRepKeyRequired.
 #[test]
 fn test_integration_drep_key_required() {
@@ -97,10 +97,7 @@ fn test_integration_drep_key_required() {
         .expect("build");
 
     // Sign with the payment key ONLY (sign_tx), omitting the DRep-key witness.
-    let signed_payment_only = bridge
-        .account()
-        .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &built.tx_cbor)
-        .expect("sign");
+    let signed_payment_only = intent_sign(&bridge, &built.tx_cbor, &["payment"]);
     if devkit_try_submit(&signed_payment_only).is_ok() {
         panic!(
             "the node accepted a DRep registration signed with the payment key only; \
@@ -137,10 +134,7 @@ fn test_integration_donation() {
             &format!("current_treasury_value: {}", treasury),
         );
         let result = bridge.quicktx().build(&yaml, &utxos, &pp, None, 0).expect("build");
-        let signed = bridge
-            .account()
-            .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, &["payment"])
-            .expect("sign");
+        let signed = intent_sign(&bridge, &result.tx_cbor, &["payment"]);
         match devkit_try_submit(&signed) {
             Ok(tx_hash) => {
                 assert!(!tx_hash.is_empty(), "empty tx hash from submit");
@@ -324,10 +318,7 @@ fn test_integration_voting() {
         .build(&read_fixture("governance_proposal.yaml"), &u3, &pp, None, 0)
         .expect("build proposal");
     let action_tx_hash = proposal.tx_hash.clone();
-    let signed_proposal = bridge
-        .account()
-        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &proposal.tx_cbor, &["payment"])
-        .expect("sign proposal");
+    let signed_proposal = intent_sign(&bridge, &proposal.tx_cbor, &["payment"]);
     if let Err(e) = devkit_try_submit(&signed_proposal) {
         panic!("submit proposal: {}", e);
     }
@@ -530,10 +521,7 @@ fn test_integration_aiken_mint_rejects() {
         .quicktx()
         .build(&read_fixture("plutus/aiken_mint_fail.yaml"), &utxos, &pp, Some(&exec), 0)
         .expect("build");
-    let signed = bridge
-        .account()
-        .sign_tx_with_keys(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor, &["payment"])
-        .expect("sign");
+    let signed = intent_sign(&bridge, &result.tx_cbor, &["payment"]);
     assert!(
         devkit_try_submit(&signed).is_err(),
         "the node accepted a mint whose validator must reject (redeemer 0); \
@@ -835,14 +823,8 @@ fn test_integration_compose_two_senders() {
         .quicktx()
         .build(&read_fixture("compose.yaml"), &utxos, &pp, None, 0)
         .expect("build");
-    let once = bridge
-        .account()
-        .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 0, &result.tx_cbor)
-        .expect("sign (0,0)");
-    let twice = bridge
-        .account()
-        .sign_tx(INTENT_MNEMONIC, ccl::Network::Testnet, 0, 1, &once)
-        .expect("sign (0,1)");
+    let once = intent_sign(&bridge, &result.tx_cbor, &["payment"]);
+    let twice = intent_sign_at(&bridge, 1, &once, &["payment"]);
     devkit_try_submit(&twice).expect("submit");
     wait_for_block();
 

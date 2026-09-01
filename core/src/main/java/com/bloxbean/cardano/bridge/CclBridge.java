@@ -41,7 +41,7 @@ import org.graalvm.nativeimage.c.type.CCharPointer;
  *
  * <h2>Typical sequence (per logical operation)</h2>
  * <pre>{@code
- *   int rc = ccl_account_create(thread, networkId);   // 1. do the work; returns status
+ *   int rc = ccl_address_info(thread, address);        // 1. do the work; returns status
  *   if (rc == 0) {
  *       char* json = ccl_get_result(thread);           // 2. fetch JSON result (thread-local)
  *       // ... use json ...

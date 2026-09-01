@@ -7,7 +7,7 @@ This guide walks the full life of a transaction: describe it in [TxPlan YAML](..
 Every transaction follows the same four steps:
 
 ```python
-from ccl import CclLib, Network, YaciProvider
+from ccl import CclLib, Network, SigningRole, YaciProvider
 import urllib.request
 
 with CclLib() as lib:
@@ -32,7 +32,8 @@ with CclLib() as lib:
     # (or lib.quicktx.build(yaml, utxos, protocol_params) with your own chain data)
 
     # 3. Sign — with the key roles the transaction's certificates require
-    signed = lib.account.sign_tx(mnemonic, result["tx_cbor"], Network.TESTNET)
+    with lib.accounts.from_mnemonic(mnemonic, Network.TESTNET) as acct:
+        signed = acct.sign_tx(result["tx_cbor"])
 
     # 4. Submit — any Blockfrost-compatible endpoint; the library never submits
     req = urllib.request.Request(f"{submit_url}/tx/submit", method="POST",
@@ -44,17 +45,20 @@ with CclLib() as lib:
 
 ## Which keys sign what
 
-`sign_tx` witnesses with the payment key only. Certificates need their own witness — use `sign_tx_with_keys` with roles **in order**:
+`acct.sign_tx(tx_cbor)` witnesses with the payment key only. Certificates need their own
+witness — combine `SigningRole` flags with `|` (witnesses apply in canonical order):
 
-| Transaction contains | `keys` |
+| Transaction contains | roles |
 |---|---|
-| Payments, metadata, minting, Plutus operations | `["payment"]` (or plain `sign_tx`) |
-| `stake_registration` / `stake_deregistration` / `stake_delegation` / `stake_withdrawal` / `voting_delegation` | `["payment", "stake"]` |
-| `drep_registration` / `drep_update` / `drep_deregistration` / `voting` | `["payment", "drep"]` |
-| `governance_proposal` | `["payment"]` |
+| Payments, metadata, minting, Plutus operations | `SigningRole.PAYMENT` (the default) |
+| `stake_registration` / `stake_deregistration` / `stake_delegation` / `stake_withdrawal` / `voting_delegation` | `PAYMENT \| STAKE` |
+| `drep_registration` / `drep_update` / `drep_deregistration` / `voting` | `PAYMENT \| DREP` |
+| `governance_proposal` | `PAYMENT` |
 | `pool_registration` / `pool_update` / `pool_retirement` | `["payment", "stake"]` when the pool is keyed to the account's stake key |
 
 A missing witness is rejected by the node with `MissingVKeyWitnessesUTXOW`.
+
+The examples below assume an open handle: `acct = lib.accounts.from_mnemonic(mnemonic, Network.TESTNET)` (with `from ccl import SigningRole`).
 The same table gives the fee's witness budget: pass `additional_signers = len(keys) - 1` to the build (the input UTXOs already cover the payment key). For a native-script spend whose only inputs sit at the script address, pass the number of the script's `sig` keys instead.
 
 
@@ -73,7 +77,7 @@ transaction:
           stake_address: {account["stake_address"]}
 """
 reg = lib.quicktx.build_with(stake_yaml, provider, sender, additional_signers=1)
-signed_reg = lib.account.sign_tx_with_keys(mnemonic, reg["tx_cbor"], ["payment", "stake"], Network.TESTNET)
+signed_reg = acct.sign_tx(reg["tx_cbor"], SigningRole.PAYMENT | SigningRole.STAKE)
 # submit signed_reg; wait for inclusion before the next step
 
 deleg_yaml = f"""
@@ -87,15 +91,16 @@ transaction:
           pool_id: pool1...
 """
 deleg = lib.quicktx.build_with(deleg_yaml, provider, sender, additional_signers=1)
-signed_deleg = lib.account.sign_tx_with_keys(mnemonic, deleg["tx_cbor"], ["payment", "stake"], Network.TESTNET)
+signed_deleg = acct.sign_tx(deleg["tx_cbor"], SigningRole.PAYMENT | SigningRole.STAKE)
 ```
 
 ## Worked example: DRep registration, then vote
 
-The DRep credential comes from the governance API:
+The DRep credential is derivable with the stateless key utility (`account.info["drep_id"]`
+carries the bech32 id; the raw credential hash comes from `crypto.derive_key`):
 
 ```python
-drep = lib.gov.drep_key_from_mnemonic(mnemonic, Network.TESTNET)
+drep = lib.crypto.derive_key(mnemonic, role="drep")
 
 drep_yaml = f"""
 version: 1.0
@@ -104,16 +109,16 @@ transaction:
       from: {sender}
       intents:
         - type: drep_registration
-          drep_credential_hex: {drep["verification_key_hash"]}
+          drep_credential_hex: {drep["public_key_hash"]}
           drep_credential_type: key_hash
           anchor_url: https://example.com/meta.json
           anchor_hash: {anchor_hash}
 """
 reg = lib.quicktx.build_with(drep_yaml, provider, sender, additional_signers=1)
-signed = lib.account.sign_tx_with_keys(mnemonic, reg["tx_cbor"], ["payment", "drep"], Network.TESTNET)
+signed = acct.sign_tx(reg["tx_cbor"], SigningRole.PAYMENT | SigningRole.DREP)
 ```
 
-To vote on a governance action, the action id is the proposal transaction's hash plus its index (a proposal you submit yourself returns its hash from `build` — `result["tx_hash"]`). Sign the `voting` transaction with `["payment", "drep"]`.
+To vote on a governance action, the action id is the proposal transaction's hash plus its index (a proposal you submit yourself returns its hash from `build` — `result["tx_hash"]`). Sign the `voting` transaction with `SigningRole.PAYMENT | SigningRole.DREP`.
 
 ## Worked example: mint under a native script
 
@@ -133,7 +138,7 @@ transaction:
           script_type: 0
 """
 mint = lib.quicktx.build_with(mint_yaml, provider, sender)
-signed = lib.account.sign_tx(mnemonic, mint["tx_cbor"], Network.TESTNET)
+signed = acct.sign_tx(mint["tx_cbor"])
 ```
 
 An empty `ScriptAll` policy (`820180`) needs no extra signature; a `sig`-keyed policy needs the corresponding key's witness.
