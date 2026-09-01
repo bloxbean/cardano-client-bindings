@@ -62,7 +62,7 @@ Rust: `bridge.quicktx().build(&yaml, &utxos, &params, None, additional_signers)?
 
 ## 4. Networks
 
-`MAINNET = 0`, `TESTNET = 1`, `PREPROD = 2`, `PREVIEW = 3`. Required for every key-deriving call; validated before the FFI call.
+`MAINNET = 0`, `TESTNET = 1`. Required for every key-deriving call; validated before the FFI call.
 
 **These are CCL enum ordinals, NOT on-chain network ids** — inverted for mainnet: `Network.MAINNET == 0` but a mainnet address's on-chain `network_id` is `1`. Never feed `address.info()["network_id"]` into a `network` parameter.
 
