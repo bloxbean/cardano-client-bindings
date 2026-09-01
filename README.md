@@ -228,7 +228,7 @@ All functions follow the same pattern:
 | **Get result** | `ccl_get_result(thread)` → result string (JSON or hex) |
 | **Get error** | `ccl_get_last_error(thread)` → error message |
 | **Memory** | Free returned strings with `ccl_free_string(thread, ptr)` |
-| **Network ID** | `0` = mainnet, `1` = testnet, `2` = preprod, `3` = preview |
+| **Network ID** | `0` = mainnet, `1` = testnet |
 
 ### Usage Pattern (C)
 
