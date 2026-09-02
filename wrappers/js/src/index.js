@@ -247,7 +247,7 @@ export class CclBridge {
       ccl_account_sign_tx_handle: { args: [FFIType.ptr, FFIType.i64, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
       ccl_account_close: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
       ccl_account_create_handle: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
-      ccl_account_export_recovery_phrase: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
+      ccl_account_export_recovery_phrase: { args: [FFIType.ptr, FFIType.i64, FFIType.ptr], returns: FFIType.i32 },
 
       // Address
       ccl_address_info: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
@@ -355,6 +355,14 @@ export class CclBridge {
       throw new CclError(rc, this._getError());
     }
     return this._getResult();
+  }
+
+  // Like _check, but never touches the read-once result slot — for calls whose result (if any)
+  // is delivered out-of-band (out-params) or that produce none.
+  _checkRc(rc) {
+    if (rc !== CCL_SUCCESS) {
+      throw new CclError(rc, this._getError());
+    }
   }
 
   /** Tear down the isolate. Idempotent; any later call throws {@link CclClosedError}. */
@@ -658,8 +666,16 @@ export class Account {
    * phrase). Persist the returned value securely; nothing else ever returns it.
    */
   exportRecoveryPhrase() {
-    const rc = this._b._lib.ccl_account_export_recovery_phrase(this._b._thread, this._handle);
-    return this._b._check(rc);
+    // Delivered via out-param in the SAME call — never through the read-once result slot.
+    // The native side destroys its pending copy only after the string is materialized, so a
+    // failed delivery is retryable instead of orphaning the only copy of the phrase.
+    const out = new BigUint64Array(1);
+    const rc = this._b._lib.ccl_account_export_recovery_phrase(this._b._thread, this._handle, ptr(out));
+    this._b._checkRc(rc);
+    const phrasePtr = Number(out[0]);
+    const phrase = new CString(phrasePtr).toString();
+    this._b._lib.ccl_free_string(this._b._thread, phrasePtr);
+    return phrase;
   }
 
   /** Release the native account state. Idempotent; further use throws with code -11. */

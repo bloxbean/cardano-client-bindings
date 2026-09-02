@@ -45,14 +45,16 @@ int main(int argc, char **argv) {
     printf("  Account info (first 100 chars): %.100s...\n", account_json);
     ccl_free_string(thread, account_json);
 
-    /* Test: one-shot recovery-phrase export */
-    rc = ccl_account_export_recovery_phrase(thread, handle);
+    /* Test: one-shot recovery-phrase export — delivered via out-param in the same call */
+    char *phrase = NULL;
+    rc = ccl_account_export_recovery_phrase(thread, handle, &phrase);
     ASSERT(rc == 0, "ccl_account_export_recovery_phrase");
-    char *phrase = ccl_get_result(thread);
-    ASSERT(phrase != NULL && strlen(phrase) > 0, "recovery phrase exported once");
+    ASSERT(phrase != NULL && strlen(phrase) > 0, "recovery phrase delivered in-call");
     ccl_free_string(thread, phrase);
-    rc = ccl_account_export_recovery_phrase(thread, handle);
+    char *again = NULL;
+    rc = ccl_account_export_recovery_phrase(thread, handle, &again);
     ASSERT(rc != 0, "second export fails (one-shot)");
+    ASSERT(again == NULL, "failed export writes nothing");
 
     /* Test: close is effective — the handle is dead afterwards */
     rc = ccl_account_close(thread, handle);

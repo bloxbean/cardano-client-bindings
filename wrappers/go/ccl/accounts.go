@@ -146,9 +146,23 @@ func (a *Account) SignTx(txCborHex string, roles SigningRole) (string, error) {
 // Accounts opened from a mnemonic fail (the caller already holds the phrase). Persist the returned
 // value securely; nothing else ever returns it.
 func (a *Account) ExportRecoveryPhrase() (string, error) {
-	return a.bridge.invoke(func() int32 {
-		return cclAccountExportRecoveryPhrase(a.bridge.thread, a.handle)
-	})
+	// Delivered via out-param in the SAME call — never through the read-once result slot.
+	// The native side destroys its pending copy only after the string is materialized, so a
+	// failed delivery is retryable instead of orphaning the only copy of the phrase.
+	var phrase string
+	var callErr error
+	if rerr := a.bridge.run(func() {
+		var out *byte
+		if rc := cclAccountExportRecoveryPhrase(a.bridge.thread, a.handle, &out); rc != Success {
+			callErr = &CclError{Code: int(rc), Message: a.bridge.getError()}
+			return
+		}
+		phrase = goString(out)
+		cclFreeString(a.bridge.thread, out)
+	}); rerr != nil {
+		return "", rerr
+	}
+	return phrase, callErr
 }
 
 // Close releases the native account state. Idempotent; further use fails with ErrInvalidHandle.

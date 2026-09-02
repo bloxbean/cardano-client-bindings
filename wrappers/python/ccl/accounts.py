@@ -66,8 +66,21 @@ class Account:
         removed on retrieval. Accounts opened from a mnemonic raise (the caller already holds the
         phrase). Persist the returned value securely; nothing else ever returns it.
         """
-        rc = self._b._lib.ccl_account_export_recovery_phrase(self._b._thread, self._handle)
-        return self._b._check(rc)
+        # Delivered via out-param in the SAME call — never through the read-once result slot.
+        # The native side destroys its pending copy only after this string is materialized, so
+        # a failed delivery is retryable instead of orphaning the only copy of the phrase.
+        out = ctypes.c_void_p()
+        rc = self._b._lib.ccl_account_export_recovery_phrase(
+            self._b._thread, self._handle, ctypes.byref(out))
+        if rc != self._b.CCL_SUCCESS:
+            from ccl._ffi import CclError, CclInvalidHandleError
+            error = self._b._get_error()
+            if rc == self._b.CCL_ERROR_INVALID_HANDLE:
+                raise CclInvalidHandleError(rc, error or f"Unknown error (code {rc})")
+            raise CclError(rc, error or f"Unknown error (code {rc})")
+        phrase = ctypes.string_at(out.value).decode("utf-8")
+        self._b._lib.ccl_free_string(self._b._thread, out)
+        return phrase
 
     def close(self):
         """Release the native account state. Idempotent; further use raises

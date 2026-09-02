@@ -60,7 +60,7 @@ var (
 	cclAccountSignTxHandle         func(thread uintptr, handle int64, txCbor string, roleMask int32) int32
 	cclAccountCloseHandle          func(thread uintptr, handle int64) int32
 	cclAccountCreateHandle         func(thread uintptr, network int32, outHandle *int64) int32
-	cclAccountExportRecoveryPhrase func(thread uintptr, handle int64) int32
+	cclAccountExportRecoveryPhrase func(thread uintptr, handle int64, outPhrase **byte) int32
 )
 
 var (

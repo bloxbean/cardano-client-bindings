@@ -340,4 +340,34 @@ class AccountServiceTest {
             AccountService.close(handle);
         }
     }
+
+    // --- Export delivery: claimed phrases are retryable on failure, never orphaned ---
+
+    @Test
+    void restoredPhraseKeepsAFailedDeliveryRetryable() {
+        long handle = AccountService.createNew(TESTNET);
+        try {
+            String phrase = AccountService.exportRecoveryPhrase(handle); // atomic claim
+            assertThrows(IllegalStateException.class,
+                    () -> AccountService.exportRecoveryPhrase(handle), "one-shot: claimed");
+
+            AccountService.restoreRecoveryPhrase(handle, phrase); // as after a failed delivery
+            assertEquals(phrase, AccountService.exportRecoveryPhrase(handle),
+                    "a failed delivery must leave the export retryable — the phrase is the only copy");
+        } finally {
+            AccountService.close(handle);
+        }
+    }
+
+    @Test
+    void restoreAfterCloseLeavesNoSecretBehind() {
+        int basePending = AccountService.pendingPhraseCount();
+        long handle = AccountService.createNew(TESTNET);
+        String phrase = AccountService.exportRecoveryPhrase(handle);
+        AccountService.close(handle);
+
+        AccountService.restoreRecoveryPhrase(handle, phrase); // lost the race with close
+        assertEquals(basePending, AccountService.pendingPhraseCount(),
+                "close wins: no secret outlives its handle, even via a late restore");
+    }
 }

@@ -151,5 +151,9 @@ extern "C" {
         network: c_int,
         out_handle: *mut i64,
     ) -> c_int;
-    pub fn ccl_account_export_recovery_phrase(thread: *mut graal_isolatethread_t, handle: i64) -> c_int;
+    pub fn ccl_account_export_recovery_phrase(
+        thread: *mut graal_isolatethread_t,
+        handle: i64,
+        out_phrase: *mut *mut c_char,
+    ) -> c_int;
 }

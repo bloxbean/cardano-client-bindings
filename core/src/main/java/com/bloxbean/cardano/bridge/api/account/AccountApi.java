@@ -106,22 +106,38 @@ public final class AccountApi {
     }
 
     /**
-     * One-shot export of a freshly created account's recovery phrase.
+     * One-shot export of a freshly created account's recovery phrase, delivered <b>in this
+     * call</b> via {@code out_phrase} — never through the result slot.
      *
-     * <p>Exported as {@code ccl_account_export_recovery_phrase}. The result is the BIP-39 phrase;
-     * it is removed on retrieval — a second call fails, as does calling this on an account opened
-     * from a mnemonic (the caller already holds that phrase). Secret access is deliberate by
-     * design: nothing else ever returns the phrase.
+     * <p>Exported as {@code ccl_account_export_recovery_phrase}. On success {@code out_phrase}
+     * receives a malloc'd, NUL-terminated copy of the BIP-39 phrase (free it with
+     * {@code ccl_free_string}). The pending phrase is destroyed only <em>after</em> that copy has
+     * been materialized: a failed delivery leaves the export retryable instead of orphaning the
+     * only copy. A second call fails, as does calling this on an account opened from a mnemonic
+     * (the caller already holds that phrase). Secret access is deliberate by design: nothing else
+     * ever returns the phrase.
      *
-     * @param thread the current isolate thread
-     * @param handle an open, freshly created account handle
+     * @param thread    the current isolate thread
+     * @param handle    an open, freshly created account handle
+     * @param outPhrase receives the malloc'd phrase (must be non-null)
      * @return {@link ErrorCodes#CCL_SUCCESS}, or {@link ErrorCodes#CCL_ERROR_INVALID_HANDLE} /
      *         {@link ErrorCodes#CCL_ERROR_INVALID_ARGUMENT}
      */
     @CEntryPoint(name = "ccl_account_export_recovery_phrase")
-    public static int exportRecoveryPhrase(IsolateThread thread, long handle) {
+    public static int exportRecoveryPhrase(IsolateThread thread, long handle,
+                                           org.graalvm.nativeimage.c.type.CCharPointerPointer outPhrase) {
         try {
-            ResultState.set(AccountService.exportRecoveryPhrase(handle));
+            if (outPhrase.isNull()) {
+                ErrorState.set("out_phrase must be non-null");
+                return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
+            }
+            String phrase = AccountService.exportRecoveryPhrase(handle); // atomic one-shot claim
+            try {
+                outPhrase.write(NativeString.toCString(phrase)); // caller frees via ccl_free_string
+            } catch (Throwable t) {
+                AccountService.restoreRecoveryPhrase(handle, phrase); // delivery failed: retryable
+                throw t;
+            }
             return ErrorCodes.CCL_SUCCESS;
         } catch (AccountService.UnknownHandleException e) {
             ErrorState.set(e.getMessage());

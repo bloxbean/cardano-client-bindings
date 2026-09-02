@@ -122,12 +122,25 @@ public final class AccountService {
      */
     public static String exportRecoveryPhrase(long handle) {
         lookup(handle); // typed -11 semantics for unknown/closed handles take precedence
-        String phrase = pendingRecoveryPhrases.remove(handle);
+        String phrase = pendingRecoveryPhrases.remove(handle); // atomic claim: one-shot
         if (phrase == null) {
             throw new IllegalStateException(
                     "No recovery phrase to export: already exported, or the account was opened from a mnemonic");
         }
         return phrase;
+    }
+
+    /**
+     * Puts a claimed-but-undelivered phrase back, so a failed delivery (e.g. the unmanaged-memory
+     * allocation for the out-param C string) leaves the export <em>retryable</em> instead of
+     * orphaning the only copy of a funded account's recovery phrase. No-op if the handle closed
+     * concurrently — close's cleanup wins, no secret outlives its handle.
+     */
+    static void restoreRecoveryPhrase(long handle, String phrase) {
+        pendingRecoveryPhrases.putIfAbsent(handle, phrase);
+        if (!accounts.containsKey(handle)) {
+            pendingRecoveryPhrases.remove(handle); // lost the race with close(); handles never reused
+        }
     }
 
     /**

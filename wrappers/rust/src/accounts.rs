@@ -140,9 +140,22 @@ impl Account {
     /// removed on retrieval. Accounts opened from a mnemonic fail (the caller already holds the
     /// phrase). Persist the returned value securely; nothing else ever returns it.
     pub fn export_recovery_phrase(&self) -> Result<String> {
+        // Delivered via out-param in the SAME call — never through the read-once result slot.
+        // The native side destroys its pending copy only after the string is materialized, so
+        // a failed delivery is retryable instead of orphaning the only copy of the phrase.
         let thread = self.shared.thread()?;
-        let rc = unsafe { ffi::ccl_account_export_recovery_phrase(thread, self.handle.get()) };
-        check_at(thread, rc)
+        let mut out: *mut std::os::raw::c_char = std::ptr::null_mut();
+        let rc = unsafe {
+            ffi::ccl_account_export_recovery_phrase(thread, self.handle.get(), &mut out)
+        };
+        if rc != crate::error_codes::CCL_SUCCESS {
+            return Err(crate::CclError { code: rc, message: crate::get_error_at(thread) });
+        }
+        let phrase = unsafe { std::ffi::CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { ffi::ccl_free_string(thread, out) };
+        Ok(phrase)
     }
 
     /// Release the native account state. Idempotent; further use fails with
