@@ -21,8 +21,9 @@ try {
 
   // 2. Restore the same account from its phrase — the address must match.
   using restored = bridge.accounts.fromMnemonic(mnemonic, TESTNET, 0, 0);
-  if (restored.info.base_address !== base_address) throw new Error('address mismatch');
-  console.log('Restored from mnemonic — address matches:', restored.info.base_address);
+  const restoredAddress = restored.info.base_address;
+  if (restoredAddress !== base_address) throw new Error('address mismatch');
+  console.log('Restored from mnemonic — address matches:', restoredAddress);
 
   // 3. Raw key material, when interop genuinely needs it, comes from the stateless
   //    derivation utility — handles never expose key bytes.

@@ -224,11 +224,13 @@ class AccountServiceTest {
     void closeLeavesNoStateBehind_inEitherMap() {
         int baseOpen = AccountService.openCount();
         int basePending = AccountService.pendingPhraseCount();
+        int baseInfoCache = AccountService.infoCacheCount();
 
         long imported = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, 0, 0);
         long created = AccountService.createNew(TESTNET);
         long exported = AccountService.createNew(TESTNET);
         AccountService.exportRecoveryPhrase(exported);
+        assertDoesNotThrow(() -> AccountService.infoJson(imported)); // populate the memoized info
 
         assertEquals(baseOpen + 3, AccountService.openCount());
         assertEquals(basePending + 1, AccountService.pendingPhraseCount(),
@@ -238,6 +240,7 @@ class AccountServiceTest {
         AccountService.close(created);
         AccountService.close(exported);
         assertEquals(baseOpen, AccountService.openCount(), "every handle removed");
+        assertEquals(baseInfoCache, AccountService.infoCacheCount(), "info cache drained on close");
         assertEquals(basePending, AccountService.pendingPhraseCount(),
                 "close drops an unexported phrase too — no secret outlives its handle");
     }

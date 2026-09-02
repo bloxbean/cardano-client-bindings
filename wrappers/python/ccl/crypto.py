@@ -1,3 +1,5 @@
+import json
+
 class Crypto:
     """Crypto namespace for CCL operations."""
 
@@ -51,7 +53,6 @@ class Crypto:
         (``lib.accounts``) for signing — this exists for interop that genuinely needs
         key bytes.
         """
-        import json
         rc = self._b._lib.ccl_crypto_derive_key(
             self._b._thread, self._b._encode(mnemonic),
             account_index, address_index, self._b._encode(role))

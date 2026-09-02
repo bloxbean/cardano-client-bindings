@@ -54,19 +54,17 @@ public final class AccountApi {
             long handle = AccountService.openMnemonic(networkId, mnemonic, accountIndex, addressIndex);
             outHandle.write(handle);
             return ErrorCodes.CCL_SUCCESS;
+        } catch (AccountService.InvalidNetworkException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_NETWORK;
+        } catch (AccountService.InvalidMnemonicException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_MNEMONIC;
         } catch (IllegalArgumentException e) {
             ErrorState.set(e.getMessage());
-            String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
-            if (msg.contains("network")) {
-                return ErrorCodes.CCL_ERROR_INVALID_NETWORK;
-            }
             return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
         } catch (Exception e) {
-            String msg = e.getMessage();
-            ErrorState.set(msg);
-            if (msg != null && msg.toLowerCase().contains("mnemonic")) {
-                return ErrorCodes.CCL_ERROR_INVALID_MNEMONIC;
-            }
+            ErrorState.set(e.getMessage());
             return ErrorCodes.CCL_ERROR_GENERAL;
         }
     }
@@ -93,9 +91,12 @@ public final class AccountApi {
             }
             outHandle.write(AccountService.createNew(networkId));
             return ErrorCodes.CCL_SUCCESS;
-        } catch (IllegalArgumentException e) {
+        } catch (AccountService.InvalidNetworkException e) {
             ErrorState.set(e.getMessage());
             return ErrorCodes.CCL_ERROR_INVALID_NETWORK;
+        } catch (IllegalArgumentException e) {
+            ErrorState.set(e.getMessage());
+            return ErrorCodes.CCL_ERROR_INVALID_ARGUMENT;
         } catch (Exception e) {
             ErrorState.set(e.getMessage());
             return ErrorCodes.CCL_ERROR_GENERAL;
@@ -148,7 +149,7 @@ public final class AccountApi {
     @CEntryPoint(name = "ccl_account_get_info")
     public static int getInfo(IsolateThread thread, long handle) {
         try {
-            ResultState.set(JsonHelper.toJson(AccountService.info(handle)));
+            ResultState.set(AccountService.infoJson(handle));
             return ErrorCodes.CCL_SUCCESS;
         } catch (AccountService.UnknownHandleException e) {
             ErrorState.set(e.getMessage());

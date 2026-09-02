@@ -28,7 +28,6 @@ extern "C" {
     pub fn ccl_get_last_error(thread: *mut graal_isolatethread_t) -> *mut c_char;
     pub fn ccl_free_string(thread: *mut graal_isolatethread_t, ptr: *mut c_char);
 
-    // Account API
 
     // Address API
     pub fn ccl_address_info(thread: *mut graal_isolatethread_t, bech32: *const c_char) -> c_int;
@@ -107,9 +106,7 @@ extern "C" {
         json: *const c_char,
     ) -> c_int;
 
-    // Governance API
 
-    // Wallet API
 
     // Script API
     pub fn ccl_script_native_from_json(

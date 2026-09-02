@@ -27,11 +27,16 @@ export const CCL_ERROR_INVALID_HANDLE = -11;
 //
 // WARNING — these are CCL's `Network` *enum ordinals*, NOT Cardano's on-chain network id. They are
 // inverted with respect to it: on-chain, testnet is 0 and mainnet is 1, whereas here MAINNET is 0
-// and TESTNET is 1. Never pass a raw number: `account.create(0)` derives a **mainnet** key, not a
+// and TESTNET is 1. Never pass a raw number: `accounts.create(0)` derives a **mainnet** key, not a
 // testnet one. Always pass one of these constants.
 //
 // The genuine on-chain id is the `network_id` field returned by `address.info()` — an account made
 // with MAINNET (0) has `address.info().network_id === 1`, and one made with TESTNET (1) has 0.
+export const MAINNET = 0;
+export const TESTNET = 1;
+
+const NETWORKS = new Set([MAINNET, TESTNET]);
+
 /**
  * Typed signing roles for managed accounts. Combine with `|`; witnesses are applied in canonical
  * order (payment, stake, DRep, committee cold, committee hot) regardless of combination order.
@@ -43,11 +48,6 @@ export const SigningRole = Object.freeze({
   COMMITTEE_COLD: 1 << 3,
   COMMITTEE_HOT: 1 << 4,
 });
-
-export const MAINNET = 0;
-export const TESTNET = 1;
-
-const NETWORKS = new Set([MAINNET, TESTNET]);
 
 // Validate a `network` argument at the wrapper boundary. Without this an out-of-range value reaches
 // the native library, which fails with an opaque error (or, for a valid-looking ordinal, silently
@@ -241,7 +241,13 @@ export class CclBridge {
       ccl_get_last_error: { args: [FFIType.ptr], returns: FFIType.ptr },
       ccl_free_string: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.void },
 
-      // Account
+      // Managed account handles (ADR-0016)
+      ccl_account_open_mnemonic: { args: [FFIType.ptr, FFIType.i32, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+      ccl_account_get_info: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
+      ccl_account_sign_tx_handle: { args: [FFIType.ptr, FFIType.i64, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
+      ccl_account_close: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
+      ccl_account_create_handle: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
+      ccl_account_export_recovery_phrase: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
 
       // Address
       ccl_address_info: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
@@ -274,19 +280,8 @@ export class CclBridge {
       ccl_script_native_from_json: { args: [FFIType.ptr, FFIType.cstring], returns: FFIType.i32 },
       ccl_script_hash: { args: [FFIType.ptr, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
 
-      // Governance
-
-      // Wallet
-
       // QuickTx
       ccl_quicktx_build: { args: [FFIType.ptr, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
-      // Managed account handles (ADR-0016)
-      ccl_account_open_mnemonic: { args: [FFIType.ptr, FFIType.i32, FFIType.cstring, FFIType.i32, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
-      ccl_account_get_info: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
-      ccl_account_sign_tx_handle: { args: [FFIType.ptr, FFIType.i64, FFIType.cstring, FFIType.i32], returns: FFIType.i32 },
-      ccl_account_close: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
-      ccl_account_create_handle: { args: [FFIType.ptr, FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
-      ccl_account_export_recovery_phrase: { args: [FFIType.ptr, FFIType.i64], returns: FFIType.i32 },
     });
     } catch (e) {
       throw new Error(
@@ -604,6 +599,7 @@ export class Account {
   constructor(bridge, handle) {
     this._b = bridge;
     this._handle = handle;
+    this._info = null;
   }
 
   /**
@@ -612,8 +608,12 @@ export class Account {
    * committee_hot_id, committee_hot_credential }`. Never contains secrets.
    */
   get info() {
-    const rc = this._b._lib.ccl_account_get_info(this._b._thread, this._handle);
-    return JSON.parse(this._b._check(rc));
+    if (this._info === null) {
+      const rc = this._b._lib.ccl_account_get_info(this._b._thread, this._handle);
+      // Immutable for the handle's lifetime: fetch once, memoize frozen.
+      this._info = Object.freeze(JSON.parse(this._b._check(rc)));
+    }
+    return this._info;
   }
 
   /**
@@ -645,6 +645,7 @@ export class Account {
   close() {
     const handle = this._handle;
     this._handle = 0n; // 0 is never a valid handle
+    this._info = null;
     if (handle && this._b._threadPtr !== null) {
       const rc = this._b._lib.ccl_account_close(this._b._thread, handle);
       this._b._check(rc);

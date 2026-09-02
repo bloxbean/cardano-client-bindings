@@ -4,6 +4,7 @@ The mnemonic crosses the FFI boundary once at open (or never, for created accoun
 one-shot recovery-phrase export) instead of travelling with every operation.
 """
 import ctypes
+import json
 from enum import IntFlag
 
 from ccl.network import Network
@@ -35,14 +36,17 @@ class Account:
     def __init__(self, bridge, handle):
         self._b = bridge
         self._handle = handle
+        self._info = None
 
     @property
     def info(self):
-        """Public account data: ``{"base_address", "enterprise_address", "stake_address",
-        "network", "account_index", "address_index", "drep_id"}``. Never contains secrets."""
-        import json
-        rc = self._b._lib.ccl_account_get_info(self._b._thread, self._handle)
-        return json.loads(self._b._check(rc))
+        """Public account data: the addresses, network and derivation indices, ``drep_id``, and
+        the committee identifiers/credentials. Never contains secrets. Immutable for the handle's
+        lifetime, so it is fetched once and memoized (a fresh copy is returned per access)."""
+        if self._info is None:
+            rc = self._b._lib.ccl_account_get_info(self._b._thread, self._handle)
+            self._info = json.loads(self._b._check(rc))
+        return dict(self._info)
 
     def sign_tx(self, tx_cbor_hex, roles=SigningRole.PAYMENT):
         """Sign a transaction with the selected roles; returns the signed CBOR hex.
@@ -69,6 +73,7 @@ class Account:
         """Release the native account state. Idempotent; further use raises
         :class:`ccl.CclInvalidHandleError`."""
         handle, self._handle = self._handle, 0  # 0 is never a valid handle
+        self._info = None
         if handle and not getattr(self._b, "_closed", True):
             rc = self._b._lib.ccl_account_close(self._b._thread, handle)
             self._b._check(rc)

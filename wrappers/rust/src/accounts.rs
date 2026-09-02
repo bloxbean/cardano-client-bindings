@@ -4,7 +4,7 @@
 //! one-shot recovery-phrase export) instead of travelling with every operation.
 //!
 //! Ownership model (ADR-0016, as amended): an `Account` is an owned value — not a borrow of the
-//! [`Bridge`](crate::Bridge) — holding shared, close-aware access to the bridge's isolate state.
+//! [`crate::Bridge`] — holding shared, close-aware access to the bridge's isolate state.
 //! It can live in the same struct as its `Bridge`. Validity is enforced at runtime: any call after
 //! the account's `close()` — or after the `Bridge` itself is dropped — fails with a normal
 //! [`CclError`] (`CCL_ERROR_INVALID_HANDLE`, `-11`), never by touching a dead isolate. Like the

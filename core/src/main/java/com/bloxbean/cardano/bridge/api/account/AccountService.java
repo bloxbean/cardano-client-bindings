@@ -32,6 +32,20 @@ public final class AccountService {
         }
     }
 
+    /** Thrown for a network id that is not MAINNET (0) or TESTNET (1). */
+    public static final class InvalidNetworkException extends IllegalArgumentException {
+        InvalidNetworkException(int networkId) {
+            super("Invalid network id: " + networkId);
+        }
+    }
+
+    /** Thrown for a syntactically invalid BIP-39 mnemonic. */
+    public static final class InvalidMnemonicException extends IllegalArgumentException {
+        InvalidMnemonicException(String reason) {
+            super("Invalid mnemonic: " + reason);
+        }
+    }
+
     // Handles start at 1: 0 is never valid, so a zero-initialized out-parameter can't alias a
     // real account.
     private static final AtomicLong nextHandle = new AtomicLong(1);
@@ -41,6 +55,10 @@ public final class AccountService {
     // handle closes. Kept out of the Account record so the ordinary object graph never carries the
     // phrase; removal on export makes the export naturally one-shot.
     private static final ConcurrentHashMap<Long, String> pendingRecoveryPhrases = new ConcurrentHashMap<>();
+
+    // Serialized info(), memoized per handle: every field is fixed at open (the class invariant),
+    // yet computing it re-derives the DRep and committee keys. Cleared on close.
+    private static final ConcurrentHashMap<Long, String> infoJsonCache = new ConcurrentHashMap<>();
 
     private AccountService() {}
 
@@ -52,10 +70,15 @@ public final class AccountService {
     public static long openMnemonic(int networkId, String mnemonic, int accountIndex, int addressIndex) {
         Network network = NetworkMapper.toNetwork(networkId);
         if (network == null) {
-            throw new IllegalArgumentException("Invalid network id: " + networkId);
+            throw new InvalidNetworkException(networkId);
         }
         if (mnemonic == null || mnemonic.isBlank()) {
-            throw new IllegalArgumentException("Mnemonic is required");
+            throw new InvalidMnemonicException("a non-blank phrase is required");
+        }
+        try {
+            com.bloxbean.cardano.client.crypto.MnemonicUtil.validateMnemonic(mnemonic);
+        } catch (Exception e) {
+            throw new InvalidMnemonicException(e.getMessage());
         }
         if (accountIndex < 0 || addressIndex < 0) {
             throw new IllegalArgumentException("Account and address indices must be >= 0");
@@ -75,7 +98,7 @@ public final class AccountService {
     public static long createNew(int networkId) {
         Network network = NetworkMapper.toNetwork(networkId);
         if (network == null) {
-            throw new IllegalArgumentException("Invalid network id: " + networkId);
+            throw new InvalidNetworkException(networkId);
         }
         var cclAccount = new com.bloxbean.cardano.client.account.Account(network);
         long handle = nextHandle.getAndIncrement();
@@ -106,6 +129,20 @@ public final class AccountService {
      * Public account information — safe to log or serialize; never contains the mnemonic or any
      * private key material.
      */
+    /** {@link #info} as its serialized JSON, memoized for the handle's lifetime. */
+    public static String infoJson(long handle) throws com.fasterxml.jackson.core.JsonProcessingException {
+        String cached = infoJsonCache.get(handle);
+        if (cached != null) {
+            return cached;
+        }
+        String json = com.bloxbean.cardano.bridge.util.JsonHelper.toJson(info(handle));
+        infoJsonCache.put(handle, json);
+        if (!accounts.containsKey(handle)) {
+            infoJsonCache.remove(handle); // lost the race with close(); handles are never reused
+        }
+        return json;
+    }
+
     public static Map<String, Object> info(long handle) {
         Account managed = lookup(handle);
         Map<String, Object> result = new LinkedHashMap<>();
@@ -190,6 +227,7 @@ public final class AccountService {
     public static void close(long handle) {
         accounts.remove(handle);
         pendingRecoveryPhrases.remove(handle);
+        infoJsonCache.remove(handle);
     }
 
     /** Number of currently open handles (test/diagnostic aid). */
@@ -200,6 +238,11 @@ public final class AccountService {
     /** Number of unexported recovery phrases pending (test/diagnostic aid). */
     static int pendingPhraseCount() {
         return pendingRecoveryPhrases.size();
+    }
+
+    /** Number of memoized info entries (test/diagnostic aid). */
+    static int infoCacheCount() {
+        return infoJsonCache.size();
     }
 
     static Account lookup(long handle) {

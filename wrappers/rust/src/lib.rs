@@ -105,42 +105,6 @@ fn to_cstring(s: &str) -> Result<CString> {
     })
 }
 
-/// Safe wrapper around the CCL native library.
-///
-/// # Threading
-///
-/// A `Bridge` is **thread-affine**: it must be used from the thread that created it. It is therefore
-/// neither `Send` nor `Sync`, and the compiler will stop you from moving one across threads. To use
-/// the library from several threads, **create one `Bridge` per thread**.
-///
-/// This is not a conservative choice; it is what the native library requires. A `Bridge` holds a
-/// `graal_isolatethread_t*`, and that handle belongs to the OS thread that created it — it carries
-/// that thread's stack bounds and the VM's thread-local state, including the result/error slots that
-/// [`Bridge::get_result`] reads back after each call. Handing it to another thread corrupts the VM.
-/// (The *isolate* — the heap — can be shared; the isolate **thread** cannot. Conflating the two is
-/// what made the previous `unsafe impl Send for Bridge` unsound: it let safe code do exactly this,
-/// with no `unsafe` block anywhere in sight, and it appeared to work right up until it didn't.)
-///
-/// Moving a `Bridge` to another thread does not compile — and must keep not compiling:
-///
-/// ```compile_fail
-/// let bridge = ccl::Bridge::new().unwrap();
-/// std::thread::spawn(move || {
-///     let _ = bridge.version(); // error: `*mut c_void` cannot be sent between threads safely
-/// });
-/// ```
-///
-/// Use one per thread instead:
-///
-/// ```no_run
-/// let handles: Vec<_> = (0..4)
-///     .map(|_| std::thread::spawn(|| {
-///         let bridge = ccl::Bridge::new()?;   // each thread owns its own isolate
-///         bridge.version()
-///     }))
-///     .collect();
-/// # Ok::<(), ccl::CclError>(())
-/// ```
 /// Close-aware view of the bridge's isolate thread, shared with owned [`accounts::Account`]s.
 pub(crate) struct BridgeShared {
     pub(crate) thread: std::cell::Cell<*mut ffi::graal_isolatethread_t>,
@@ -191,6 +155,42 @@ pub(crate) fn check_at(thread: *mut ffi::graal_isolatethread_t, rc: i32) -> Resu
     Ok(get_result_at(thread))
 }
 
+/// Safe wrapper around the CCL native library.
+///
+/// # Threading
+///
+/// A `Bridge` is **thread-affine**: it must be used from the thread that created it. It is therefore
+/// neither `Send` nor `Sync`, and the compiler will stop you from moving one across threads. To use
+/// the library from several threads, **create one `Bridge` per thread**.
+///
+/// This is not a conservative choice; it is what the native library requires. A `Bridge` holds a
+/// `graal_isolatethread_t*`, and that handle belongs to the OS thread that created it — it carries
+/// that thread's stack bounds and the VM's thread-local state, including the result/error slots the
+/// wrapper reads back after each call. Handing it to another thread corrupts the VM.
+/// (The *isolate* — the heap — can be shared; the isolate **thread** cannot. Conflating the two is
+/// what made the previous `unsafe impl Send for Bridge` unsound: it let safe code do exactly this,
+/// with no `unsafe` block anywhere in sight, and it appeared to work right up until it didn't.)
+///
+/// Moving a `Bridge` to another thread does not compile — and must keep not compiling:
+///
+/// ```compile_fail
+/// let bridge = ccl::Bridge::new().unwrap();
+/// std::thread::spawn(move || {
+///     let _ = bridge.version(); // error: `*mut c_void` cannot be sent between threads safely
+/// });
+/// ```
+///
+/// Use one per thread instead:
+///
+/// ```no_run
+/// let handles: Vec<_> = (0..4)
+///     .map(|_| std::thread::spawn(|| {
+///         let bridge = ccl::Bridge::new()?;   // each thread owns its own isolate
+///         bridge.version()
+///     }))
+///     .collect();
+/// # Ok::<(), ccl::CclError>(())
+/// ```
 pub struct Bridge {
     #[allow(dead_code)]
     isolate: *mut ffi::graal_isolate_t,
@@ -291,12 +291,12 @@ impl Bridge {
         ScriptApi { bridge: self }
     }
 
-    /// Get the quicktx namespace API.
     /// Managed accounts (ADR-0016): open once, hold an owned Account, sign with typed roles.
     pub fn accounts(&self) -> accounts::AccountsApi<'_> {
         accounts::AccountsApi { bridge: self }
     }
 
+    /// Get the quicktx namespace API.
     pub fn quicktx(&self) -> QuickTxApi<'_> {
         QuickTxApi { bridge: self }
     }
