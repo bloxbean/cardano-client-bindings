@@ -218,14 +218,15 @@ def test_multiple_receivers(ccl_lib, devkit, funded_sender):
     r1 = _fresh_addr(ccl_lib)
     r2 = _fresh_addr(ccl_lib)
 
-    utxos = devkit.get_utxos(funded_sender.info["base_address"])
+    sender_address = funded_sender.info["base_address"]
+    utxos = devkit.get_utxos(sender_address)
     pp = devkit.get_protocol_params()
 
     yaml_str = f"""
 version: 1.0
 transaction:
   - tx:
-      from: {funded_sender}
+      from: {sender_address}
       intents:
         - type: payment
           address: {r1}
