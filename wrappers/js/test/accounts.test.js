@@ -138,3 +138,25 @@ describe('managed accounts', () => {
     expect(() => leaked.info).toThrow(CclError);
   });
 });
+
+describe('GC fallback', () => {
+  // A dropped Account (no close/using) must be reclaimed best-effort: leaked registry
+  // entries pin key material Java-side until process exit. Deterministic close remains
+  // the contract — this pins only that leaks are eventually narrowed (ADR-0016).
+  function leakAccountHandle() {
+    const acct = bridge.accounts.create(TESTNET);
+    return acct._handle; // BigInt copy; the Account object itself is dropped
+  }
+
+  it('a dropped account is reclaimed by the finalizer', async () => {
+    const handle = leakAccountHandle();
+    for (let i = 0; i < 100; i++) {
+      Bun.gc(true);
+      await new Promise((r) => setTimeout(r, 10)); // let finalizer tasks run
+      const rc = bridge._lib.ccl_account_get_info(bridge._thread, handle);
+      if (rc === -11) return; // finalizer closed it
+      if (rc === 0) bridge._check(rc); // drain the parked info so the slot stays clean
+    }
+    throw new Error('dropped Account was never reclaimed — no GC fallback closes leaked handles');
+  });
+});

@@ -7,9 +7,11 @@ package ccl
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func unsignedStakeReg(t *testing.T, info *AccountPublicInfo) string {
@@ -208,4 +210,30 @@ func TestManagedAccountConcurrentUseSerializes(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err)
 	}
+}
+
+// A dropped Account (no Close) must be reclaimed by the GC fallback: leaked registry entries
+// pin key material Java-side until process exit. Deterministic Close remains the contract —
+// this pins only that leaks are eventually narrowed, per ADR-0016's fallback-protection note.
+func TestDroppedAccountIsReclaimedByGC(t *testing.T) {
+	acct, err := bridge.Accounts.Create(Testnet)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	handle := acct.handle
+	acct = nil // drop the only reference
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		_, err := bridge.invoke(func() int32 {
+			return cclAccountGetInfo(bridge.thread, handle)
+		})
+		var ce *CclError
+		if errors.As(err, &ce) && ce.Code == ErrInvalidHandle {
+			return // the finalizer closed it
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("dropped Account was never reclaimed — no GC fallback closes leaked handles")
 }

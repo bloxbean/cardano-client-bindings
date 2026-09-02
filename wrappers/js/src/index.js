@@ -600,11 +600,27 @@ export class QuickTxApi {
  * after close throws a {@link CclError} with code `CCL_ERROR_INVALID_HANDLE` (-11). String
  * representations never contain secret material.
  */
+// Best-effort GC fallback (ADR-0016 "wrapper finalizers are fallback protection"): a dropped
+// Account's native registry entry pins key material until process exit. Deterministic close()
+// or `using` remains the contract — this only narrows the leak. The callback must not touch
+// the read-once result slot (it ignores the return code) and must skip closed bridges: the raw
+// _threadPtr guard is deliberate, the throwing _thread getter would be wrong in a finalizer.
+const accountFinalizer = new FinalizationRegistry(({ bridge, handle }) => {
+  if (bridge._threadPtr !== null && handle) {
+    try {
+      bridge._lib.ccl_account_close(bridge._threadPtr, handle);
+    } catch {
+      // best-effort only
+    }
+  }
+});
+
 export class Account {
   constructor(bridge, handle) {
     this._b = bridge;
     this._handle = handle;
     this._info = null;
+    accountFinalizer.register(this, { bridge, handle }, this);
   }
 
   /**
@@ -648,6 +664,7 @@ export class Account {
 
   /** Release the native account state. Idempotent; further use throws with code -11. */
   close() {
+    accountFinalizer.unregister(this); // closed deterministically; nothing left to finalize
     const handle = this._handle;
     this._handle = 0n; // 0 is never a valid handle
     this._info = null;

@@ -100,7 +100,8 @@ signed, err := acct.SignTx(txCbor, ccl.RolePayment|ccl.RoleStake)
 - `SignTx(txCborHex, roles)` — typed `SigningRole` bit mask (`RolePayment`, `RoleStake`, `RoleDRep`,
   `RoleCommitteeCold`, `RoleCommitteeHot`);
   witnesses apply in canonical order. An empty mask is rejected.
-- `Close()` is explicit and idempotent — close Accounts like files; there is no finalizer. All
+- `Close()` is explicit and idempotent — close Accounts like files. Like `os.File`, a dropped
+  Account is reclaimed best-effort by a GC finalizer (fallback only; timing is the GC's). All
   Account calls ride the Bridge's dedicated isolate thread, so concurrent goroutine use is safe
   (and serialized). `String()` shows only the handle.
 - `Info()` returns public data only: the base/enterprise/stake/change addresses, network and

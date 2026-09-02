@@ -11,6 +11,7 @@ package ccl
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 )
 
 // SigningRole is a typed signing-role bit mask. Combine with |; witnesses are applied in canonical
@@ -38,9 +39,9 @@ type AccountPublicInfo struct {
 	// The CIP-1852 role-1 (internal/change) leaf at this account's address index.
 	ChangeAddress string `json:"change_address"`
 	Network       int    `json:"network"`
-	AccountIndex      int    `json:"account_index"`
-	AddressIndex      int    `json:"address_index"`
-	DRepID            string `json:"drep_id"`
+	AccountIndex  int    `json:"account_index"`
+	AddressIndex  int    `json:"address_index"`
+	DRepID        string `json:"drep_id"`
 	// Committee identifiers: bech32 id and hex credential (blake2b-224 verification-key hash,
 	// as used in committee certificates). Public data like everything else here.
 	CommitteeColdID         string `json:"committee_cold_id"`
@@ -56,8 +57,11 @@ type AccountPublicInfo struct {
 // stake/DRep/committee keys sit at their standard role indices independent of addressIndex, so
 // Accounts at different address indices of one account index share a single stake/DRep identity.
 //
-// Close is explicit and idempotent; any use after Close fails with ErrInvalidHandle (-11). There
-// is no finalizer — close Accounts like files.
+// Close is explicit and idempotent; any use after Close fails with ErrInvalidHandle (-11).
+// Close Accounts like files — but like os.File, a dropped Account is reclaimed best-effort by a
+// GC finalizer (ADR-0016 "wrapper finalizers are fallback protection"): a leaked registry entry
+// would pin key material Java-side until process exit. The finalizer is fallback only;
+// reclamation timing is the GC's.
 type Account struct {
 	bridge *Bridge
 	handle int64 // 0 after Close — never a valid handle
@@ -77,7 +81,7 @@ func (a *AccountsApi) FromMnemonic(mnemonic string, network Network, accountInde
 	if err != nil {
 		return nil, err
 	}
-	return &Account{bridge: a.bridge, handle: handle}, nil
+	return newAccount(a.bridge, handle), nil
 }
 
 // Create creates a brand-new account (fresh 24-word mnemonic). No secret is returned here —
@@ -93,7 +97,22 @@ func (a *AccountsApi) Create(network Network) (*Account, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Account{bridge: a.bridge, handle: handle}, nil
+	return newAccount(a.bridge, handle), nil
+}
+
+// newAccount wires the best-effort GC fallback: a dropped Account (no Close) is closed when
+// the collector reaps it. The finalizer runs on a GC goroutine, so it hops onto the bridge's
+// serialized executor via run() — and reads no result (ccl_account_close produces none; the
+// result slot belongs to whichever call is in flight). A closed bridge makes run() return an
+// error, which is deliberately ignored: the isolate died and took the registry with it.
+func newAccount(bridge *Bridge, handle int64) *Account {
+	acct := &Account{bridge: bridge, handle: handle}
+	runtime.SetFinalizer(acct, func(a *Account) {
+		if h := a.handle; h != 0 {
+			_ = a.bridge.run(func() { cclAccountCloseHandle(a.bridge.thread, h) })
+		}
+	})
+	return acct
 }
 
 // Info returns the account's public data. Never contains secrets.
@@ -134,6 +153,7 @@ func (a *Account) ExportRecoveryPhrase() (string, error) {
 
 // Close releases the native account state. Idempotent; further use fails with ErrInvalidHandle.
 func (a *Account) Close() error {
+	runtime.SetFinalizer(a, nil) // closed deterministically; nothing left to finalize
 	handle := a.handle
 	a.handle = 0 // 0 is never a valid handle
 	if handle == 0 {
