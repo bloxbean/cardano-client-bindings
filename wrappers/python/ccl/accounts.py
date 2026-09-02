@@ -76,7 +76,16 @@ class Account:
         self._info = None
         if handle and not getattr(self._b, "_closed", True):
             rc = self._b._lib.ccl_account_close(self._b._thread, handle)
-            self._b._check(rc)
+            # Deliberately NOT self._b._check(rc): on success _check drains the
+            # READ-ONCE result slot, and close() also runs from __del__ during
+            # cyclic GC — which can fire between another call's native return and
+            # its result fetch, on this same thread. ccl_account_close produces no
+            # result, so on success there is nothing to read; draining here would
+            # steal that in-flight call's pending result.
+            if rc != self._b.CCL_SUCCESS:
+                from ccl._ffi import CclError
+                error = self._b._get_error()
+                raise CclError(rc, error or f"Unknown error (code {rc})")
 
     def __enter__(self):
         return self

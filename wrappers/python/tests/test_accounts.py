@@ -117,3 +117,48 @@ def test_two_handles_same_leaf_independent_lifecycle(ccl):
         assert b.info["base_address"]  # sibling unaffected
     finally:
         b.close()
+
+
+# --- close() must never touch the read-once result slot -------------------------------------
+#
+# Results travel through a thread-local, READ-ONCE slot: a successful native call parks its
+# result there, and the wrapper fetches it with a second FFI call. Account.close() runs not
+# only explicitly but also from __del__ during cyclic GC — which can fire between another
+# call's native return and its result fetch, on the same thread. If close() drains the slot
+# (it produces no result of its own), it steals that in-flight result: sign_tx silently
+# returns None. These tests pin the invariant from both directions.
+
+BLAKE2B_HELLO = "8b7ca7d27d9fc55fa30abfe515b3afb24e3fe89fdd02e2ac92bca2c96680642e"
+
+
+def test_close_never_drains_the_pending_result_slot(ccl):
+    acct = ccl.accounts.create(Network.TESTNET)
+
+    # Park a known result in the slot without fetching it — exactly how it sits
+    # between a native call's return and its result read.
+    rc = ccl._lib.ccl_crypto_blake2b_256(ccl._thread, b"48656c6c6f")  # "Hello"
+    assert rc == 0
+
+    acct.close()  # must not consume the parked result
+
+    assert ccl._get_result() == BLAKE2B_HELLO
+
+
+def test_gc_finalizer_cannot_steal_an_inflight_result(ccl):
+    """The production bug shape: cyclic GC finalizes a dead Account mid-call."""
+    import gc
+
+    class Cycle:
+        pass
+
+    holder = Cycle()
+    holder.self_ref = holder  # unreachable cycle: only gc.collect() can reap it
+    holder.account = ccl.accounts.create(Network.TESTNET)
+    del holder
+
+    rc = ccl._lib.ccl_crypto_blake2b_256(ccl._thread, b"48656c6c6f")
+    assert rc == 0
+
+    gc.collect()  # runs Account.__del__ -> close() with the result parked
+
+    assert ccl._get_result() == BLAKE2B_HELLO
