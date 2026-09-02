@@ -184,3 +184,26 @@ def test_sign_tx_error_codes_are_typed_and_consistent(ccl):
             with pytest.raises(CclError) as excinfo:
                 live.sign_tx(corrupt)
             assert excinfo.value.code == -9, f"{corrupt!r} → {excinfo.value.code}"
+
+
+def test_foreign_handle_from_another_isolate_is_rejected():
+    """Two bridges = two isolates. If every isolate counts handles from 1, bridge A's handle
+    aliases a real account on bridge B, and signing through the C ABI with the wrong
+    bridge/handle pairing silently uses the WRONG KEYS instead of failing with -11. The
+    handle spaces must be disjoint (per-isolate randomized) so the documented foreign-handle
+    failure actually happens."""
+    from ccl._ffi import CclLib
+
+    lib1, lib2 = CclLib(), CclLib()
+    try:
+        a1 = lib1.accounts.create(Network.TESTNET)
+        a2 = lib2.accounts.create(Network.TESTNET)  # same allocation order on both isolates
+
+        # Pass lib1's handle to lib2 through the raw ABI — the exact wrong-pairing mistake.
+        rc = lib2._lib.ccl_account_get_info(lib2._thread, a1._handle)
+        assert rc == -11, (
+            f"foreign handle returned rc={rc}: it aliased a real account on the other "
+            f"isolate (handles: lib1={a1._handle}, lib2={a2._handle})")
+    finally:
+        lib1.close()
+        lib2.close()

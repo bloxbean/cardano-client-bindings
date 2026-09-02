@@ -325,4 +325,19 @@ class AccountServiceTest {
             AccountService.close(handle);
         }
     }
+
+    @Test
+    void handlesComeFromARandomizedPerIsolateSpace() {
+        // Cross-isolate aliasing guard: if handles ever count from 1 again, two bridges in one
+        // process collide and a foreign handle silently resolves a real account (wrong keys)
+        // instead of -11. A tiny first handle means the random base is gone.
+        long handle = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, 0, 0);
+        try {
+            assertTrue(handle > 1_000_000L,
+                    "handle " + handle + " looks like a fixed small counter — the per-isolate "
+                            + "random base (see nextHandle) has been removed");
+        } finally {
+            AccountService.close(handle);
+        }
+    }
 }

@@ -14,9 +14,11 @@ import org.graalvm.nativeimage.c.type.CLongPointer;
  * Managed Account entry points (ADR-0016): open an account once and receive an opaque handle;
  * subsequent operations take the handle instead of the mnemonic.
  *
- * <p>Handles are isolate-scoped {@code uint64} identifiers (never 0). Unknown, closed, or foreign
- * handles fail with {@link ErrorCodes#CCL_ERROR_INVALID_HANDLE}. Closing is explicit and
- * idempotent; all handles die with the isolate.
+ * <p>Handles are isolate-scoped {@code uint64} identifiers (never 0), allocated from a
+ * per-isolate randomized space. Unknown, closed, or foreign handles fail with
+ * {@link ErrorCodes#CCL_ERROR_INVALID_HANDLE} — foreign-handle detection is statistical
+ * (collision odds ~2^-62), not structural. Closing is explicit and idempotent; all handles die
+ * with the isolate.
  *
  * <p>See {@link com.bloxbean.cardano.bridge.CclBridge} for the calling convention.
  */

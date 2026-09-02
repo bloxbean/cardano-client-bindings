@@ -46,9 +46,14 @@ public final class AccountService {
         }
     }
 
-    // Handles start at 1: 0 is never valid, so a zero-initialized out-parameter can't alias a
-    // real account.
-    private static final AtomicLong nextHandle = new AtomicLong(1);
+    // Handles start at a per-isolate 62-bit random base (never 0, so a zero-initialized
+    // out-parameter can't alias a real account). Every isolate counting from 1 would make
+    // cross-isolate handle collisions certain: with two bridges in one process, bridge A's
+    // handle 1 aliased bridge B's account 1, and the wrong bridge/handle pairing signed with
+    // the WRONG KEYS instead of failing with -11. Randomized bases make the documented
+    // foreign-handle failure hold statistically (collision odds ~ n·m / 2^62).
+    private static final AtomicLong nextHandle = new AtomicLong(
+            (new java.security.SecureRandom().nextLong() & ((1L << 62) - 1)) | 1L);
     private static final ConcurrentHashMap<Long, Account> accounts = new ConcurrentHashMap<>();
 
     // Recovery phrases of freshly created (not imported) accounts, held only until exported or the
