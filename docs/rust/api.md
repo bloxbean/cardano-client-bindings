@@ -123,7 +123,9 @@ pub fn derive_key(&self, mnemonic: &str, account_index: i32, address_index: i32,
 
 `derive_key` is the stateless CIP-1852 "raw key material" utility — `role` is one of `"payment"`,
 `"change"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`; it returns the JSON
-`{"path","private_key","public_key","public_key_hash"}`. Key derivation is network-independent.
+`{"path","private_key","public_key","public_key_hash"}`, plus — for the governance roles — the
+CIP-105 bech32 encodings `bech32_verification_key`/`bech32_verification_key_hash` (what
+cardano-cli and GovTool accept for registration). Key derivation is network-independent.
 Prefer managed accounts for signing — handles never expose key bytes.
 
 ```rust

@@ -116,7 +116,10 @@ derive_key(mnemonic, account_index=0, address_index=0, role="payment") -> dict
 
 `derive_key` is the stateless CIP-1852 "raw key material" utility — `role` is one of `"payment"`,
 `"change"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`; it returns `{"path",
-"private_key", "public_key", "public_key_hash"}`. Key derivation is network-independent. Prefer
+"private_key", "public_key", "public_key_hash"}`. The governance roles additionally carry the
+CIP-105 bech32 encodings `bech32_verification_key`/`bech32_verification_key_hash`
+(`drep_vk1…`/`cc_cold_vk1…`/`cc_hot_vk1…` and the `…_vkh1…` hash forms) — what cardano-cli and
+GovTool accept for registration. Key derivation is network-independent. Prefer
 managed accounts for signing — handles never expose key bytes.
 
 ```python

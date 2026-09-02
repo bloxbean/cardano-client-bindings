@@ -203,4 +203,19 @@ class CryptoApiTest {
         assertTrue(provider.verify(signature, message, publicKey),
                 "seed-based signing must verify against the seed's derived public key");
     }
+
+    @Test
+    void governanceRolesCarryCip105Bech32Encodings() {
+        // Pins the CIP-105 prefixes derive_key exposes for governance roles; if CCL ever changes
+        // these encodings, the wrappers' registration workflows change with them — fail loudly.
+        var keyPair = deriveTestKeyPair();
+        assertTrue(com.bloxbean.cardano.client.governance.keys.DRepKey.from(keyPair)
+                .bech32VerificationKey().startsWith("drep_vk1"));
+        assertTrue(com.bloxbean.cardano.client.governance.keys.DRepKey.from(keyPair)
+                .bech32VerificationKeyHash().startsWith("drep_vkh1"));
+        assertTrue(com.bloxbean.cardano.client.governance.keys.CommitteeColdKey.from(keyPair)
+                .bech32VerificationKeyHash().startsWith("cc_cold_vkh1"));
+        assertTrue(com.bloxbean.cardano.client.governance.keys.CommitteeHotKey.from(keyPair)
+                .bech32VerificationKeyHash().startsWith("cc_hot_vkh1"));
+    }
 }

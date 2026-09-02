@@ -244,9 +244,14 @@ describe('Cardano Client Bindings', () => {
         const account = createManaged(bridge, MAINNET);
         const cold = bridge.crypto.deriveKey(account.mnemonic, 0, 0, 'committee_cold');
         expect(cold.public_key_hash).toBe(account.committee_cold_credential);
+        expect(cold.bech32_verification_key).toStartWith('cc_cold_vk1');
+        expect(cold.bech32_verification_key_hash).toStartWith('cc_cold_vkh1');
         const drep = bridge.crypto.deriveKey(account.mnemonic, 0, 0, 'drep');
         expect(drep.public_key.length).toBe(64);
         expect(drep.path).toBe("m/1852'/1815'/0'/3/0");
+        expect(drep.bech32_verification_key).toStartWith('drep_vk1');
+        // Non-governance roles carry no CIP-105 encodings by design.
+        expect(bridge.crypto.deriveKey(account.mnemonic).bech32_verification_key).toBeUndefined();
     });
 
     // --- Wallet ---

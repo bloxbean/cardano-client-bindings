@@ -645,3 +645,33 @@ func createTestAccount(t *testing.T, network Network) testAccount {
 		EnterpriseAddress: info.EnterpriseAddress, StakeAddress: info.StakeAddress,
 		DRepID: info.DRepID, CommitteeColdID: info.CommitteeColdID, CommitteeHotID: info.CommitteeHotID}
 }
+
+func TestDeriveKeyCip105Bech32Encodings(t *testing.T) {
+	// Governance registration (cardano-cli / GovTool) takes verification keys in CIP-105
+	// bech32 form; the deleted gov API returned them and derive_key must too.
+	mnemonic, err := bridge.Crypto.GenerateMnemonic(24)
+	if err != nil {
+		t.Fatalf("GenerateMnemonic: %v", err)
+	}
+	for role, prefix := range map[string]string{
+		"drep": "drep", "committee_cold": "cc_cold", "committee_hot": "cc_hot",
+	} {
+		key, err := bridge.Crypto.DeriveKey(mnemonic, 0, 0, role)
+		if err != nil {
+			t.Fatalf("DeriveKey(%s): %v", role, err)
+		}
+		if !strings.HasPrefix(key.Bech32VerificationKey, prefix+"_vk1") {
+			t.Errorf("%s: expected %s_vk1 prefix, got %q", role, prefix, key.Bech32VerificationKey)
+		}
+		if !strings.HasPrefix(key.Bech32VerificationKeyHash, prefix+"_vkh1") {
+			t.Errorf("%s: expected %s_vkh1 prefix, got %q", role, prefix, key.Bech32VerificationKeyHash)
+		}
+	}
+	payment, err := bridge.Crypto.DeriveKey(mnemonic, 0, 0, "payment")
+	if err != nil {
+		t.Fatalf("DeriveKey(payment): %v", err)
+	}
+	if payment.Bech32VerificationKey != "" {
+		t.Error("non-governance roles carry no CIP-105 encodings by design")
+	}
+}

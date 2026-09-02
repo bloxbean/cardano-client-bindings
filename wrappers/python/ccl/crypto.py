@@ -53,8 +53,12 @@ class Crypto:
         ``private_key`` (hex 64-byte extended BIP32-Ed25519 key — pass it *whole* to
         :meth:`sign`, which detects the extended form by length; its first half is a
         clamped scalar, not a seed), ``public_key``, and ``public_key_hash``
-        (for the committee roles this is the certificate credential). Key derivation is
-        network-independent, so no network argument. Prefer managed accounts
+        (for the committee roles this is the certificate credential). The governance roles
+        (``drep``, ``committee_cold``, ``committee_hot``) additionally carry the CIP-105
+        bech32 encodings ``bech32_verification_key`` (``drep_vk1…``/``cc_cold_vk1…``/
+        ``cc_hot_vk1…``) and ``bech32_verification_key_hash`` (``…_vkh1…``) — the forms
+        cardano-cli and GovTool accept. Key derivation is network-independent, so no
+        network argument. Prefer managed accounts
         (``lib.accounts``) for signing — this exists for interop that genuinely needs
         key bytes.
         """

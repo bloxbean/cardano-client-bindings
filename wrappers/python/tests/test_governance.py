@@ -38,3 +38,20 @@ def test_derive_key_shapes(ccl):
     assert len(drep['private_key']) == 128  # 64-byte extended key
     assert len(drep['public_key']) == 64    # 32-byte verification key
     assert len(drep['public_key_hash']) == 56
+
+
+def test_derive_key_returns_cip105_bech32_encodings_for_gov_roles(ccl):
+    """cardano-cli / GovTool take governance verification keys in CIP-105 bech32 form
+    (drep_vk1…, cc_cold_vk1…, cc_hot_vk1…, and the …_vkh hash forms). The deleted gov API
+    returned them; derive_key must too, or the registration workflow needs a third-party
+    bech32 library."""
+    mnemonic = ccl.crypto.generate_mnemonic(24)
+
+    for role, prefix in (("drep", "drep"), ("committee_cold", "cc_cold"), ("committee_hot", "cc_hot")):
+        key = ccl.crypto.derive_key(mnemonic, role=role)
+        assert key["bech32_verification_key"].startswith(f"{prefix}_vk1"), role
+        assert key["bech32_verification_key_hash"].startswith(f"{prefix}_vkh1"), role
+
+    # Non-governance roles carry no bech32 forms — the fields are gov-specific by design.
+    payment = ccl.crypto.derive_key(mnemonic, role="payment")
+    assert "bech32_verification_key" not in payment

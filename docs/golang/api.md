@@ -144,7 +144,9 @@ func (c *CryptoApi) DeriveKey(mnemonic string, accountIndex, addressIndex int, r
 
 `DeriveKey` is the stateless CIP-1852 "raw key material" utility — `role` is one of `"payment"`,
 `"change"`, `"stake"`, `"drep"`, `"committee_cold"`, `"committee_hot"`; it returns
-`{Path, PrivateKey, PublicKey, PublicKeyHash}`. Key derivation is network-independent. Prefer
+`{Path, PrivateKey, PublicKey, PublicKeyHash}`, plus — for the governance roles — the CIP-105
+bech32 encodings `Bech32VerificationKey`/`Bech32VerificationKeyHash` (what cardano-cli and GovTool
+accept for registration). Key derivation is network-independent. Prefer
 managed accounts for signing — handles never expose key bytes.
 
 Hash inputs are hex in → hex out:

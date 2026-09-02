@@ -278,6 +278,11 @@ public final class CryptoApi {
      *
      * <p>Exported as {@code ccl_crypto_derive_key}. On success the result is a JSON object:
      * <pre>{@code {"path","private_key","public_key","public_key_hash"}}</pre>
+     * For the governance roles ({@code drep}, {@code committee_cold}, {@code committee_hot}) the
+     * result additionally carries the CIP-105 bech32 encodings {@code bech32_verification_key}
+     * ({@code drep_vk1…}/{@code cc_cold_vk1…}/{@code cc_hot_vk1…}) and
+     * {@code bech32_verification_key_hash} ({@code …_vkh1…}) — the forms cardano-cli and GovTool
+     * accept for registration.
      * {@code private_key} is the hex-encoded 64-byte extended BIP32-Ed25519 private key — pass it
      * <b>whole</b> to {@code ccl_crypto_sign} (which detects the extended form by length); its
      * first half is a clamped scalar, not a seed, and must never be used as one;
@@ -338,6 +343,27 @@ public final class CryptoApi {
             result.put("private_key", HexUtil.encodeHexString(keyPair.getPrivateKey().getKeyData()));
             result.put("public_key", HexUtil.encodeHexString(publicKey));
             result.put("public_key_hash", HexUtil.encodeHexString(Blake2bUtil.blake2bHash224(publicKey)));
+            // CIP-105 bech32 encodings for the governance roles — the forms cardano-cli and
+            // GovTool take for DRep/committee registration. Non-governance roles have no
+            // CIP-105 key encoding, so the fields are deliberately absent there.
+            switch (role) {
+                case "drep" -> {
+                    var k = com.bloxbean.cardano.client.governance.keys.DRepKey.from(keyPair);
+                    result.put("bech32_verification_key", k.bech32VerificationKey());
+                    result.put("bech32_verification_key_hash", k.bech32VerificationKeyHash());
+                }
+                case "committee_cold" -> {
+                    var k = com.bloxbean.cardano.client.governance.keys.CommitteeColdKey.from(keyPair);
+                    result.put("bech32_verification_key", k.bech32VerificationKey());
+                    result.put("bech32_verification_key_hash", k.bech32VerificationKeyHash());
+                }
+                case "committee_hot" -> {
+                    var k = com.bloxbean.cardano.client.governance.keys.CommitteeHotKey.from(keyPair);
+                    result.put("bech32_verification_key", k.bech32VerificationKey());
+                    result.put("bech32_verification_key_hash", k.bech32VerificationKeyHash());
+                }
+                default -> { /* payment/change/stake: no CIP-105 encoding */ }
+            }
             ResultState.set(JsonHelper.toJson(result));
             return ErrorCodes.CCL_SUCCESS;
         } catch (Exception e) {

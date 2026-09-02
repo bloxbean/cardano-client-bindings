@@ -517,4 +517,8 @@ type DerivedKey struct {
 	PrivateKey    string `json:"private_key"`
 	PublicKey     string `json:"public_key"`
 	PublicKeyHash string `json:"public_key_hash"`
+	// CIP-105 bech32 encodings, present only for the governance roles (drep,
+	// committee_cold, committee_hot) — the forms cardano-cli and GovTool accept.
+	Bech32VerificationKey     string `json:"bech32_verification_key,omitempty"`
+	Bech32VerificationKeyHash string `json:"bech32_verification_key_hash,omitempty"`
 }

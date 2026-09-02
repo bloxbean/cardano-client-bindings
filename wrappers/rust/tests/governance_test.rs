@@ -76,3 +76,25 @@ fn test_derive_key_rejects_unknown_role() {
     let result = b.crypto().derive_key(&mnemonic, 0, 0, "bogus");
     assert!(result.is_err(), "expected error for unknown role");
 }
+
+#[test]
+fn test_derive_key_returns_cip105_bech32_encodings_for_gov_roles() {
+    let b = bridge();
+    let mnemonic = b.crypto().generate_mnemonic(24).expect("mnemonic");
+    for (role, prefix) in [("drep", "drep"), ("committee_cold", "cc_cold"), ("committee_hot", "cc_hot")] {
+        let key: Value =
+            serde_json::from_str(&b.crypto().derive_key(&mnemonic, 0, 0, role).expect("derive")).expect("json");
+        assert!(
+            key["bech32_verification_key"].as_str().unwrap().starts_with(&format!("{prefix}_vk1")),
+            "{role}"
+        );
+        assert!(
+            key["bech32_verification_key_hash"].as_str().unwrap().starts_with(&format!("{prefix}_vkh1")),
+            "{role}"
+        );
+    }
+    // Non-governance roles carry no CIP-105 encodings by design.
+    let payment: Value =
+        serde_json::from_str(&b.crypto().derive_key(&mnemonic, 0, 0, "payment").expect("derive")).expect("json");
+    assert!(payment.get("bech32_verification_key").is_none());
+}

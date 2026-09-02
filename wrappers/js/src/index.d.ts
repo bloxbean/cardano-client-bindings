@@ -203,6 +203,9 @@ export interface DerivedKey {
     private_key: string;
     public_key: string;
     public_key_hash: string;
+    /** CIP-105 bech32 encodings — present only for the governance roles (drep, committee_cold, committee_hot). */
+    bech32_verification_key?: string;
+    bech32_verification_key_hash?: string;
 }
 
 export interface TxApi {
