@@ -194,10 +194,11 @@ pub(crate) fn check_at(thread: *mut ffi::graal_isolatethread_t, rc: i32) -> Resu
 pub struct Bridge {
     #[allow(dead_code)]
     isolate: *mut ffi::graal_isolate_t,
-    thread: *mut ffi::graal_isolatethread_t,
-    // Shared with owned Accounts (Rc: the Bridge is !Send, so no atomics needed). Drop nulls the
-    // cell before tearing the isolate down, hard-invalidating every outstanding Account: their
-    // calls then fail with a normal CclError instead of touching a dead isolate.
+    // The single home of the isolate-thread pointer, shared with owned Accounts (Rc: the Bridge
+    // is !Send, so no atomics needed). Drop takes the pointer out of the cell (nulling it) before
+    // tearing the isolate down, hard-invalidating every outstanding Account in the same act:
+    // their calls then fail with a normal CclError instead of touching a dead isolate. Keeping
+    // exactly one copy means no future close/reset path can desync Bridge and Accounts.
     pub(crate) shared: std::rc::Rc<BridgeShared>,
     // Raw pointers are already !Send + !Sync, so no negative impl is needed — but that is a load-
     // bearing property of this type, not an accident, and removing this field must not silently
@@ -224,7 +225,6 @@ impl Bridge {
 
         let bridge = Bridge {
             isolate,
-            thread,
             shared: std::rc::Rc::new(BridgeShared { thread: std::cell::Cell::new(thread) }),
             _not_send: PhantomData,
         };
@@ -256,13 +256,20 @@ impl Bridge {
         Ok(())
     }
 
+    /// The live isolate thread. Infallible for the Bridge's own methods: while a `&Bridge`
+    /// exists, `Drop` cannot have run, so the cell is non-null by construction. (Accounts, which
+    /// can outlive the Bridge, go through the fallible [`BridgeShared::thread`] instead.)
+    fn thread(&self) -> *mut ffi::graal_isolatethread_t {
+        self.shared.thread.get()
+    }
+
     fn check(&self, rc: i32) -> Result<String> {
-        check_at(self.thread, rc)
+        check_at(self.thread(), rc)
     }
 
     /// Get the library version.
     pub fn version(&self) -> Result<String> {
-        let rc = unsafe { ffi::ccl_version(self.thread) };
+        let rc = unsafe { ffi::ccl_version(self.thread()) };
         self.check(rc)
     }
 
@@ -304,12 +311,13 @@ impl Bridge {
 
 impl Drop for Bridge {
     fn drop(&mut self) {
-        // Invalidate outstanding Accounts before the isolate dies: their calls become typed
-        // errors, never dangling-isolate dereferences.
-        self.shared.thread.set(ptr::null_mut());
-        if !self.thread.is_null() {
+        // Take the pointer out of the cell (nulling it) before the isolate dies: outstanding
+        // Accounts are invalidated in the same act — their calls become typed errors, never
+        // dangling-isolate dereferences.
+        let thread = self.shared.thread.replace(ptr::null_mut());
+        if !thread.is_null() {
             unsafe {
-                ffi::graal_tear_down_isolate(self.thread);
+                ffi::graal_tear_down_isolate(thread);
             }
         }
     }
@@ -324,7 +332,7 @@ pub struct AddressApi<'a> {
 impl<'a> AddressApi<'a> {
     pub fn info(&self, bech32: &str) -> Result<String> {
         let cs = to_cstring(bech32)?;
-        let rc = unsafe { ffi::ccl_address_info(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_address_info(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
@@ -333,19 +341,19 @@ impl<'a> AddressApi<'a> {
             Ok(s) => s,
             Err(_) => return false,
         };
-        let rc = unsafe { ffi::ccl_address_validate(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_address_validate(self.bridge.thread(), cs.as_ptr()) };
         rc == error_codes::CCL_SUCCESS
     }
 
     pub fn to_bytes(&self, bech32: &str) -> Result<String> {
         let cs = to_cstring(bech32)?;
-        let rc = unsafe { ffi::ccl_address_to_bytes(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_address_to_bytes(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn from_bytes(&self, hex_bytes: &str) -> Result<String> {
         let cs = to_cstring(hex_bytes)?;
-        let rc = unsafe { ffi::ccl_address_from_bytes(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_address_from_bytes(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 }
@@ -359,18 +367,18 @@ pub struct CryptoApi<'a> {
 impl<'a> CryptoApi<'a> {
     pub fn blake2b_256(&self, data_hex: &str) -> Result<String> {
         let cs = to_cstring(data_hex)?;
-        let rc = unsafe { ffi::ccl_crypto_blake2b_256(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_crypto_blake2b_256(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn blake2b_224(&self, data_hex: &str) -> Result<String> {
         let cs = to_cstring(data_hex)?;
-        let rc = unsafe { ffi::ccl_crypto_blake2b_224(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_crypto_blake2b_224(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn generate_mnemonic(&self, word_count: i32) -> Result<String> {
-        let rc = unsafe { ffi::ccl_crypto_generate_mnemonic(self.bridge.thread, word_count) };
+        let rc = unsafe { ffi::ccl_crypto_generate_mnemonic(self.bridge.thread(), word_count) };
         self.bridge.check(rc)
     }
 
@@ -379,14 +387,14 @@ impl<'a> CryptoApi<'a> {
             Ok(s) => s,
             Err(_) => return false,
         };
-        let rc = unsafe { ffi::ccl_crypto_validate_mnemonic(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_crypto_validate_mnemonic(self.bridge.thread(), cs.as_ptr()) };
         rc == error_codes::CCL_SUCCESS
     }
 
     pub fn sign(&self, message_hex: &str, sk_hex: &str) -> Result<String> {
         let cs_msg = to_cstring(message_hex)?;
         let cs_sk = to_cstring(sk_hex)?;
-        let rc = unsafe { ffi::ccl_crypto_sign(self.bridge.thread, cs_msg.as_ptr(), cs_sk.as_ptr()) };
+        let rc = unsafe { ffi::ccl_crypto_sign(self.bridge.thread(), cs_msg.as_ptr(), cs_sk.as_ptr()) };
         self.bridge.check(rc)
     }
 
@@ -404,7 +412,7 @@ impl<'a> CryptoApi<'a> {
             Err(_) => return false,
         };
         let rc = unsafe {
-            ffi::ccl_crypto_verify(self.bridge.thread, cs_sig.as_ptr(), cs_msg.as_ptr(), cs_pk.as_ptr())
+            ffi::ccl_crypto_verify(self.bridge.thread(), cs_sig.as_ptr(), cs_msg.as_ptr(), cs_pk.as_ptr())
         };
         rc == error_codes::CCL_SUCCESS
     }
@@ -427,7 +435,7 @@ impl<'a> CryptoApi<'a> {
         let cs_role = to_cstring(role)?;
         let rc = unsafe {
             ffi::ccl_crypto_derive_key(
-                self.bridge.thread,
+                self.bridge.thread(),
                 cs_mnemonic.as_ptr(),
                 account_index,
                 address_index,
@@ -447,7 +455,7 @@ pub struct TxApi<'a> {
 impl<'a> TxApi<'a> {
     pub fn hash(&self, tx_cbor_hex: &str) -> Result<String> {
         let cs = to_cstring(tx_cbor_hex)?;
-        let rc = unsafe { ffi::ccl_tx_hash(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_tx_hash(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
@@ -455,26 +463,26 @@ impl<'a> TxApi<'a> {
         let cs_tx = to_cstring(tx_cbor_hex)?;
         let cs_sk = to_cstring(sk_cbor_hex)?;
         let rc = unsafe {
-            ffi::ccl_tx_sign_with_secret_key(self.bridge.thread, cs_tx.as_ptr(), cs_sk.as_ptr())
+            ffi::ccl_tx_sign_with_secret_key(self.bridge.thread(), cs_tx.as_ptr(), cs_sk.as_ptr())
         };
         self.bridge.check(rc)
     }
 
     pub fn to_json(&self, tx_cbor_hex: &str) -> Result<String> {
         let cs = to_cstring(tx_cbor_hex)?;
-        let rc = unsafe { ffi::ccl_tx_to_json(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_tx_to_json(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn from_json(&self, tx_json: &str) -> Result<String> {
         let cs = to_cstring(tx_json)?;
-        let rc = unsafe { ffi::ccl_tx_from_json(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_tx_from_json(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn deserialize(&self, tx_cbor_hex: &str) -> Result<String> {
         let cs = to_cstring(tx_cbor_hex)?;
-        let rc = unsafe { ffi::ccl_tx_deserialize(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_tx_deserialize(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 }
@@ -488,19 +496,19 @@ pub struct PlutusApi<'a> {
 impl<'a> PlutusApi<'a> {
     pub fn data_hash(&self, datum_cbor_hex: &str) -> Result<String> {
         let cs = to_cstring(datum_cbor_hex)?;
-        let rc = unsafe { ffi::ccl_plutus_data_hash(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_plutus_data_hash(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn data_to_json(&self, cbor_hex: &str) -> Result<String> {
         let cs = to_cstring(cbor_hex)?;
-        let rc = unsafe { ffi::ccl_plutus_data_to_json(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_plutus_data_to_json(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn data_from_json(&self, json: &str) -> Result<String> {
         let cs = to_cstring(json)?;
-        let rc = unsafe { ffi::ccl_plutus_data_from_json(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_plutus_data_from_json(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 }
@@ -514,13 +522,13 @@ pub struct ScriptApi<'a> {
 impl<'a> ScriptApi<'a> {
     pub fn native_from_json(&self, json: &str) -> Result<String> {
         let cs = to_cstring(json)?;
-        let rc = unsafe { ffi::ccl_script_native_from_json(self.bridge.thread, cs.as_ptr()) };
+        let rc = unsafe { ffi::ccl_script_native_from_json(self.bridge.thread(), cs.as_ptr()) };
         self.bridge.check(rc)
     }
 
     pub fn hash(&self, script_cbor_hex: &str, script_type: i32) -> Result<String> {
         let cs = to_cstring(script_cbor_hex)?;
-        let rc = unsafe { ffi::ccl_script_hash(self.bridge.thread, cs.as_ptr(), script_type) };
+        let rc = unsafe { ffi::ccl_script_hash(self.bridge.thread(), cs.as_ptr(), script_type) };
         self.bridge.check(rc)
     }
 }
@@ -594,7 +602,7 @@ impl<'a> QuickTxApi<'a> {
 
         let rc = unsafe {
             ffi::ccl_quicktx_build(
-                self.bridge.thread,
+                self.bridge.thread(),
                 yaml_cs.as_ptr(),
                 utxos_cs.as_ptr(),
                 pp_cs.as_ptr(),
