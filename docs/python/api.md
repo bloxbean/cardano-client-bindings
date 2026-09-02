@@ -84,8 +84,8 @@ with lib.accounts.from_mnemonic(mnemonic, Network.TESTNET) as acct:   # or lib.a
   `COMMITTEE_COLD`, `COMMITTEE_HOT`), combined with `|`; witnesses apply in canonical order, so the
   witnesses apply in canonical order. An empty mask is rejected.
 - `close()` is idempotent; the context manager calls it. `repr(account)` shows only the handle.
-- `info` returns public data only: the base/enterprise/stake addresses, network and derivation
-  indices, `drep_id`, and the committee identifiers (`committee_cold_id`/`committee_hot_id`,
+- `info` returns public data only: the base/enterprise/stake/change addresses, network and
+  derivation indices, `drep_id`, and the committee identifiers (`committee_cold_id`/`committee_hot_id`,
   bech32, plus `committee_cold_credential`/`committee_hot_credential` — the hex blake2b-224
   verification-key hashes used in committee certificates).
 

@@ -96,8 +96,8 @@ try {
   in canonical order. An empty mask is rejected.
 - `close()` is idempotent; `Symbol.dispose` supports `using`-declarations. `String(acct)` shows only
   the handle.
-- `info` returns public data only: the base/enterprise/stake addresses, network and derivation
-  indices, `drep_id`, and the committee identifiers (`committee_cold_id`/`committee_hot_id`, bech32,
+- `info` returns public data only: the base/enterprise/stake/change addresses, network and
+  derivation indices, `drep_id`, and the committee identifiers (`committee_cold_id`/`committee_hot_id`, bech32,
   plus `committee_cold_credential`/`committee_hot_credential` — hex blake2b-224 verification-key
   hashes, as used in committee certificates).
 

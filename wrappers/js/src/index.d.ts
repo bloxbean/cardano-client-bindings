@@ -157,6 +157,8 @@ export interface AccountPublicInfo {
     base_address: string;
     enterprise_address: string;
     stake_address: string;
+    /** The CIP-1852 role-1 (internal/change) leaf at this account's address index. */
+    change_address: string;
     /** The CCL enum ordinal the account was opened with — NOT the on-chain network id. */
     network: number;
     account_index: number;

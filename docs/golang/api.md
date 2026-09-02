@@ -103,8 +103,8 @@ signed, err := acct.SignTx(txCbor, ccl.RolePayment|ccl.RoleStake)
 - `Close()` is explicit and idempotent — close Accounts like files; there is no finalizer. All
   Account calls ride the Bridge's dedicated isolate thread, so concurrent goroutine use is safe
   (and serialized). `String()` shows only the handle.
-- `Info()` returns public data only: the base/enterprise/stake addresses, network and derivation
-  indices, `DRepID`, and the committee identifiers (`CommitteeColdID`/`CommitteeHotID`, bech32,
+- `Info()` returns public data only: the base/enterprise/stake/change addresses, network and
+  derivation indices, `DRepID`, and the committee identifiers (`CommitteeColdID`/`CommitteeHotID`, bech32,
   plus `CommitteeColdCredential`/`CommitteeHotCredential` — hex blake2b-224 verification-key
   hashes, as used in committee certificates).
 

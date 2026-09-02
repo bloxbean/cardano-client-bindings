@@ -149,6 +149,9 @@ public final class AccountService {
         result.put("base_address", managed.cclAccount().baseAddress());
         result.put("enterprise_address", managed.cclAccount().enterpriseAddress());
         result.put("stake_address", managed.cclAccount().stakeAddress());
+        // The CIP-1852 role-1 (internal/change) leaf at this account's address index — wallet
+        // apps need it to see funds sitting on change outputs.
+        result.put("change_address", managed.cclAccount().changeAddress());
         result.put("network", managed.networkId());
         result.put("account_index", managed.accountIndex());
         result.put("address_index", managed.addressIndex());

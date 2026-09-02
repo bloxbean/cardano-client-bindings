@@ -40,8 +40,8 @@ class Account:
 
     @property
     def info(self):
-        """Public account data: the addresses, network and derivation indices, ``drep_id``, and
-        the committee identifiers/credentials. Never contains secrets. Immutable for the handle's
+        """Public account data: the base/enterprise/stake/change addresses, network and
+        derivation indices, ``drep_id``, and the committee identifiers/credentials. Never contains secrets. Immutable for the handle's
         lifetime, so it is fetched once and memoized (a fresh copy is returned per access)."""
         if self._info is None:
             rc = self._b._lib.ccl_account_get_info(self._b._thread, self._handle)

@@ -608,7 +608,7 @@ export class Account {
   }
 
   /**
-   * Public account data: `{ base_address, enterprise_address, stake_address, network,
+   * Public account data: `{ base_address, enterprise_address, stake_address, change_address, network,
    * account_index, address_index, drep_id, committee_cold_id, committee_cold_credential,
    * committee_hot_id, committee_hot_credential }`. Never contains secrets.
    */

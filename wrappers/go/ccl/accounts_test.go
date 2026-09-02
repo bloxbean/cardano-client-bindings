@@ -56,6 +56,11 @@ func TestManagedAccountInfoMatchesPinnedDerivation(t *testing.T) {
 	const pinnedBase = "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer" +
 		"3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp"
 	const pinnedStake = "stake_test1uqevw2xnsc0pvn9t9r9c7qryfqfeerchgrlm3ea2nefr9hqp8n5xl"
+	const pinnedChange = "addr_test1qz4kjk0as0x7ptt54l6cnfyzejqg22cku0qhqx6al4g2xe" +
+		"pjcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq5hxe5g"
+	if info.ChangeAddress != pinnedChange {
+		t.Fatalf("change_address diverges from pinned derivation: %s", info.ChangeAddress)
+	}
 	if info.BaseAddress != pinnedBase || info.StakeAddress != pinnedStake {
 		t.Fatalf("managed info diverges from pinned derivation: %+v", info)
 	}

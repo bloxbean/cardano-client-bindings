@@ -256,4 +256,42 @@ class AccountServiceTest {
         assertThrows(Exception.class,
                 () -> AccountService.openMnemonic(TESTNET, "not a valid mnemonic at all", 0, 0));
     }
+
+    // --- The public info contract: complete, and never silently shrinking ---
+    //
+    // change_address went missing once (the legacy API had it; the first handle info() didn't, and
+    // no other entry point could rebuild it — a capability loss the removal commit claimed not to
+    // make). Pinning the exact key set makes any field deletion or rename a test failure with the
+    // field's name in it, instead of a silent contract change discovered by a downstream wallet.
+
+    @Test
+    void infoExposesTheCompletePublicFieldSet() {
+        long handle = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, 0, 0);
+        try {
+            var info = AccountService.info(handle);
+            assertEquals(
+                    java.util.List.of(
+                            "base_address", "enterprise_address", "stake_address", "change_address",
+                            "network", "account_index", "address_index", "drep_id",
+                            "committee_cold_id", "committee_cold_credential",
+                            "committee_hot_id", "committee_hot_credential"),
+                    new java.util.ArrayList<>(info.keySet()),
+                    "the public info field set (and its order) is a contract — extend deliberately, never shrink");
+        } finally {
+            AccountService.close(handle);
+        }
+    }
+
+    @Test
+    void changeAddressMatchesTheMnemonicBackedDerivation() {
+        long handle = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, 0, 0);
+        try {
+            var reference = Account.createFromMnemonic(Networks.testnet(), TEST_MNEMONIC, 0, 0);
+            assertEquals(reference.changeAddress(),
+                    AccountService.info(handle).get("change_address"),
+                    "change_address must be the CIP-1852 role-1 leaf, byte-identical to CCL's own");
+        } finally {
+            AccountService.close(handle);
+        }
+    }
 }

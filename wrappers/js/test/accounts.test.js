@@ -50,6 +50,9 @@ describe('managed accounts', () => {
         '3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp');
       expect(info.stake_address).toBe(
         'stake_test1uqevw2xnsc0pvn9t9r9c7qryfqfeerchgrlm3ea2nefr9hqp8n5xl');
+      expect(info.change_address).toBe(
+        'addr_test1qz4kjk0as0x7ptt54l6cnfyzejqg22cku0qhqx6al4g2xe' +
+        'pjcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq5hxe5g');
       expect(info.network).toBe(TESTNET);
       expect(info.mnemonic).toBeUndefined();
     } finally {

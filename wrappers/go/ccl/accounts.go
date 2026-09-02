@@ -35,7 +35,9 @@ type AccountPublicInfo struct {
 	BaseAddress       string `json:"base_address"`
 	EnterpriseAddress string `json:"enterprise_address"`
 	StakeAddress      string `json:"stake_address"`
-	Network           int    `json:"network"`
+	// The CIP-1852 role-1 (internal/change) leaf at this account's address index.
+	ChangeAddress string `json:"change_address"`
+	Network       int    `json:"network"`
 	AccountIndex      int    `json:"account_index"`
 	AddressIndex      int    `json:"address_index"`
 	DRepID            string `json:"drep_id"`
