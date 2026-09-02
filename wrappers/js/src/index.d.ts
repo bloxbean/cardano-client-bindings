@@ -131,6 +131,7 @@ export interface CryptoApi {
     blake2b224(dataHex: string): string;
     generateMnemonic(wordCount?: number): string;
     validateMnemonic(mnemonic: string): boolean;
+    /** skHex: a 32-byte seed (64 hex) or a 64-byte extended key (128 hex, from deriveKey) — detected by length. */
     sign(messageHex: string, skHex: string): string;
     verify(signatureHex: string, messageHex: string, pkHex: string): boolean;
     /**
@@ -194,7 +195,7 @@ export declare class AccountsApi {
 export type DeriveKeyRole =
     | 'payment' | 'change' | 'stake' | 'drep' | 'committee_cold' | 'committee_hot';
 
-/** Result of {@link CryptoApi.deriveKey}. The extended private key's first 64 hex chars are the raw Ed25519 key. */
+/** Result of {@link CryptoApi.deriveKey}. Pass private_key whole to sign() — the extended form is detected by length. */
 export interface DerivedKey {
     path: string;
     private_key: string;

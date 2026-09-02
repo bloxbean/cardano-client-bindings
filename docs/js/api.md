@@ -121,7 +121,7 @@ blake2b256(dataHex: string): string
 blake2b224(dataHex: string): string
 generateMnemonic(wordCount = 24): string
 validateMnemonic(mnemonic: string): boolean
-sign(messageHex: string, skHex: string): string      // Ed25519; 32-byte key (64 hex chars)
+sign(messageHex: string, skHex: string): string      // Ed25519; 32-byte seed or 64-byte extended key (by length)
 verify(signatureHex: string, messageHex: string, pkHex: string): boolean
 deriveKey(mnemonic: string, accountIndex = 0, addressIndex = 0, role: DeriveKeyRole = 'payment'): DerivedKey
 ```
@@ -133,7 +133,7 @@ accounts for signing — handles never expose key bytes.
 
 ```js
 const digest = bridge.crypto.blake2b256("48656c6c6f");          // "Hello"
-const sk = bridge.crypto.deriveKey(mnemonic).private_key.slice(0, 64);
+const sk = bridge.crypto.deriveKey(mnemonic).private_key; // pass the extended key whole
 const sig = bridge.crypto.sign("68656c6c6f", sk);
 ```
 

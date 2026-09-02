@@ -33,12 +33,13 @@ func main() {
 	fmt.Println("Blake2b-224('Hello'):", h224)
 
 	// --- Ed25519 signing ---
-	// DeriveKey returns the 64-byte extended key; Sign expects a 32-byte
-	// Ed25519 key, so take the first 32 bytes (64 hex chars).
+	// DeriveKey returns the 64-byte extended BIP32-Ed25519 key; pass it whole to
+	// Sign — the extended form is detected by length. (Never slice it: its first
+	// half is a clamped scalar, not a seed.)
 	key, _ := bridge.Crypto.DeriveKey(mnemonic, 0, 0, "payment")
 	privExt, pub := key.PrivateKey, key.PublicKey
 	messageHex := "68656c6c6f" // "hello"
-	sig, _ := bridge.Crypto.Sign(messageHex, privExt[:64])
+	sig, _ := bridge.Crypto.Sign(messageHex, privExt)
 	fmt.Println("Ed25519 signature:", sig)
 	// A tampered signature is correctly rejected.
 	fmt.Println("  verify(fake signature) ->", bridge.Crypto.Verify("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", messageHex, pub))

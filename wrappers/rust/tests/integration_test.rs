@@ -215,15 +215,22 @@ fn test_crypto_sign() {
         .expect("Failed to derive key");
     let key: serde_json::Value = serde_json::from_str(&key_json).expect("Invalid JSON");
     let priv_key = key["private_key"].as_str().unwrap().to_string();
-    // Use first 32 bytes (64 hex chars) for standard Ed25519
-    let priv_key_32 = &priv_key[..64];
-
+    // Round-trip regression pin: the whole extended key must sign AND verify against
+    // the key's own public key; half of it (a clamped scalar, not a seed) must not.
+    let pub_key = key["public_key"].as_str().unwrap();
     let message_hex = "68656c6c6f";
     let signature = bridge
         .crypto()
-        .sign(message_hex, priv_key_32)
+        .sign(message_hex, &priv_key)
         .expect("Failed to sign");
     assert_eq!(signature.len(), 128);
+    assert!(bridge.crypto().verify(&signature, message_hex, pub_key));
+
+    let wrong = bridge
+        .crypto()
+        .sign(message_hex, &priv_key[..64])
+        .expect("Failed to sign with seed form");
+    assert!(!bridge.crypto().verify(&wrong, message_hex, pub_key));
 }
 
 #[test]

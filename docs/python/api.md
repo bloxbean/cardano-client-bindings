@@ -109,7 +109,7 @@ blake2b_256(data_hex) -> str       # 64 hex chars
 blake2b_224(data_hex) -> str       # 56 hex chars
 generate_mnemonic(word_count=24) -> str
 validate_mnemonic(mnemonic) -> bool
-sign(message_hex, sk_hex) -> str   # Ed25519; 32-byte key (64 hex chars)
+sign(message_hex, sk_hex) -> str   # Ed25519; 32-byte seed or 64-byte extended key (by length)
 verify(signature_hex, message_hex, pk_hex) -> bool
 derive_key(mnemonic, account_index=0, address_index=0, role="payment") -> dict
 ```
@@ -121,7 +121,7 @@ managed accounts for signing — handles never expose key bytes.
 
 ```python
 digest = lib.crypto.blake2b_256("48656c6c6f")            # "Hello"
-sk = lib.crypto.derive_key(mnemonic)["private_key"][:64]
+sk = lib.crypto.derive_key(mnemonic)["private_key"]   # pass the extended key whole
 sig = lib.crypto.sign("68656c6c6f", sk)
 ```
 

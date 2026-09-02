@@ -201,16 +201,26 @@ func TestCryptoSign(t *testing.T) {
 		t.Fatalf("Crypto.DeriveKey() failed: %v", err)
 	}
 
-	// Use first 32 bytes (64 hex chars) for standard Ed25519 sign
-	privKey32 := key.PrivateKey[:64]
-
+	// Round-trip regression pin: the whole extended key must sign AND verify against
+	// the key's own public key; half of it (a clamped scalar, not a seed) must not.
 	messageHex := "68656c6c6f"
-	sig, err := bridge.Crypto.Sign(messageHex, privKey32)
+	sig, err := bridge.Crypto.Sign(messageHex, key.PrivateKey)
 	if err != nil {
 		t.Fatalf("Crypto.Sign() failed: %v", err)
 	}
 	if len(sig) != 128 {
 		t.Errorf("expected 128 hex chars signature, got %d", len(sig))
+	}
+	if !bridge.Crypto.Verify(sig, messageHex, key.PublicKey) {
+		t.Error("extended-key signature must verify against the derived public key")
+	}
+
+	wrong, err := bridge.Crypto.Sign(messageHex, key.PrivateKey[:64])
+	if err != nil {
+		t.Fatalf("Crypto.Sign(seed form) failed: %v", err)
+	}
+	if bridge.Crypto.Verify(wrong, messageHex, key.PublicKey) {
+		t.Error("half an extended key treated as a seed signs under a different keypair — must not verify")
 	}
 }
 

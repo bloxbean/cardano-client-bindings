@@ -440,6 +440,10 @@ class CryptoApi {
     return this._b._lib.ccl_crypto_validate_mnemonic(this._b._thread, cstr(mnemonic)) === CCL_SUCCESS;
   }
 
+  /**
+   * Ed25519 sign. `skHex` is a 32-byte seed (64 hex chars) or a 64-byte BIP32-Ed25519
+   * extended key (128 hex chars, e.g. from {@link CryptoApi#deriveKey}) — detected by length.
+   */
   sign(messageHex, skHex) {
     return this._b._check(this._b._lib.ccl_crypto_sign(this._b._thread, cstr(messageHex), cstr(skHex)));
   }
@@ -452,8 +456,9 @@ class CryptoApi {
    * Stateless CIP-1852 key derivation — the explicit "raw key material" utility.
    *
    * `role` is one of "payment", "change", "stake", "drep", "committee_cold", "committee_hot".
-   * Returns `{path, private_key, public_key, public_key_hash}`; the extended private key's first
-   * 64 hex chars are the raw Ed25519 key accepted by {@link CryptoApi#sign}. Key derivation is
+   * Returns `{path, private_key, public_key, public_key_hash}`; pass `private_key` whole to
+   * {@link CryptoApi#sign}, which detects the 64-byte extended form by length (never slice it —
+   * its first half is a clamped scalar, not a seed). Key derivation is
    * network-independent. Prefer managed accounts for signing — handles never expose key bytes.
    */
   deriveKey(mnemonic, accountIndex = 0, addressIndex = 0, role = "payment") {

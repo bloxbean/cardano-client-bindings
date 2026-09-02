@@ -116,7 +116,7 @@ pub fn blake2b_256(&self, data_hex: &str) -> Result<String>;
 pub fn blake2b_224(&self, data_hex: &str) -> Result<String>;
 pub fn generate_mnemonic(&self, word_count: i32) -> Result<String>;  // 12 or 24
 pub fn validate_mnemonic(&self, mnemonic: &str) -> bool;
-pub fn sign(&self, message_hex: &str, sk_hex: &str) -> Result<String>;  // Ed25519; 32-byte key (64 hex chars)
+pub fn sign(&self, message_hex: &str, sk_hex: &str) -> Result<String>;  // Ed25519; 32-byte seed or 64-byte extended key (by length)
 pub fn verify(&self, signature_hex: &str, message_hex: &str, pk_hex: &str) -> bool;
 pub fn derive_key(&self, mnemonic: &str, account_index: i32, address_index: i32, role: &str) -> Result<String>;
 ```
@@ -131,7 +131,7 @@ let digest = bridge.crypto().blake2b_256("48656c6c6f")?; // "Hello"
 let key: serde_json::Value =
     serde_json::from_str(&bridge.crypto().derive_key(&mnemonic, 0, 0, "payment")?)?;
 let sk = key["private_key"].as_str().unwrap();
-let sig = bridge.crypto().sign(msg_hex, &sk[..64])?;     // first 32 bytes of the extended key
+let sig = bridge.crypto().sign(msg_hex, &sk)?;           // pass the extended key whole
 ```
 
 ## bridge.tx()

@@ -20,11 +20,12 @@ try {
   console.log("Blake2b-224('Hello'):", bridge.crypto.blake2b224('48656c6c6f'));
 
   // --- Ed25519 signing ---
-  // deriveKey returns the 64-byte extended key; sign expects a 32-byte
-  // Ed25519 key, so take the first 32 bytes (64 hex chars).
+  // deriveKey returns the 64-byte extended BIP32-Ed25519 key; pass it whole to
+  // sign — the extended form is detected by length. (Never slice it: its first
+  // half is a clamped scalar, not a seed.)
   const mnemonic = bridge.crypto.generateMnemonic(24);
   const key = bridge.crypto.deriveKey(mnemonic);
-  const sk = key.private_key.slice(0, 64);
+  const sk = key.private_key;
   const pk = key.public_key;
   const messageHex = '68656c6c6f'; // "hello"
   console.log('Ed25519 signature:', bridge.crypto.sign(messageHex, sk));

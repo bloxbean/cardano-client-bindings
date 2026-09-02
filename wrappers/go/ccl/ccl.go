@@ -356,14 +356,19 @@ func (c *CryptoApi) ValidateMnemonic(mnemonic string) bool {
 	return c.bridge.invokeRC(func() int32 { return cclCryptoValidateMnemon(c.bridge.thread, mnemonic) }) == Success
 }
 
+// Sign produces an Ed25519 signature. skHex is a 32-byte seed (64 hex chars) or a
+// 64-byte BIP32-Ed25519 extended key (128 hex chars, e.g. DeriveKey's PrivateKey) —
+// the form is detected by length.
 func (c *CryptoApi) Sign(messageHex, skHex string) (string, error) {
 	return c.bridge.invoke(func() int32 { return cclCryptoSign(c.bridge.thread, messageHex, skHex) })
 }
 
 // DeriveKey is the stateless CIP-1852 key-derivation utility — the explicit "raw key
 // material" escape hatch. role is one of "payment", "change", "stake", "drep",
-// "committee_cold", "committee_hot". Key derivation is network-independent. Prefer the
-// managed Accounts API for signing; handles never expose key bytes.
+// "committee_cold", "committee_hot". Pass PrivateKey (the 64-byte extended BIP32-Ed25519
+// key) whole to Crypto.Sign, which detects the extended form by length — never slice it,
+// its first half is a clamped scalar, not a seed. Key derivation is network-independent.
+// Prefer the managed Accounts API for signing; handles never expose key bytes.
 func (c *CryptoApi) DeriveKey(mnemonic string, accountIndex, addressIndex int, role string) (*DerivedKey, error) {
 	result, err := c.bridge.invoke(func() int32 {
 		return cclCryptoDeriveKey(c.bridge.thread, mnemonic, int32(accountIndex), int32(addressIndex), role)

@@ -155,12 +155,17 @@ describe('Cardano Client Bindings', () => {
 
     it('should sign with 32-byte key', () => {
         const account = createManaged(bridge, MAINNET);
-        const privKeyExtended = bridge.crypto.deriveKey(account.mnemonic).private_key;
-        const privKey = privKeyExtended.substring(0, 64); // first 32 bytes
+        const key = bridge.crypto.deriveKey(account.mnemonic);
+        // Round-trip regression pin: the whole extended key must sign AND verify against
+        // the key's own public_key; half of it (a clamped scalar, not a seed) must not.
 
         const messageHex = '68656c6c6f';
-        const signature = bridge.crypto.sign(messageHex, privKey);
+        const signature = bridge.crypto.sign(messageHex, key.private_key);
         expect(signature.length).toBe(128); // 64 bytes
+        expect(bridge.crypto.verify(signature, messageHex, key.public_key)).toBe(true);
+
+        const wrong = bridge.crypto.sign(messageHex, key.private_key.substring(0, 64));
+        expect(bridge.crypto.verify(wrong, messageHex, key.public_key)).toBe(false);
     });
 
     it('should reject wrong signature in verify', () => {

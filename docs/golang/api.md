@@ -137,7 +137,7 @@ func (c *CryptoApi) Blake2b256(dataHex string) (string, error)
 func (c *CryptoApi) Blake2b224(dataHex string) (string, error)
 func (c *CryptoApi) GenerateMnemonic(wordCount int) (string, error)   // 12 or 24
 func (c *CryptoApi) ValidateMnemonic(mnemonic string) bool
-func (c *CryptoApi) Sign(messageHex, skHex string) (string, error)    // Ed25519; 32-byte key (64 hex chars)
+func (c *CryptoApi) Sign(messageHex, skHex string) (string, error)    // Ed25519; 32-byte seed or 64-byte extended key (by length)
 func (c *CryptoApi) Verify(signatureHex, messageHex, pkHex string) bool
 func (c *CryptoApi) DeriveKey(mnemonic string, accountIndex, addressIndex int, role string) (*DerivedKey, error)
 ```
@@ -152,7 +152,7 @@ Hash inputs are hex in → hex out:
 ```go
 digest, _ := bridge.Crypto.Blake2b256("48656c6c6f") // "Hello"
 key, _ := bridge.Crypto.DeriveKey(mnemonic, 0, 0, "payment")
-sig, _ := bridge.Crypto.Sign(msgHex, key.PrivateKey[:64]) // first 32 bytes of the extended key
+sig, _ := bridge.Crypto.Sign(msgHex, key.PrivateKey) // pass the extended key whole
 ```
 
 ## bridge.Tx

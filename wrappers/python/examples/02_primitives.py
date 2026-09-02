@@ -24,11 +24,12 @@ def main():
         print("Blake2b-224('Hello'):", lib.crypto.blake2b_224("48656c6c6f"))
 
         # --- Ed25519 signing ---
-        # crypto.derive_key returns the 64-byte extended key; ccl_crypto_sign
-        # expects a 32-byte Ed25519 key, so take the first 32 bytes (64 hex chars).
+        # crypto.derive_key returns the 64-byte extended BIP32-Ed25519 key; pass it
+        # whole to sign — the extended form is detected by length. (Never slice it:
+        # its first half is a clamped scalar, not a seed.)
         mnemonic = lib.crypto.generate_mnemonic(24)
         key = lib.crypto.derive_key(mnemonic, role="payment")
-        sk = key["private_key"][:64]
+        sk = key["private_key"]
         pk = key["public_key"]
         message_hex = "68656c6c6f"  # "hello"
         signature = lib.crypto.sign(message_hex, sk)

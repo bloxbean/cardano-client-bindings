@@ -26,15 +26,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Blake2b-224('Hello'): {}", bridge.crypto().blake2b_224("48656c6c6f")?);
 
     // --- Ed25519 signing ---
-    // derive_key returns the 64-byte extended key; sign expects a 32-byte
-    // Ed25519 key, so take the first 32 bytes (64 hex chars).
+    // derive_key returns the 64-byte extended BIP32-Ed25519 key; pass it whole to
+    // sign — the extended form is detected by length. (Never slice it: its first
+    // half is a clamped scalar, not a seed.)
     let mnemonic = bridge.crypto().generate_mnemonic(24)?;
     let key_json = bridge.crypto().derive_key(&mnemonic, 0, 0, "payment")?;
     let key: serde_json::Value = serde_json::from_str(&key_json)?;
     let priv_ext = key["private_key"].as_str().unwrap().to_string();
     let pub_key = key["public_key"].as_str().unwrap().to_string();
     let message_hex = "68656c6c6f"; // "hello"
-    let signature = bridge.crypto().sign(message_hex, &priv_ext[..64])?;
+    let signature = bridge.crypto().sign(message_hex, &priv_ext)?;
     println!("Ed25519 signature: {}", signature);
     // A tampered signature is correctly rejected.
     let fake_sig = "00".repeat(64);

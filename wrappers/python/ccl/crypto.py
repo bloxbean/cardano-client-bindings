@@ -28,7 +28,11 @@ class Crypto:
         return rc == CclLib.CCL_SUCCESS
 
     def sign(self, message_hex, sk_hex):
-        """Sign message with secret key. Returns signature hex."""
+        """Sign message with a secret key; returns signature hex.
+
+        ``sk_hex`` is either a 32-byte Ed25519 seed (64 hex chars) or a 64-byte
+        BIP32-Ed25519 extended key (128 hex chars, e.g. from :meth:`derive_key`) —
+        the form is detected by length."""
         rc = self._b._lib.ccl_crypto_sign(
             self._b._thread, self._b._encode(message_hex), self._b._encode(sk_hex))
         return self._b._check(rc)
@@ -46,8 +50,9 @@ class Crypto:
 
         ``role`` is one of ``"payment"``, ``"change"``, ``"stake"``, ``"drep"``,
         ``"committee_cold"``, ``"committee_hot"``. Returns a dict with ``path``,
-        ``private_key`` (hex 64-byte extended key; its first 64 hex chars are the raw
-        Ed25519 key accepted by :meth:`sign`), ``public_key``, and ``public_key_hash``
+        ``private_key`` (hex 64-byte extended BIP32-Ed25519 key — pass it *whole* to
+        :meth:`sign`, which detects the extended form by length; its first half is a
+        clamped scalar, not a seed), ``public_key``, and ``public_key_hash``
         (for the committee roles this is the certificate credential). Key derivation is
         network-independent, so no network argument. Prefer managed accounts
         (``lib.accounts``) for signing — this exists for interop that genuinely needs

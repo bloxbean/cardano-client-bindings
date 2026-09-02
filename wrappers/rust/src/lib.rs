@@ -391,6 +391,8 @@ impl<'a> CryptoApi<'a> {
         rc == error_codes::CCL_SUCCESS
     }
 
+    /// Ed25519 sign. `sk_hex` is a 32-byte seed (64 hex chars) or a 64-byte BIP32-Ed25519
+    /// extended key (128 hex chars, e.g. `derive_key`'s `private_key`) — detected by length.
     pub fn sign(&self, message_hex: &str, sk_hex: &str) -> Result<String> {
         let cs_msg = to_cstring(message_hex)?;
         let cs_sk = to_cstring(sk_hex)?;
@@ -420,9 +422,10 @@ impl<'a> CryptoApi<'a> {
     /// Stateless CIP-1852 key derivation — the explicit "raw key material" utility.
     ///
     /// `role` is one of `"payment"`, `"change"`, `"stake"`, `"drep"`, `"committee_cold"`,
-    /// `"committee_hot"`. Returns the JSON `{"path","private_key","public_key","public_key_hash"}`
-    /// (the extended private key's first 64 hex chars are the raw Ed25519 key accepted by
-    /// [`CryptoApi::sign`]). Key derivation is network-independent. Prefer the managed accounts
+    /// `"committee_hot"`. Returns the JSON `{"path","private_key","public_key","public_key_hash"}`.
+    /// Pass `private_key` (the 64-byte extended BIP32-Ed25519 key) whole to [`CryptoApi::sign`],
+    /// which detects the extended form by length — never slice it, its first half is a clamped
+    /// scalar, not a seed. Key derivation is network-independent. Prefer the managed accounts
     /// API for signing — handles never expose key bytes.
     pub fn derive_key(
         &self,
