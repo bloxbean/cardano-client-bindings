@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from ccl import SigningRole
 from ccl._ffi import CclLib, CclError
 from ccl.network import Network
 from tests.devkit_helper import DevKitHelper
@@ -396,7 +397,6 @@ def test_managed_account_handle_sign_submit(ccl_lib, devkit):
     """ADR-0016 end-to-end: build offline, sign with a managed Account handle (typed role mask,
     no mnemonic in the signing call), and have the node accept the transaction. The handle-based
     signature must be as node-acceptable as the mnemonic-per-call path it replaces."""
-    from ccl import SigningRole
     pp = _reset_and_fund(devkit)
     utxos = devkit.get_utxos(INTENT_SENDER)
     built = ccl_lib.quicktx.build(_read_fixture("stake_registration.yaml"), utxos, pp,
