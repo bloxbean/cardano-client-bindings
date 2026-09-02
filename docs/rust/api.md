@@ -13,21 +13,19 @@ impl Bridge {
     pub fn new() -> Result<Self>;
     pub fn version(&self) -> Result<String>;
 
-    pub fn account(&self) -> AccountApi<'_>;
-    pub fn address(&self) -> AddressApi<'_>;
-    pub fn crypto(&self)  -> CryptoApi<'_>;
-    pub fn tx(&self)      -> TxApi<'_>;
-    pub fn plutus(&self)  -> PlutusApi<'_>;
-    pub fn script(&self)  -> ScriptApi<'_>;
-    pub fn gov(&self)     -> GovApi<'_>;
-    pub fn wallet(&self)  -> WalletApi<'_>;
-    pub fn quicktx(&self) -> QuickTxApi<'_>;
+    pub fn accounts(&self) -> AccountsApi<'_>;
+    pub fn address(&self)  -> AddressApi<'_>;
+    pub fn crypto(&self)   -> CryptoApi<'_>;
+    pub fn tx(&self)       -> TxApi<'_>;
+    pub fn plutus(&self)   -> PlutusApi<'_>;
+    pub fn script(&self)   -> ScriptApi<'_>;
+    pub fn quicktx(&self)  -> QuickTxApi<'_>;
 }
 ```
 
 `Bridge::new()` creates a GraalVM isolate and verifies the native library version matches the crate.
 
-**Lifecycle.** Teardown is RAII: `Drop` tears down the isolate. The API handles (`AccountApi<'_>` etc.) borrow the bridge, so the borrow checker statically prevents use-after-free.
+**Lifecycle.** Teardown is RAII: `Drop` tears down the isolate. The namespace handles (`AddressApi<'_>` etc.) borrow the bridge, so the borrow checker statically prevents use-after-free; managed `Account`s are owned values that a bridge drop hard-invalidates (typed -11 errors).
 
 **Threading.** `Bridge` is **`!Send` and `!Sync`** — moving it to another thread is a compile error. The GraalVM isolate thread is bound to the OS thread that created it; create one `Bridge` per thread.
 

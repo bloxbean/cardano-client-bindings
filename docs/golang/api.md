@@ -19,7 +19,7 @@ var ErrBridgeClosed = errors.New("ccl: bridge is closed")
 `New()` loads the native library (downloading it on first use — see [troubleshooting](troubleshooting.md#how-the-native-library-is-found)), creates a GraalVM isolate on a dedicated pinned OS thread, and verifies the library version matches the wrapper. The API groups are exported fields:
 
 ```go
-bridge.Account  // *AccountApi
+bridge.Accounts // *AccountsApi (managed accounts, ADR-0016)
 bridge.Address  // *AddressApi
 bridge.Crypto   // *CryptoApi
 bridge.Tx       // *TxApi
@@ -46,7 +46,7 @@ func (n Network) String() string  // "mainnet", "testnet", ...
 func (n Network) Valid() bool
 ```
 
-Every method that derives keys (`Account`, `Wallet`, `Gov`) requires a `Network` value. An out-of-range value returns a plain descriptive error before any native call.
+Account operations (`Accounts`) require a `Network` value; an out-of-range value returns a plain descriptive error before any native call. The stateless `Crypto.DeriveKey` takes none — key derivation is network-independent.
 
 > **Gotcha:** these constants are CCL enum ordinals, **not** Cardano's on-chain network id — the two are inverted for mainnet/testnet (`Mainnet = 0`, but a mainnet address's on-chain `network_id` is `1`). `AddressInfo.NetworkID` is the genuine on-chain value; never feed it back into an API that takes a `Network`.
 

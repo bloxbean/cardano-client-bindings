@@ -225,7 +225,7 @@ All functions follow the same pattern:
 |--------|-----------|
 | **Inputs** | Strings via `char*` (JSON for complex data, hex for binary) |
 | **Return value** | `int` status code (`0` = success, negative = error) |
-| **Get result** | `ccl_get_result(thread)` → result string (JSON or hex) |
+| **Get result** | `ccl_get_result(thread)` → result string (JSON or hex). **Read-once**: a second read returns empty — copy if needed twice |
 | **Get error** | `ccl_get_last_error(thread)` → error message |
 | **Memory** | Free returned strings with `ccl_free_string(thread, ptr)` |
 | **Network ID** | `0` = mainnet, `1` = testnet |
@@ -336,7 +336,7 @@ bridge.close();
 | Function | Description |
 |----------|-------------|
 | `ccl_version` | Returns library version |
-| `ccl_get_result` | Returns last successful result string |
+| `ccl_get_result` | Returns last successful result string (read-once: consumed on read) |
 | `ccl_get_last_error` | Returns last error message |
 | `ccl_free_string` | Frees a string returned by the library |
 

@@ -52,6 +52,10 @@ import org.graalvm.nativeimage.c.type.CCharPointer;
  *   }
  * }</pre>
  *
+ * <p>The result slot is <b>read-once</b>: {@code ccl_get_result} consumes the value, and a second
+ * read returns an empty string — copy it if you need it twice. (Deliberate: results can carry
+ * secrets, e.g. an exported recovery phrase, which must not linger.)
+ *
  * <p>Because the result/error are thread-local, the work call and its {@code ccl_get_result} /
  * {@code ccl_get_last_error} retrieval must run on the same isolate thread.
  *
@@ -82,7 +86,10 @@ public final class CclBridge {
     }
 
     /**
-     * Returns the result string produced by the most recent successful call on this thread.
+     * Returns the result string produced by the most recent successful call on this thread —
+     * <b>read-once</b>: fetching the result consumes it, and a second read returns an empty
+     * string. Read-once is deliberate (results can carry secrets, e.g. an exported recovery
+     * phrase, which must not linger in the slot); copy the string if you need it twice.
      *
      * <p>Exported as {@code ccl_get_result}. The returned pointer is malloc'd and owned by the
      * caller, who must release it with {@link #freeString(IsolateThread, CCharPointer) ccl_free_string}.
