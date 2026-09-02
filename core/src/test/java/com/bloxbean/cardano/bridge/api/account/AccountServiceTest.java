@@ -294,4 +294,35 @@ class AccountServiceTest {
             AccountService.close(handle);
         }
     }
+
+    // --- signTx error precedence ---
+    //
+    // The class's own rule (established in exportRecoveryPhrase): unknown/closed-handle semantics
+    // take precedence over argument validation, so wrapper recovery keyed on the typed handle
+    // error (-11) always triggers. And corrupt hex is a corrupt transaction (-9), the same class
+    // as valid-hex-bad-CBOR — not an invalid argument (-2).
+
+    @Test
+    void signTxOnAClosedHandleThrowsTheHandleError_evenWithBadArguments() {
+        long handle = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, 0, 0);
+        AccountService.close(handle);
+        assertThrows(AccountService.UnknownHandleException.class,
+                () -> AccountService.signTx(handle, "", 0),
+                "closed-handle semantics must take precedence over argument validation");
+    }
+
+    @Test
+    void nonHexTransactionIsAnInvalidTransaction_notAnInvalidArgument() {
+        long handle = AccountService.openMnemonic(TESTNET, TEST_MNEMONIC, 0, 0);
+        try {
+            for (String corrupt : new String[]{"zz", "abc"}) { // non-hex; odd length
+                var e = assertThrows(IllegalStateException.class,
+                        () -> AccountService.signTx(handle, corrupt, AccountService.ROLE_PAYMENT),
+                        "corrupt hex must map to CCL_ERROR_INVALID_TRANSACTION like corrupt CBOR");
+                assertTrue(e.getMessage().startsWith("Transaction signing failed"));
+            }
+        } finally {
+            AccountService.close(handle);
+        }
+    }
 }

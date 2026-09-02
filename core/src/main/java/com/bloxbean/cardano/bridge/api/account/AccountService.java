@@ -189,6 +189,10 @@ public final class AccountService {
      * @throws IllegalArgumentException for an empty/unknown mask or blank transaction
      */
     public static String signTx(long handle, String txCborHex, int roleMask) {
+        // Handle lookup first: unknown/closed-handle semantics (-11) take precedence over
+        // argument validation, matching exportRecoveryPhrase — wrapper recovery keyed on the
+        // typed handle error must always trigger.
+        Account managed = lookup(handle);
         if (txCborHex == null || txCborHex.isBlank()) {
             throw new IllegalArgumentException("Transaction CBOR hex is required");
         }
@@ -198,11 +202,17 @@ public final class AccountService {
         if ((roleMask & ~ALL_ROLES) != 0) {
             throw new IllegalArgumentException("Unknown bits in role mask: " + roleMask);
         }
-        Account managed = lookup(handle);
+        byte[] txBytes;
+        try {
+            txBytes = com.bloxbean.cardano.client.util.HexUtil.decodeHexString(txCborHex.trim());
+        } catch (IllegalArgumentException e) {
+            // Corrupt hex is a corrupt transaction (-9), the same class as valid-hex-bad-CBOR —
+            // not an invalid argument (-2).
+            throw new IllegalStateException("Transaction signing failed: " + e.getMessage(), e);
+        }
         try {
             com.bloxbean.cardano.client.transaction.spec.Transaction tx =
-                    com.bloxbean.cardano.client.transaction.spec.Transaction.deserialize(
-                            com.bloxbean.cardano.client.util.HexUtil.decodeHexString(txCborHex.trim()));
+                    com.bloxbean.cardano.client.transaction.spec.Transaction.deserialize(txBytes);
             if ((roleMask & ROLE_PAYMENT) != 0) {
                 tx = managed.cclAccount().sign(tx);
             }

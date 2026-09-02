@@ -165,3 +165,22 @@ def test_gc_finalizer_cannot_steal_an_inflight_result(ccl):
     gc.collect()  # runs Account.__del__ -> close() with the result parked
 
     assert ccl._get_result() == BLAKE2B_HELLO
+
+
+def test_sign_tx_error_codes_are_typed_and_consistent(ccl):
+    """Closed-handle recovery keys on CclInvalidHandleError (-11), and corrupt input maps to
+    -9 (invalid transaction) whether the corruption is bad hex or bad CBOR — never -2."""
+    import pytest
+    from ccl import CclInvalidHandleError
+    from ccl._ffi import CclError
+
+    acct = ccl.accounts.create(Network.TESTNET)
+    acct.close()
+    with pytest.raises(CclInvalidHandleError):
+        acct.sign_tx("", 0)
+
+    with ccl.accounts.create(Network.TESTNET) as live:
+        for corrupt in ("zz", "abc"):  # non-hex; odd length
+            with pytest.raises(CclError) as excinfo:
+                live.sign_tx(corrupt)
+            assert excinfo.value.code == -9, f"{corrupt!r} → {excinfo.value.code}"
