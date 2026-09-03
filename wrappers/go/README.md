@@ -66,22 +66,25 @@ func main() {
 	}
 	defer bridge.Close() // tears down the isolate
 
-	account, err := bridge.Account.Create(ccl.Testnet)
+	account, err := bridge.Accounts.Create(ccl.Testnet) // managed handle (ADR-0016)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(account.BaseAddress) // addr_test1...
-	fmt.Println(account.Mnemonic)    // 24-word phrase
+	defer account.Close()
+	info, _ := account.Info()
+	fmt.Println(info.BaseAddress) // addr_test1...
+	phrase, _ := account.ExportRecoveryPhrase() // one-shot, deliberate
+	fmt.Println(phrase) // 24-word phrase
 }
 ```
 
 ## API namespaces
 
 A `*Bridge` exposes these namespaces (all offline operations):
-`bridge.Account`, `bridge.Address`, `bridge.Crypto`, `bridge.Tx`, `bridge.Plutus`,
-`bridge.Script`, `bridge.Gov`, `bridge.Wallet`, `bridge.QuickTx`.
+`bridge.Accounts`, `bridge.Address`, `bridge.Crypto`, `bridge.Tx`, `bridge.Plutus`,
+`bridge.Script`, `bridge.QuickTx`.
 
-Networks are the `ccl.Network` type: `ccl.Mainnet`, `ccl.Testnet`, `ccl.Preprod`, `ccl.Preview`.
+Networks are the `ccl.Network` type: `ccl.Mainnet` or `ccl.Testnet`.
 
 > **These are CCL's enum ordinals, not Cardano's on-chain network id.** `Mainnet` is 0 and
 > `Testnet` is 1, which is the *inverse* of the on-chain encoding (0 = testnet, 1 = mainnet).
