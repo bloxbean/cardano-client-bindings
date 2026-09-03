@@ -88,6 +88,10 @@ Exact names and result mechanics may change during implementation, but these inv
   transaction and typed role selection, not mnemonic/network/path arguments.
 - Handles are scoped to one bridge/GraalVM isolate. Foreign, closed, and stale handles fail with a
   normal CCL error rather than accessing another object.
+  > **Update (2026-09-03):** foreign-handle detection is *statistical*, not structural: handles are
+  > allocated from a per-isolate randomized 62-bit space (collision odds ~2⁻⁶²). A fixed counter
+  > made cross-isolate collisions certain and let a foreign handle silently alias a real account —
+  > the wrong-pairing regression test pins the rejection.
 - `close` is explicit and idempotent. Closing a bridge closes and clears all accounts that belong to
   it. Wrapper finalizers are fallback protection, never the primary lifecycle mechanism.
 - Go Account calls use the Bridge's existing dedicated OS-thread executor in accordance with
@@ -326,6 +330,13 @@ The change will be staged:
    not a secret-memory fix.
 5. Remove the deprecated stateless secret-bearing surface only in a release that permits the
    documented breaking change.
+
+> **Update (2026-09-03):** stages 4–5 collapsed. Pre-release, with only preview-tagged packages and
+> no meaningful consumers, the mnemonic-per-operation surface was **removed outright** alongside
+> stage 2 (PR #80) — no deprecation period, and the wrapper-only facade was never needed. No
+> capability was lost: public identity moved onto `get_info`, and raw key material survives as the
+> stateless `crypto.derive_key` utility (documented as advanced), not as an account operation.
+> Stage 3 remains open, deliberately sequenced after the accounts merge.
 
 The old and new ABI must not silently disagree. ABI additions and removals follow the versioning and
 all-wrapper release requirements in `RELEASING.md` and ADR-0015.
