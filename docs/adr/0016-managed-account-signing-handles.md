@@ -52,9 +52,9 @@ material improvement.
 This decision interacts with three accepted ADRs:
 
 - [ADR-0002](0002-offline-stateless-no-provider.md) keeps `libccl` offline, stateless, and free of
-  provider/network configuration. That rule remains. This ADR proposes a narrow, explicit exception
-  for caller-created, in-memory signing capabilities. If accepted, it supersedes ADR-0002 only where
-  ADR-0002 says that `libccl` holds no key/account state.
+  provider/network configuration. That rule remains. This ADR carves a narrow, explicit exception
+  for caller-created, in-memory signing capabilities: it supersedes ADR-0002 only where ADR-0002
+  says that `libccl` holds no key/account state.
 - [ADR-0003](0003-four-language-wrappers-uniform-ffi.md) requires a common thin C ABI. Account objects
   must therefore be native resources surfaced idiomatically by thin wrappers, not four independent
   account implementations.
@@ -86,12 +86,11 @@ Exact names and result mechanics may change during implementation, but these inv
 - The handle is an opaque identifier, not a raw pointer exposed to wrappers.
 - Network, account index, and address index are fixed when the Account is opened. Signing takes a
   transaction and typed role selection, not mnemonic/network/path arguments.
-- Handles are scoped to one bridge/GraalVM isolate. Foreign, closed, and stale handles fail with a
-  normal CCL error rather than accessing another object.
-  > **Update (2026-09-03):** foreign-handle detection is *statistical*, not structural: handles are
-  > allocated from a per-isolate randomized 62-bit space (collision odds ~2⁻⁶²). A fixed counter
-  > made cross-isolate collisions certain and let a foreign handle silently alias a real account —
-  > the wrong-pairing regression test pins the rejection.
+- Handles are scoped to one bridge/GraalVM isolate and allocated from a per-isolate randomized
+  62-bit space. Foreign, closed, and stale handles fail with a normal CCL error rather than
+  accessing another object — foreign-handle detection is *statistical* (collision odds ~2⁻⁶²), not
+  structural; a fixed counter would make cross-isolate collisions certain and let a foreign handle
+  silently alias a real account, which the wrong-pairing regression test pins against.
 - `close` is explicit and idempotent. Closing a bridge closes and clears all accounts that belong to
   it. Wrapper finalizers are fallback protection, never the primary lifecycle mechanism.
 - Go Account calls use the Bridge's existing dedicated OS-thread executor in accordance with
@@ -121,8 +120,7 @@ Multiple addresses under one account are served in this ADR's scope by **opening
 leaf** (opening is cheap). A **wallet handle** — the managed successor to the mnemonic-per-call HD
 `wallet` API group: open the account-level node once, then `derive_address(handle, index)` and sign
 for any derived leaf (including multi-address senders) — is deliberate **future work**: it is purely
-additive to this ABI (new entry points, no changes to the account surface), and it is the
-prerequisite for retiring the old `wallet.*` group in the deprecation stage. Watch-only handles from
+additive to this ABI (new entry points, no changes to the account surface). Watch-only handles from
 account-level public derivation material are future work of the same additive kind. Arbitrary
 non-CIP-1852 derivation paths are **out of scope** for handles; the low-level raw-key APIs remain
 the escape hatch.
@@ -251,7 +249,7 @@ same negative tests), and the choice is wrapper-internal: it can be revisited in
 release without touching the C ABI or other wrappers.
 
 Recovery phrases should use `secrecy::SecretString`/`zeroize`, not plain
-`String` or JSON. The current secret-bearing, untyped JSON account results are specifically deprecated
+`String` or JSON. Secret-bearing, untyped JSON account results are specifically rejected
 by this decision.
 
 #### Go
@@ -325,18 +323,11 @@ The change will be staged:
 2. Add the opaque-handle ABI and Account objects in all four wrappers, with lifecycle, role, negative
    handle, and signing-parity tests.
 3. Add signer abstractions and pass accurate signer/witness information into QuickTx fee estimation.
-4. Deprecate mnemonic-per-operation account, wallet, governance, and signing calls. A wrapper-only
-   Account facade may temporarily adapt the old ABI, but must be documented as an ergonomics bridge,
-   not a secret-memory fix.
-5. Remove the deprecated stateless secret-bearing surface only in a release that permits the
-   documented breaking change.
-
-> **Update (2026-09-03):** stages 4–5 collapsed. Pre-release, with only preview-tagged packages and
-> no meaningful consumers, the mnemonic-per-operation surface was **removed outright** alongside
-> stage 2 (PR #80) — no deprecation period, and the wrapper-only facade was never needed. No
-> capability was lost: public identity moved onto `get_info`, and raw key material survives as the
-> stateless `crypto.derive_key` utility (documented as advanced), not as an account operation.
-> Stage 3 remains open, deliberately sequenced after the accounts merge.
+4. Remove the mnemonic-per-operation account, wallet, governance, and signing calls outright.
+   Pre-release, with only preview-tagged packages and no meaningful consumers, no deprecation
+   period or compatibility facade is warranted — but no capability may be lost: public identity
+   moves onto the account info, and raw key material survives as the stateless
+   `crypto.derive_key` utility, documented as advanced.
 
 The old and new ABI must not silently disagree. ABI additions and removals follow the versioning and
 all-wrapper release requirements in `RELEASING.md` and ADR-0015.
