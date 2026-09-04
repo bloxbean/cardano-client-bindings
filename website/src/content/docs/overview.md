@@ -5,10 +5,6 @@ description: Cardano Client Lib as a native shared library, callable from Python
 
 Cardano Client Bindings compiles [Cardano Client Lib (CCL)](https://github.com/bloxbean/cardano-client-lib) into a native shared library (`libccl.so` / `libccl.dylib` / `libccl.dll`) using GraalVM native-image. Any language can call CCL's offline Cardano operations via FFI — **no JVM required at runtime**.
 
-## Why?
-
-Cardano Client Lib is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. Cardano Client Bindings makes selected CCL modules available as a **native shared library with a C ABI**, so Python, Go, Rust, and JavaScript reuse CCL's exact, well-tested behavior — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
-
 ## Where this fits in the ecosystem
 
 To be clear about what this is *not*: Cardano has excellent native libraries in all four of these languages — [pycardano](https://github.com/Python-Cardano/pycardano) (Python), [MeshJS](https://meshjs.dev) and [Lucid Evolution](https://github.com/Anastasia-Labs/lucid-evolution) (TypeScript), [pallas](https://github.com/txpipe/pallas) (Rust), [gOuroboros](https://github.com/blinklabs-io/gouroboros) and [Apollo](https://github.com/Salvionied/apollo) (Go), among others. If one of them serves your needs, use it — these bindings are not trying to replace them.
@@ -22,6 +18,10 @@ The bindings exist for the cases where a native library doesn't quite fit:
 - **A maintained fallback.** Native libraries have occasionally gone unmaintained; these bindings ride on CCL's active maintenance.
 
 The honest costs of this approach: a ~50 MB platform-specific native binary in your dependency tree, no node-protocol/chain-sync support (offline operations only, by design), and [platform gaps](../reference/platforms/) a pure-language library wouldn't have.
+
+## Why?
+
+Cardano Client Lib is a mature, feature-rich Cardano SDK covering key derivation, transaction building, Plutus data handling, governance, and more. Cardano Client Bindings makes selected CCL modules available as a **native shared library with a C ABI**, so Python, Go, Rust, and JavaScript reuse CCL's exact, well-tested behavior — whether as the foundation for a wrapper library, a transaction builder, or for individual functions like crypto, address parsing, and CBOR serialization.
 
 ## What's included
 

@@ -42,11 +42,10 @@ Plutus transactions build fully offline: when you supply no execution units, the
 - **Wrapper ↔ library version lock.** The wrapper and native library must match on base semver; a mismatch fails fast at load (`CCL_SKIP_VERSION_CHECK=1` overrides at your own risk).
 - **Network enum ≠ on-chain network id.** `Network.MAINNET == 0` but a mainnet address's on-chain `network_id` is `1`. Never feed `address.info()["network_id"]` back into an API that takes a `network`.
 - **Quantities are strings.** Chain data carries amounts as strings (`"quantity": "5000000"`) to avoid 2^53 float truncation — mind this in JavaScript especially.
-- **Argument-order quirk:** Python's `sign_tx`/`sign_tx_with_keys` take the transaction before the network, unlike the other wrappers.
 
 ## Signing needs the right key roles
 
-`sign_tx` witnesses with the **payment key only**. Stake, DRep, and committee certificates need their own witnesses via `sign_tx_with_keys` (roles: `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`) — otherwise the node rejects with `MissingVKeyWitnessesUTXOW`. Each language's *Building Transactions* page has the intent → roles table.
+`account.sign_tx(tx_cbor)` witnesses with the **payment key only**. Stake, DRep, and committee certificates need their own witnesses — combine `SigningRole` flags (`PAYMENT`, `STAKE`, `DREP`, `COMMITTEE_COLD`, `COMMITTEE_HOT`) with `|`; otherwise the node rejects with `MissingVKeyWitnessesUTXOW`. Each language's *Building Transactions* page has the intent → roles table.
 
 ## Platform gaps
 

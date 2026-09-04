@@ -47,15 +47,15 @@ Create an account and build a payment, fully offline (Python shown — the [othe
 ```python
 from ccl import CclLib, Network
 
-with CclLib() as lib:
-    account = lib.account.create(Network.TESTNET)
-    print(account["base_address"])   # addr_test1...
+with CclLib() as lib, lib.accounts.create(Network.TESTNET) as account:
+    address = account.info["base_address"]
+    print(address)                   # addr_test1... (info is public data — never the mnemonic)
 
     yaml = f"""
     version: 1.0
     transaction:
       - tx:
-          from: {account["base_address"]}
+          from: {address}
           intents:
             - type: payment
               address: addr_test1qz...
@@ -65,8 +65,9 @@ with CclLib() as lib:
     """
     # Supply UTXOs + protocol params yourself, or use a provider (see below)
     result = lib.quicktx.build(yaml, utxos, protocol_params)
-    signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
-    # Submit `signed` with any HTTP client — the library never submits
+    signed = account.sign_tx(result["tx_cbor"])
+    # Submit `signed` with any HTTP client — the library never submits.
+    # To keep the account: account.export_recovery_phrase() returns the phrase once, deliberately.
 ```
 
 The transaction is described as [TxPlan YAML](../reference/txplan/); the library selects UTXOs, calculates the fee, and handles change. For fetching UTXOs and protocol parameters conveniently, each wrapper ships optional providers (Yaci DevKit, Blockfrost) — see the per-language *Providers & Evaluators* pages.
