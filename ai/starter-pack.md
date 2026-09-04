@@ -20,22 +20,22 @@ All four have the same nine API groups — `account`, `address`, `crypto`, `tx`,
 - The library makes **no network calls** and **never submits transactions**. Do not invent fetch/submit methods on it.
 - Chain data (UTXOs, protocol parameters) is an **input** you pass to `quicktx.build`. Optional wrapper-side `Provider` objects (YaciProvider, BlockfrostProvider) fetch it for `quicktx.build_with` — those are plain HTTP helpers in the wrapper, not the native library.
 - Submission: POST the signed CBOR hex (as bytes) to any Blockfrost-compatible `/tx/submit` with `Content-Type: application/cbor`, using the language's own HTTP client.
-- Keys/mnemonics are inputs to each call; the library holds no state between calls beyond the loaded isolate.
+- Accounts are **managed handles** (ADR-0016): open once (`accounts.from_mnemonic`/`accounts.create`), then sign by handle with typed roles — the mnemonic never travels with per-operation calls, and the account object retains only the hardened account-level key, never the recovery phrase.
 
 ## 3. Core workflow (build → sign → submit)
 
 ```python
-from ccl import CclLib, Network, YaciProvider
+from ccl import CclLib, Network, SigningRole, YaciProvider
 
-with CclLib() as lib:                                # context manager; or lib.close()
-    account = lib.account.create(Network.TESTNET)    # {"mnemonic","base_address","enterprise_address","stake_address"}
+with CclLib() as lib, lib.accounts.create(Network.TESTNET) as account:
+    address = account.info["base_address"]           # info is public data — never the mnemonic
     provider = YaciProvider()                        # or BlockfrostProvider(project_id, network="preprod")
 
     yaml = f"""
     version: 1.0
     transaction:
       - tx:
-          from: {account["base_address"]}
+          from: {address}
           intents:
             - type: payment
               address: addr_test1qz...
@@ -43,19 +43,25 @@ with CclLib() as lib:                                # context manager; or lib.c
                 - unit: lovelace
                   quantity: "5000000"
     """
-    result = lib.quicktx.build_with(yaml, provider, account["base_address"])
+    result = lib.quicktx.build_with(yaml, provider, address)
     # or fully offline: lib.quicktx.build(yaml, utxos, protocol_params, exec_units=None, additional_signers=0)
     # result = {"tx_cbor": str, "tx_hash": str, "fee": str}
 
-    signed = lib.account.sign_tx(account["mnemonic"], result["tx_cbor"], Network.TESTNET)
+    signed = account.sign_tx(result["tx_cbor"])      # payment role; combine SigningRole flags for certs
     # submit `signed` yourself (bytes.fromhex → POST /tx/submit)
 ```
 
-Go: `bridge.QuickTx.Build(yaml, utxos, params)` / `bridge.Account.SignTx(mnemonic, ccl.Testnet, 0, 0, txCbor)`.
-JS: `bridge.quicktx.build(yaml, utxos, params, null, additionalSigners)` / `bridge.account.signTx(mnemonic, TESTNET, 0, 0, txCbor)`.
-Rust: `bridge.quicktx().build(&yaml, &utxos, &params, None, additional_signers)?` / Go: `bridge.QuickTx.Build(yaml, utxos, pp, additionalSigners)` — the count is **positional** in Go/Rust.
+To restore an existing account: `lib.accounts.from_mnemonic(mnemonic, Network.TESTNET)` — the mnemonic
+crosses the boundary once, there. A created account's phrase is exported once, deliberately, with
+`account.export_recovery_phrase()`.
 
-**Argument-order gotcha:** Python's `sign_tx(mnemonic, tx_cbor, network, ...)` puts the transaction *before* the network; Go/JS/Rust use `(mnemonic, network, account_index, address_index, tx_cbor)`.
+Go: `acct, _ := bridge.Accounts.Create(ccl.Testnet)` / `acct.SignTx(result.TxCbor, ccl.RolePayment)`.
+JS: `using acct = bridge.accounts.create(TESTNET)` / `acct.signTx(result.tx_cbor)`.
+Rust: `let acct = bridge.accounts().create(Network::Testnet)?` / `acct.sign_tx(&result.tx_cbor, SigningRole::PAYMENT)?`.
+The `additional_signers` build count is **positional** in Go/Rust; keyword/options elsewhere.
+
+**Uniform signatures:** `sign_tx(tx_cbor, roles)` has the same shape in all four languages — no
+per-language argument-order quirks (the legacy mnemonic-per-call API that had them is gone).
 
 ## 4. Networks
 
@@ -178,31 +184,31 @@ Multiple `- tx:` entries compose into one transaction (set `context.fee_payer`; 
 
 ## 7. Signing rules (agents get this wrong most)
 
-`sign_tx` adds the **payment key witness only**. Certificates need more, via `sign_tx_with_keys(mnemonic, tx_cbor, keys, network)` (Python order) with roles in order:
+`account.sign_tx(tx_cbor)` adds the **payment key witness only**. Certificates need more — combine `SigningRole` flags with `|` (witnesses apply in canonical order, so combination order never matters):
 
-| Transaction contains | keys |
+| Transaction contains | roles |
 |---|---|
-| payment / metadata / minting / Plutus ops | `["payment"]` |
-| stake_registration / deregistration / delegation / withdrawal / voting_delegation | `["payment", "stake"]` |
-| drep_registration / drep_update / drep_deregistration / voting | `["payment", "drep"]` |
-| governance_proposal | `["payment"]` |
-| pool operations (keyed to the account's stake key) | `["payment", "stake"]` |
+| payment / metadata / minting / Plutus ops | `SigningRole.PAYMENT` (the default) |
+| stake_registration / deregistration / delegation / withdrawal / voting_delegation | `PAYMENT \| STAKE` |
+| drep_registration / drep_update / drep_deregistration / voting | `PAYMENT \| DREP` |
+| governance_proposal | `PAYMENT` |
+| pool operations (keyed to the account's stake key) | `PAYMENT \| STAKE` |
 
-Missing witness ⇒ node rejects with `MissingVKeyWitnessesUTXOW`. Available roles: `payment`, `stake`, `drep`, `committee_cold`, `committee_hot`.
+Missing witness ⇒ node rejects with `MissingVKeyWitnessesUTXOW`. Available roles: `PAYMENT`, `STAKE`, `DREP`, `COMMITTEE_COLD`, `COMMITTEE_HOT` (Go: `RolePayment|RoleStake`; Rust: `SigningRole::PAYMENT | SigningRole::STAKE`).
 
-**The same table gives the fee's witness budget (`additional_signers`) — ALWAYS pass it on cert/script builds:** `additional_signers = len(keys) − 1` (the input UTXOs already cover the payment key). So: `0` payment-only, `1` one certificate role, `2` stake+DRep in one tx. Two exceptions: a native-script spend whose only inputs sit at the script address needs the script's `sig`-key count (payment key isn't input-implied there), and each plan-level `required_signer` adds one. Undercounting → node rejects with `FeeTooSmallUTxO`; overcounting only overpays ~4,400 lovelace per witness.
+**The same table gives the fee's witness budget (`additional_signers`) — ALWAYS pass it on cert/script builds:** `additional_signers = <number of roles> − 1` (the input UTXOs already cover the payment key). So: `0` payment-only, `1` one certificate role, `2` stake+DRep in one tx. Two exceptions: a native-script spend whose only inputs sit at the script address needs the script's `sig`-key count (payment key isn't input-implied there), and each plan-level `required_signer` adds one. Undercounting → node rejects with `FeeTooSmallUTxO`; overcounting only overpays ~4,400 lovelace per witness.
 
 ## 8. API groups (complete surface)
 
-- **account**: `create(network)`, `from_mnemonic(mnemonic, network, account_index=0, address_index=0)` → `{mnemonic, base_address, enterprise_address, stake_address}`; `get_private_key` (128-hex extended key — first 64 hex chars are the raw Ed25519 key for `crypto.sign`), `get_public_key`, `get_drep_id`, `sign_tx`, `sign_tx_with_keys`.
+- **accounts** (managed handles, ADR-0016): `create(network)` / `from_mnemonic(mnemonic, network, account_index=0, address_index=0)` → `Account` with `info` (base/enterprise/stake/change addresses, `drep_id`, committee ids + credentials — **never the mnemonic**), `sign_tx(tx_cbor, roles=SigningRole.PAYMENT)`, one-shot `export_recovery_phrase()` (created accounts only), idempotent `close()` (context manager / `using` / `defer` / `Drop`). One handle = one CIP-1852 payment leaf; open more handles for more address indices.
 - **address**: `info(bech32)` → `{type, network_id, payment_credential_hash, …}`; `validate` (bool, never raises), `to_bytes`, `from_bytes`.
-- **crypto**: `blake2b_256(hex)`, `blake2b_224(hex)`, `generate_mnemonic(word_count=24)`, `validate_mnemonic`, `sign(message_hex, sk_hex)` (32-byte key), `verify`.
+- **crypto**: `blake2b_256(hex)`, `blake2b_224(hex)`, `generate_mnemonic(word_count=24)`, `validate_mnemonic`, `sign(message_hex, sk_hex)` (32-byte seed **or** 64-byte extended key, detected by length — pass `derive_key`'s `private_key` whole, never sliced), `verify`, `derive_key(mnemonic, account_index=0, address_index=0, role="payment")` — the stateless raw-key utility (roles payment/change/stake/drep/committee_cold/committee_hot; governance roles also return CIP-105 `bech32_verification_key`/`bech32_verification_key_hash`).
 - **tx**: `hash(tx_cbor)`, `to_json`, `deserialize`. ⚠️ `from_json` and `sign_with_secret_key` are **broken in the current release** — use `account.sign_tx`.
 - **plutus**: `data_hash(cbor_hex)`. ⚠️ `data_to_json` / `data_from_json` are **broken in the current release** — keep PlutusData as CBOR hex.
 - **script**: `native_from_json(json)` → `{policy_id, script_hash, cbor_hex}`; `hash(cbor_hex, script_type)` (0=native, 1..3=PlutusV1..V3).
-- **gov**: `drep_key_from_mnemonic` → `{drep_id, verification_key, verification_key_hash}`; `committee_cold_key_from_mnemonic`, `committee_hot_key_from_mnemonic`.
-- **wallet**: `create(network)`, `from_mnemonic`, `get_address(mnemonic, network, index)` — HD wallet, sequential addresses.
 - **quicktx**: `build(yaml, utxos, protocol_params, exec_units=None, additional_signers=0)`, `build_with(yaml, provider, sender, evaluator=None, additional_signers=0)` → `{tx_cbor, tx_hash, fee}` (unsigned). Go/Rust take the count positionally.
+
+There is **no separate gov or wallet group**: governance identity (DRep id, committee ids/credentials) is on `account.info`, governance signing uses the `DREP`/`COMMITTEE_*` roles, raw governance keys come from `crypto.derive_key`, and an HD wallet is one recovery phrase with one handle per payment leaf (`address_index`).
 
 ## 9. Errors
 

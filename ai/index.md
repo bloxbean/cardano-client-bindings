@@ -60,7 +60,7 @@ These are the failure modes the starter pack exists to prevent:
 
 1. **Inventing an online API** — the library never fetches or submits; chain data is an input, submission is your job.
 2. **Calling the broken functions** — `tx.from_json`, `tx.sign_with_secret_key`, and `plutus.data_to_json`/`data_from_json` fail in the current release (GraalVM reflection gaps).
-3. **Signing with the wrong keys** — certificates need `sign_tx_with_keys` with explicit roles, or the node rejects the transaction.
+3. **Signing with the wrong keys** — certificates need explicit `SigningRole` flags on `account.sign_tx` (e.g. `PAYMENT | STAKE`), or the node rejects the transaction.
 4. **Confusing `Network` values with on-chain network ids** — they're inverted for mainnet.
 5. **Guessing TxPlan field names** — the intent catalog in the starter pack has the verified YAML shapes.
 6. **Using Node.js for the JS wrapper** — it's Bun-only.

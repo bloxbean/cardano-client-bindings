@@ -114,7 +114,7 @@
 <ol>
 <li><strong>Inventing an online API</strong> — the library never fetches or submits; chain data is an input, submission is your job.</li>
 <li><strong>Calling the broken functions</strong> — <code dir="auto">tx.from_json</code>, <code dir="auto">tx.sign_with_secret_key</code>, and <code dir="auto">plutus.data_to_json</code>/<code dir="auto">data_from_json</code> fail in the current release (GraalVM reflection gaps).</li>
-<li><strong>Signing with the wrong keys</strong> — certificates need <code dir="auto">sign_tx_with_keys</code> with explicit roles, or the node rejects the transaction.</li>
+<li><strong>Signing with the wrong keys</strong> — certificates need explicit <code dir="auto">SigningRole</code> flags on <code dir="auto">account.sign_tx</code> (e.g. <code dir="auto">PAYMENT | STAKE</code>), or the node rejects the transaction.</li>
 <li><strong>Confusing <code dir="auto">Network</code> values with on-chain network ids</strong> — they’re inverted for mainnet.</li>
 <li><strong>Guessing TxPlan field names</strong> — the intent catalog in the starter pack has the verified YAML shapes.</li>
 <li><strong>Using Node.js for the JS wrapper</strong> — it’s Bun-only.</li>
